@@ -1,0 +1,249 @@
+/* GESTION DES THÈMES - PoseChrono */
+
+/* ============================================
+   THÈME PAR DÉFAUT: Violet 
+   ============================================ */
+
+:root {
+  /* Couleurs principales */
+  --color-primary: #667eea;
+  --color-primary-lessintense: #5e6fba;
+  --color-primary-dark: #764ba2;
+  --color-primary-light: #7c94fc;
+  --color-primary-elegant-light: #a8b9ff;
+  --color-primary-elegant: #667eea40;
+  --color-primary-darkcontext: #667eea66;
+  --color-primary-border-light: #667eea99;
+  --color-accent: #3a42a0;
+  --color-accent-dark: #5db7e9;
+  --color-warning: #ff6a00;
+  --color-error: #ff4545;
+  --bg-button-disabled: #2d2d2d;
+  --color-accentuation1: #fad070;
+
+  /* Ombres */
+  --shadow-primary: rgba(102, 126, 234, 0.4);
+  --shadow-primary-light: rgba(102, 126, 234, 0.2);
+
+  /* Backgrounds boutons */
+  --bg-primary-subtle: rgba(102, 126, 234, 0.15);
+  --bg-primary-hover: rgba(102, 126, 234, 0.25);
+  --bg-primary-active: rgba(102, 126, 234, 0.3);
+  --bg-memory-active: #2a3154;
+  --border-primary: rgba(102, 126, 234, 0.3);
+
+  /* Bouton Start */
+  --color-start-btn-bg: linear-gradient(to right, #39409f, #5bb1e5);
+  --color-start-btn-hover: linear-gradient(to right, #434ab7, #6cc2f7);
+  --color-start-btn-active: linear-gradient(to right, #39409f, #5bb1e5);
+  --color-start-btn-shadow: none;
+  --color-start-btn-shadow-active: none;
+
+  /* module dessin  */
+  --color-drawing-badge: #ebbb2e85;
+}
+
+/* ============================================
+   THÈME : Violet avec LOGO
+   ============================================ */
+
+:root[data-theme="violet-logo"] {
+  /* Mêmes couleurs que le thème violet */
+  --color-primary: #667eea;
+  --color-primary-lessintense: #5e6fba;
+  --color-primary-dark: #764ba2;
+  --color-primary-light: #7c94fc;
+  --color-primary-elegant-light: #a8b9ff;
+  --color-primary-elegant: #667eea40;
+  --color-accent: #3a42a0;
+  --color-accent-dark: #5db7e9;
+  --color-warning: #ff6a00;
+  --color-error: #ff4545;
+
+  /* Ombres */
+  --shadow-primary: rgba(102, 126, 234, 0.4);
+  --shadow-primary-light: rgba(102, 126, 234, 0.2);
+
+  /* Backgrounds boutons */
+  --bg-primary-subtle: rgba(102, 126, 234, 0.15);
+  --bg-primary-hover: rgba(102, 126, 234, 0.25);
+  --bg-primary-active: rgba(102, 126, 234, 0.3);
+  --bg-memory-active: #2a3154;
+  --border-primary: rgba(102, 126, 234, 0.3);
+
+  /* Bouton Start personnalisé */
+  --color-start-btn-bg: linear-gradient(to right, #39409f, #5bb1e5);
+  --color-start-btn-hover: linear-gradient(to right, #434ab7, #6cc2f7);
+  --color-start-btn-bg: linear-gradient(to right, #39409f, #5bb1e5);
+  --color-start-btn-shadow: none;
+  --color-start-btn-shadow-active: none;
+}
+
+/* ============================================
+   THÈME PAR DÉFAUT: CYAN 
+   ============================================ */
+
+:root[data-theme="cyan"] {
+  --color-primary: #3ca5b5;
+  --color-primary-lessintense: #06b6d4;
+  --color-primary-dark: #0e7490;
+  --color-primary-light: #67e8f9;
+  --color-primary-elegant-light: #a5f3fc;
+  --color-primary-elegant: #22d3ee40;
+  --color-accent: #0891b2;
+  --color-accent-dark: #06b6d4;
+
+  /* Ombres */
+  --shadow-primary: rgba(34, 211, 238, 0.4);
+  --shadow-primary-light: rgba(34, 211, 238, 0.2);
+
+  /* Backgrounds boutons */
+  --bg-primary-subtle: rgba(34, 211, 238, 0.15);
+  --bg-primary-hover: rgba(34, 211, 238, 0.25);
+  --bg-primary-active: rgba(34, 211, 238, 0.3);
+  --bg-memory-active: #1e3a47;
+  --border-primary: rgba(34, 211, 238, 0.3);
+
+  /* Bouton Start */
+
+  --color-start-btn-bg: #0891b2;
+  --color-start-btn-hover: #06b6d4;
+  --color-start-btn-active: #0891b2;
+  --color-start-btn-shadow: rgba(34, 211, 238, 0.327);
+  --color-start-btn-shadow-active: rgba(8, 145, 178, 0.4);
+}
+
+/* ============================================
+   THÈME PAR DÉFAUT: VERT 
+   ============================================ */
+
+:root[data-theme="vert"] {
+  --color-primary: #10b981;
+  --color-primary-lessintense: #059669;
+  --color-primary-dark: #047857;
+  --color-primary-light: #34d399;
+  --color-primary-elegant-light: #6ee7b7;
+  --color-primary-elegant: #10b98140;
+  --color-accent: #065f46;
+  --color-accent-dark: #059669;
+  --color-warning: #ff6a00;
+  --color-error: #ff4545;
+
+  /* Ombres */
+  --shadow-primary: rgba(16, 185, 129, 0.4);
+  --shadow-primary-light: rgba(16, 185, 129, 0.2);
+
+  /* Backgrounds boutons */
+  --bg-primary-subtle: rgba(16, 185, 129, 0.15);
+  --bg-primary-hover: rgba(16, 185, 129, 0.25);
+  --bg-primary-active: rgba(16, 185, 129, 0.3);
+  --bg-memory-active: #1e3d2f;
+  --border-primary: rgba(16, 185, 129, 0.3);
+
+  /* Bouton Start */
+  --color-start-btn-bg: linear-gradient(to right, #00684e, #34d399);
+  --color-start-btn-hover: linear-gradient(to right, #047857, #6ee7b7);
+  --color-start-btn-active: linear-gradient(to right, #00684e, #10b981);
+  --color-start-btn-shadow: none;
+  --color-start-btn-shadow-active: none;
+}
+
+/* ============================================
+   ADAPTATIONS D'ÉLÉMENTS SPÉCIFIQUES AUX THÈMES
+   ============================================ */
+
+/* Titre principal "Pose" */
+#colored-word-title {
+  background: linear-gradient(135deg, #4e6dc2 0%, #5397d5 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Titre avec logo pour violet-logo */
+:root[data-theme="violet-logo"] #main-title {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+:root[data-theme="violet-logo"] #main-title span:not(#colored-word-title) {
+  display: none; /* Cache "Chrono!" */
+}
+
+:root[data-theme="violet-logo"] #colored-word-title {
+  display: inline-block;
+  width: 300px;
+  height: 80px;
+  background-image: url("../assets/logo/titre-theme.png");
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  /* Désactiver le clipping pour afficher l'image complète */
+  -webkit-background-clip: border-box;
+  background-clip: border-box;
+  -webkit-text-fill-color: transparent;
+  /* Cache le texte "Pose" */
+  color: transparent;
+  font-size: 0;
+}
+
+/* Icône au-dessus du bouton Start pour violet-logo */
+:root[data-theme="violet-logo"] .start-btn::before {
+  content: "";
+  position: absolute;
+  top: -24px;
+  left: 376px;
+  width: 80px;
+  height: 85px;
+  background-image: url("../assets/logo/posechrono-icon-simple.png");
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+:root[data-theme="violet-logo"] .start-btn {
+  position: relative;
+}
+
+:root[data-theme="violet-logo"] .start-btn:disabled::before {
+  filter: grayscale(1) brightness(1.2) contrast(1.1);
+}
+
+:root[data-theme="cyan"] #colored-word-title {
+  background: linear-gradient(135deg, #06b6d4 0%, #22d3ee 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+:root[data-theme="vert"] #colored-word-title {
+  background: linear-gradient(135deg, #059669 0%, #34d399 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Messages "Images analysées:" */
+.source-message-text {
+  opacity: 0.8;
+  font-size: 0.8em;
+  color: #667eea;
+}
+
+:root[data-theme="violet-logo"] .source-message-text {
+  color: #667eea;
+}
+
+:root[data-theme="cyan"] .source-message-text {
+  color: #22d3ee;
+}
+
+:root[data-theme="vert"] .source-message-text {
+  color: #10b981;
+}
+
+/* Texte d'avertissement (couleur fixe) */
+.warning-text {
+  color: #ff953a;
+}

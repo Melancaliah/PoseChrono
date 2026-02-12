@@ -1,0 +1,1351 @@
+<!doctype html>
+<html lang="fr" id="html-root">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="description"
+      content="PoseChrono - Sessions de modèles vivants pour Eagle. Outil de chronométrage pour les séances de dessin d'après modèle."
+    />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
+    />
+    <meta name="theme-color" content="#667eea" />
+    <title>PoseChrono! - Session de modèles vivants</title>
+    <link rel="stylesheet" href="css/themes.css" />
+    <link rel="stylesheet" href="css/style.css" />
+    <link rel="stylesheet" href="css/components.css" />
+    <link rel="stylesheet" href="css/titlebar.css" />
+    <link rel="stylesheet" href="css/screens.css" />
+    <link rel="stylesheet" href="css/modes.css" />
+    <link rel="stylesheet" href="css/modals.css" />
+    <link rel="stylesheet" href="css/timeline.css" />
+  </head>
+  <body>
+    <!-- ================================================================ -->
+    <!-- BARRE DE TITRE PERSONNALISEE (Frame: false)                     -->
+    <!-- ================================================================ -->
+    <header id="titlebar" class="custom-titlebar">
+      <!-- Zone draggable (gauche) -->
+      <div class="titlebar-drag-zone">
+        <img src="logo.png" alt="Logo" class="titlebar-logo" />
+        <h1 class="titlebar-title" data-i18n="app.title">PoseChrono!</h1>
+      </div>
+
+      <!-- Zone des controles (droite) -->
+      <div class="titlebar-controls">
+        <!-- Bouton Pin (garder la fenetre au premier plan) -->
+        <button
+          id="pin-btn"
+          class="titlebar-btn titlebar-btn-pin"
+          data-tooltip="Garder la fenêtre au premier plan (Shift+T)"
+          aria-label="Pin window"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <path
+              d="M14.0115 5.78978C13.8215 5.59992 13.5715 5.5 13.3015 5.5C13.2415 5.5 13.1715 5.5 13.1115 5.51998C12.7815 5.57994 12.5115 5.79977 12.3815 6.10953L10.9915 9.33705C10.8615 9.63682 10.5915 9.85665 10.2715 9.92659L8.30146 10.3163C7.94146 10.3862 7.65146 10.656 7.54146 11.0058C7.43146 11.3555 7.53146 11.7452 7.79146 12.005L9.54146 13.7537L5.65146 17.6407C5.45146 17.8405 5.45146 18.1503 5.65146 18.3501C5.75146 18.45 5.88146 18.5 6.00146 18.5C6.12146 18.5 6.26146 18.45 6.35146 18.3501L10.2415 14.4631L11.9915 16.2118C12.1815 16.4016 12.4415 16.5015 12.7015 16.5015C12.8015 16.5015 12.8915 16.4915 12.9915 16.4616C13.3415 16.3517 13.6115 16.0619 13.6815 15.7022L14.0715 13.7337C14.1315 13.4139 14.3515 13.1441 14.6615 13.0142L17.8915 11.6253C18.1915 11.4954 18.4215 11.2256 18.4815 10.8958C18.5415 10.5661 18.4415 10.2364 18.2115 9.99654L14.0115 5.78978ZM14.2715 12.0749C13.6615 12.3347 13.2315 12.8743 13.1015 13.5238L12.7115 15.4923L8.50146 11.2955L10.4715 10.9058C11.1215 10.7759 11.6615 10.3363 11.9215 9.73674L13.3115 6.50922L17.5115 10.706L14.2715 12.0749Z"
+              fill="currentColor"
+            />
+          </svg>
+        </button>
+
+        <!-- Divider -->
+        <div class="titlebar-divider"></div>
+
+        <!-- Bouton Minimiser -->
+        <button
+          id="minimize-btn"
+          class="titlebar-btn titlebar-btn-minimize"
+          data-tooltip="Minimiser"
+          aria-label="Minimize window"
+        >
+          <svg viewBox="0 0 24 24" fill="currentColor">
+            <line
+              x1="5"
+              y1="12"
+              x2="19"
+              y2="12"
+              stroke="currentColor"
+              stroke-width="2"
+            />
+          </svg>
+        </button>
+
+        <!-- Bouton Maximiser -->
+        <button
+          id="maximize-btn"
+          class="titlebar-btn titlebar-btn-maximize"
+          data-tooltip="Maximiser"
+          aria-label="Maximize window"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 -960 960 960"
+            fill="currentColor"
+          >
+            <path
+              d="M120-120v-720h720v720H120Zm80-80h560v-560H200v560Zm0 0v-560 560Z"
+            />
+          </svg>
+        </button>
+
+        <!-- Bouton Fermer -->
+        <button
+          id="close-btn"
+          class="titlebar-btn titlebar-btn-close"
+          data-tooltip="Fermer"
+          aria-label="Close window"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <path
+              fill-rule="evenodd"
+              clip-rule="evenodd"
+              d="M12.707 12.0001L16.853 7.85413C17.049 7.65813 17.049 7.34213 16.853 7.14613C16.658 6.95113 16.342 6.95113 16.146 7.14613L12 11.2931L7.85301 7.14613C7.65801 6.95113 7.34201 6.95113 7.14601 7.14613C6.95101 7.34213 6.95101 7.65813 7.14601 7.85413L11.293 12.0001L7.14601 16.1461C6.95101 16.3421 6.95101 16.6581 7.14601 16.8541C7.24401 16.9511 7.37201 17.0001 7.50001 17.0001C7.62801 17.0001 7.75601 16.9511 7.85301 16.8541L12 12.7071L16.146 16.8541C16.244 16.9511 16.372 17.0001 16.5 17.0001C16.628 17.0001 16.756 16.9511 16.853 16.8541C17.049 16.6581 17.049 16.3421 16.853 16.1461L12.707 12.0001Z"
+              fill="currentColor"
+              fill-opacity="0.8"
+            />
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <div id="plugin">
+      <!-- ============================================================ -->
+      <!-- ÉCRAN D'ACCUEIL / PARAMÈTRES                                 -->
+      <!-- ============================================================ -->
+      <div id="settings-screen" class="scrollingbared">
+        <div class="screen">
+          <div class="settings-container">
+            <!-- En-tête -->
+            <h1 id="main-title">
+              <span id="colored-word-title">Pose</span
+              ><span style="color: white">Chrono!</span>
+            </h1>
+            <p class="subtitle">Session de modèles vivants pour Eagle</p>
+            <div class="setting-group">
+              <p id="folder-info" class="info-text" data-i18n="settings.loadingImages">Chargement des images...</p>
+            </div>
+
+            <!-- Sélection du type de session -->
+            <div id="session-box">
+              <div id="session-type-section" class="setting-group">
+                <label>TYPE DE SESSION</label>
+                <div class="mode-selector">
+                  <button class="mode-btn active" data-mode="classique">
+                    Classique
+                  </button>
+                  <button class="mode-btn" data-mode="custom">
+                    Personnalisé
+                  </button>
+                  <button class="mode-btn" data-mode="relax">Tranquille</button>
+                  <button class="mode-btn" data-mode="memory">Mémoire</button>
+                </div>
+              </div>
+            </div>
+
+            <div id="session-description">
+              <span>Choisi un type de session</span>
+            </div>
+            <div class="settings-divider"></div>
+
+            <!-- Paramètres des différents modes -->
+            <div class="settings-modes-container">
+              <!-- Mode Personnalisé -->
+              <div id="mode-custom-settings" class="setting-group fade-out">
+                <div
+                  style="
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    margin-bottom: 12px;
+                  "
+                >
+                  <label data-i18n="settings.numberOfPoses">NOMBRES DE POSES</label>
+                  <button
+                    type="button"
+                    id="manage-plans-btn"
+                    class="manage-plans-btn"
+                    data-i18n-tooltip="modes.custom.managePlans"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      height="18px"
+                      viewBox="0 -960 960 960"
+                      width="18px"
+                      fill="currentColor"
+                    >
+                      <path
+                        d="M200-120q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h357l-80 80H200v560h560v-278l80-80v358q0 33-23.5 56.5T760-120H200Zm280-360ZM360-360v-170l367-367q12-12 27-18t30-6q16 0 30.5 6t26.5 18l56 57q11 12 17 26.5t6 29.5q0 15-5.5 29.5T897-728L530-360H360Zm481-424-56-56 56 56ZM440-440h56l232-232-28-28-29-28-231 231v57Zm260-260-29-28 29 28 28 28-28-28Z"
+                      />
+                    </svg>
+                    <span data-i18n="modes.custom.managePlans">Plans de session</span>
+                  </button>
+                </div>
+                <div class="custom-builder-container">
+                  <div class="custom-builder-row">
+                    <div
+                      class="custom-field"
+                      data-i18n-tooltip="modes.custom.numberOfRepetitions"
+                    >
+                      <label for="custom-count-input" class="field-label" data-i18n="settings.posesLabel"
+                        >POSES</label
+                      >
+                      <input
+                        type="number"
+                        id="custom-count-input"
+                        min="1"
+                        value="5"
+                      />
+                    </div>
+                    <div
+                      class="field-separator"
+                      data-i18n="settings.posesOf"
+                    ></div>
+                    <div
+                      class="custom-field"
+                      data-i18n-tooltip="settings.durationLabel"
+                    >
+                      <label class="field-label" data-i18n="settings.durationLabelShort">DURÉE</label>
+                      <div class="hms-builder">
+                        <div class="time-field">
+                          <input
+                            type="number"
+                            id="custom-h-input"
+                            placeholder="0"
+                            min="0"
+                            max="9"
+                          /><span class="unit">h</span>
+                        </div>
+                        <div class="time-field">
+                          <input
+                            type="number"
+                            id="custom-m-input"
+                            placeholder="0"
+                            min="0"
+                            max="59"
+                          /><span class="unit">min</span>
+                        </div>
+                        <div class="time-field">
+                          <input
+                            type="number"
+                            id="custom-s-input"
+                            placeholder="0"
+                            min="0"
+                            max="59"
+                          /><span class="unit">s</span>
+                        </div>
+                      </div>
+                    </div>
+                    <!-- Boutons Ajouter pose / Ajouter pause -->
+                    <div class="add-buttons-group">
+                      <button
+                        type="button"
+                        id="add-step-btn"
+                        class="add-step-btn"
+                        data-i18n-tooltip="modes.custom.addPoses"
+                      >
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          width="20"
+                          height="20"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="3"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        >
+                          <line x1="12" y1="5" x2="12" y2="19"></line>
+                          <line x1="5" y1="12" x2="19" y2="12"></line>
+                        </svg>
+                      </button>
+                      <button
+                        type="button"
+                        id="add-pause-btn"
+                        class="add-pause-btn"
+                        data-i18n-tooltip="modes.custom.addPause"
+                      >
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          height="24px"
+                          viewBox="0 -960 960 960"
+                          width="24px"
+                          fill="#e3e3e3"
+                        >
+                          <path
+                            d="M160-120v-80h640v80H160Zm160-160q-66 0-113-47t-47-113v-400h640q33 0 56.5 23.5T880-760v120q0 33-23.5 56.5T800-560h-80v120q0 66-47 113t-113 47H320Zm0-80h240q33 0 56.5-23.5T640-440v-320H240v320q0 33 23.5 56.5T320-360Zm400-280h80v-120h-80v120ZM320-360h-80 400-320Z"
+                          />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                <!-- Liste des étapes personnalisées -->
+                <div id="custom-steps-list" class="steps-queue">
+                  <div class="empty-queue-msg" data-i18n="modes.custom.emptyQueueMsg">
+                    Ajoute des étapes pour construire ta session
+                  </div>
+                </div>
+              </div>
+
+              <!-- Mode Mémoire -->
+              <div id="mode-memory-settings" class="setting-group fade-out">
+                <label data-i18n="modes.memory.trainingType">TYPE D'ENTRAÎNEMENT</label>
+                <div class="memory-type-selector">
+                  <button
+                    type="button"
+                    class="memory-type-btn active"
+                    data-memory-type="flash"
+                  >
+                    <div class="memory-type-label" data-i18n="modes.memory.flash">Flash</div>
+                    <div class="memory-type-desc" data-i18n="modes.memory.flashDescription">
+                      L'image disparaît après quelques secondes
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    class="memory-type-btn"
+                    data-memory-type="progressive"
+                  >
+                    <div class="memory-type-label" data-i18n="modes.memory.progressive">Progressif</div>
+                    <div class="memory-type-desc" data-i18n="modes.memory.progressiveDescription">
+                      L'image devient floue progressivement
+                    </div>
+                  </button>
+                </div>
+
+                <!-- Configuration Flash -->
+                <div id="memory-flash-settings" class="memory-subconfig">
+                  <label
+                    style="
+                      color: #ccc;
+                      font-size: 13px;
+                      margin-bottom: 8px;
+                      display: block;
+                    "
+                    data-i18n="modes.memory.displayDuration">DURÉE D'AFFICHAGE</label
+                  >
+                  <div class="duration-row">
+                    <button
+                      type="button"
+                      class="duration-btn"
+                      data-duration="10"
+                    >
+                      10s
+                    </button>
+                    <button
+                      type="button"
+                      class="duration-btn"
+                      data-duration="20"
+                    >
+                      20s
+                    </button>
+                    <button
+                      type="button"
+                      class="duration-btn active"
+                      data-duration="30"
+                    >
+                      30s
+                    </button>
+                    <button
+                      type="button"
+                      class="duration-btn"
+                      data-duration="60"
+                    >
+                      1min
+                    </button>
+                    <!-- <div class="duration-separator"></div> -->
+                    <div class="memory-custom-time">
+                      <div
+                        class="time-input-group"
+                        data-i18n-tooltip="timer.customTime"
+                      >
+                        <input
+                          type="number"
+                          id="memory-flash-minutes"
+                          min="0"
+                          max="99"
+                          value="0"
+                        />
+                        <span class="time-unit">min</span>
+                        <input
+                          type="number"
+                          id="memory-flash-seconds"
+                          min="0"
+                          max="59"
+                          value="0"
+                        />
+                        <span class="time-unit">s</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Temps de dessin -->
+                  <div class="memory-drawing-time">
+                    <label
+                      style="
+                        color: #ccc;
+                        font-size: 13px;
+                        margin-bottom: 8px;
+                        display: block;
+                      "
+                    >
+                      <span data-i18n="modes.memory.drawingTime">TEMPS DE DESSIN</span>
+                    </label>
+                    <div class="drawing-time-controls">
+                      <div
+                        class="time-input-group"
+                        id="memory-drawing-time-input"
+                        data-i18n-tooltip="modes.memory.drawingTime"
+                      >
+                        <input
+                          type="number"
+                          id="memory-drawing-minutes"
+                          min="0"
+                          max="99"
+                          value="0"
+                        />
+                        <span class="time-unit">min</span>
+                        <input
+                          type="number"
+                          id="memory-drawing-seconds"
+                          min="0"
+                          max="59"
+                          value="0"
+                        />
+                        <span class="time-unit">s</span>
+                      </div>
+                      <span class="or-separator" data-i18n="misc.or">ou</span>
+                      <button
+                        type="button"
+                        class="no-pressure-btn active"
+                        id="no-pressure-btn"
+                      >
+                        <span data-i18n="modes.memory.noPressure">Sans limite de temps de dessin</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <!-- Slider pour le nombre de poses -->
+                  <div class="memory-poses-slider">
+                    <label
+                      style="
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                        color: #ccc;
+                        font-size: 13px;
+                        margin-bottom: 5px;
+                      "
+                    >
+                      <span data-i18n="modes.memory.numberOfPoses">NOMBRE DE POSES</span>
+                      <span id="memory-poses-value">10</span>
+                    </label>
+                    <input
+                      type="range"
+                      id="memory-poses-slider"
+                      min="1"
+                      max="100"
+                      value="10"
+                      step="1"
+                      style="width: 100%; cursor: pointer"
+                    />
+                  </div>
+
+                  <!-- Durée totale de la session -->
+                  <div
+                    id="memory-total-duration"
+                    style="
+                      text-align: center;
+                      margin-top: 15px;
+                      font-size: 12px;
+                      color: rgba(255, 255, 255, 0.6);
+                      display: none;
+                    "
+                  >
+                    <span style="font-style: italic"
+                      data-i18n="modes.custom.totalDuration">Durée totale de la session :</span
+                    >
+                    <span
+                      id="memory-total-duration-value"
+                      style="
+                        color: #667eea;
+                        font-weight: bold;
+                        margin-left: 6px;
+                      "
+                    ></span>
+                  </div>
+                </div>
+
+                <!-- Configuration Progressive -->
+                <div
+                  id="memory-progressive-settings"
+                  class="memory-subconfig"
+                  style="display: none"
+                >
+                  <label
+                    style="
+                      display: flex;
+                      justify-content: space-between;
+                      align-items: center;
+                      color: #ccc;
+                      font-size: 13px;
+                      margin-bottom: 8px;
+                    "
+                    data-i18n="modes.memory.progressiveTimer">CHRONO (FLOU PROGRESSIF)</label
+                  >
+                  <div class="duration-row">
+                    <button
+                      type="button"
+                      class="duration-btn"
+                      data-duration="30"
+                    >
+                      30s
+                    </button>
+                    <button
+                      type="button"
+                      class="duration-btn active"
+                      data-duration="60"
+                    >
+                      1min
+                    </button>
+                    <button
+                      type="button"
+                      class="duration-btn"
+                      data-duration="120"
+                    >
+                      2min
+                    </button>
+                    <button
+                      type="button"
+                      class="duration-btn"
+                      data-duration="300"
+                    >
+                      5min
+                    </button>
+                    <div class="memory-custom-time">
+                      <div
+                        class="time-input-group"
+                        data-i18n-tooltip="timer.customTime"
+                      >
+                        <input
+                          type="number"
+                          id="memory-progressive-minutes"
+                          min="0"
+                          max="99"
+                          value="0"
+                        />
+                        <span class="time-unit">min</span>
+                        <input
+                          type="number"
+                          id="memory-progressive-seconds"
+                          min="0"
+                          max="59"
+                          value="0"
+                        />
+                        <span class="time-unit">s</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Slider pour le nombre de poses -->
+                  <div class="memory-poses-slider">
+                    <label
+                      style="
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                        color: #ccc;
+                        font-size: 13px;
+                        margin-bottom: 5px;
+                      "
+                    >
+                      <span data-i18n="modes.memory.numberOfPoses">NOMBRE DE POSES</span>
+                      <span id="memory-progressive-poses-value">10</span>
+                    </label>
+                    <input
+                      type="range"
+                      id="memory-progressive-poses-slider"
+                      min="1"
+                      max="100"
+                      value="10"
+                      step="1"
+                      style="width: 100%; cursor: pointer"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <!-- Mode Classique -->
+              <div id="mode-classique-settings" class="setting-group fade-in">
+                <label data-i18n="settings.timerLabel">CHRONO</label>
+                <div class="duration-row">
+                  <button type="button" class="duration-btn" data-duration="30">
+                    30s
+                  </button>
+                  <button type="button" class="duration-btn" data-duration="45">
+                    45s
+                  </button>
+                  <button
+                    type="button"
+                    class="duration-btn active"
+                    data-duration="60"
+                  >
+                    1min
+                  </button>
+                  <button
+                    type="button"
+                    class="duration-btn"
+                    data-duration="120"
+                  >
+                    2min
+                  </button>
+                  <button
+                    type="button"
+                    class="duration-btn"
+                    data-duration="300"
+                  >
+                    5min
+                  </button>
+                  <button
+                    type="button"
+                    class="duration-btn"
+                    data-duration="600"
+                  >
+                    10min
+                  </button>
+                </div>
+                <!-- Durée personnalisée -->
+                <div class="custom-time-section">
+                  <div class="custom-time-inputs">
+                    <div class="time-input-group" data-i18n-tooltip="timer.hours">
+                      <input
+                        type="number"
+                        id="hours-input"
+                        min="0"
+                        max="23"
+                        value="0"
+                      />
+                      <span class="time-unit">h</span>
+                    </div>
+                    <div class="time-input-group" data-i18n-tooltip="timer.minutes">
+                      <input
+                        type="number"
+                        id="minutes-input"
+                        min="0"
+                        max="59"
+                        value="0"
+                      />
+                      <span class="time-unit">min</span>
+                    </div>
+                    <div class="time-input-group" data-i18n-tooltip="timer.seconds">
+                      <input
+                        type="number"
+                        id="seconds-input"
+                        min="0"
+                        max="59"
+                        value="0"
+                      />
+                      <span class="time-unit">s</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Options globales et bouton démarrer -->
+            <div id="bloc-settings-bottom">
+              <div class="settings-divider"></div>
+              <div id="session-settings" class="setting-group">
+                <label class="label-small" data-i18n="settings.sessionOptions">Options de la session</label>
+                <div class="options-row">
+                  <button
+                    type="button"
+                    id="random-shuffle-btn"
+                    class="option-toggle-btn active"
+                    data-i18n-tooltip="settings.randomShuffleTooltip"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      height="24px"
+                      viewBox="0 -960 960 960"
+                      width="24px"
+                      fill="currentColor"
+                    >
+                      <path
+                        d="M560-160v-80h104L537-367l57-57 126 126v-102h80v240H560Zm-344 0-56-56 504-504H560v-80h240v240h-80v-104L216-160Zm151-377L160-744l56-56 207 207-56 56Z"
+                      />
+                    </svg>
+                    <span data-i18n="settings.randomShuffle">Aléatoire</span>
+                  </button>
+                  <button
+                    type="button"
+                    id="autoflip-btn"
+                    class="option-toggle-btn"
+                    data-i18n-tooltip="settings.flipRandomly"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      height="24px"
+                      viewBox="0 -960 960 960"
+                      width="24px"
+                      fill="currentColor"
+                    >
+                      <path
+                        d="M360-120H200q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h160v80H200v560h160v80Zm80 80v-880h80v880h-80Zm160-80v-80h80v80h-80Zm0-640v-80h80v80h-80Zm160 640v-80h80q0 33-23.5 56.5T760-120Zm0-160v-80h80v80h-80Zm0-160v-80h80v80h-80Zm0-160v-80h80v80h-80Zm0-160v-80q33 0 56.5 23.5T840-760h-80Z"
+                      />
+                    </svg>
+                    <span>Auto-Flip</span>
+                  </button>
+                  <button
+                    type="button"
+                    id="home-progressive-blur-btn"
+                    class="option-toggle-btn"
+                    data-i18n-tooltip="filters.progressiveBlurTooltip"
+                  ></button>
+                </div>
+              </div>
+              <button type="button" id="start-btn" class="start-btn" disabled data-i18n="settings.startSession">
+                Commencer la session
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ============================================================ -->
+        <!-- MODULE HISTORIQUE / TIMELINE (hors settings-container)      -->
+        <!-- ============================================================ -->
+        <button
+          type="button"
+          id="timeline-toggle-btn"
+          class="timeline-toggle-btn"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            height="20px"
+            viewBox="0 -960 960 960"
+            width="20px"
+            fill="currentColor"
+          >
+            <path
+              d="M200-80q-33 0-56.5-23.5T120-160v-560q0-33 23.5-56.5T200-800h40v-80h80v80h320v-80h80v80h40q33 0 56.5 23.5T840-720v560q0 33-23.5 56.5T760-80H200Zm0-80h560v-400H200v400Zm0-480h560v-80H200v80Zm0 0v-80 80Zm280 240q-17 0-28.5-11.5T440-440q0-17 11.5-28.5T480-480q17 0 28.5 11.5T520-440q0 17-11.5 28.5T480-400Zm-160 0q-17 0-28.5-11.5T280-440q0-17 11.5-28.5T320-480q17 0 28.5 11.5T360-440q0 17-11.5 28.5T320-400Zm320 0q-17 0-28.5-11.5T600-440q0-17 11.5-28.5T640-480q17 0 28.5 11.5T680-440q0 17-11.5 28.5T640-400ZM480-240q-17 0-28.5-11.5T440-280q0-17 11.5-28.5T480-320q17 0 28.5 11.5T520-280q0 17-11.5 28.5T480-240Zm-160 0q-17 0-28.5-11.5T280-280q0-17 11.5-28.5T320-320q17 0 28.5 11.5T360-280q0 17-11.5 28.5T320-240Zm320 0q-17 0-28.5-11.5T600-280q0-17 11.5-28.5T640-320q17 0 28.5 11.5T680-280q0 17-11.5 28.5T640-240Z"
+            />
+          </svg>
+          <span data-i18n="timeline.history">Historique des sessions</span>
+          <svg
+            class="chevron"
+            xmlns="http://www.w3.org/2000/svg"
+            height="20px"
+            viewBox="0 -960 960 960"
+            width="20px"
+            fill="currentColor"
+          >
+            <path d="M480-345 240-585l56-56 184 184 184-184 56 56-240 240Z" />
+          </svg>
+        </button>
+        <div id="timeline-container" class="collapsed"></div>
+      </div>
+
+      <!-- ============================================================ -->
+      <!-- ÉCRAN DE DESSIN (SESSION EN COURS)                          -->
+      <!-- ============================================================ -->
+      <div id="drawing-screen" class="screen hidden">
+        <!-- Overlay de pause -->
+        <div id="pause-overlay" class="hidden">
+          <div class="pause-central-block">
+            <svg class="pause-progress-svg" viewBox="0 0 160 160">
+              <circle class="bg" cx="80" cy="80" r="70"></circle>
+              <circle
+                id="pause-progress-bar"
+                class="progress"
+                cx="80"
+                cy="80"
+                r="70"
+              ></circle>
+            </svg>
+            <div class="pause-content">
+              <span class="pause-icon"
+                ><img
+                  height="128px"
+                  width="128px"
+                  style="margin-right: -20px"
+                  src="assets/icones/break2.png"
+                  alt="Pause Icon"
+              /></span>
+              <h2 data-i18n="drawing.pause">PAUSE</h2>
+              <p>
+                <span data-i18n="drawing.nextSeriesIn">Prochaine série dans</span> <span id="pause-timer-display">00:00</span>
+              </p>
+            </div>
+          </div>
+          <p id="next-step-info"></p>
+        </div>
+
+        <!-- Zone d'affichage de l'image -->
+        <div class="image-container">
+          <!-- Conteneur des badges (pause, dessin, etc.) -->
+          <div id="badges-container" class="badges-container">
+            <div id="pause-badge" class="status-badge pause-badge hidden" data-i18n="drawing.pause">
+              PAUSE
+            </div>
+            <div id="drawing-badge" class="status-badge drawing-badge hidden" data-i18n="drawing.drawingBadge">
+              DESSIN
+            </div>
+          </div>
+          <div class="image-wrapper">
+            <div id="progress-bar" class="progress-bar">
+              <div id="progress-fill" class="progress-fill"></div>
+            </div>
+            <img id="current-image" src="" alt="Image de référence" />
+            <!-- Élément vidéo pour les fichiers vidéo -->
+            <video
+              id="current-video"
+              style="display: none"
+              playsinline
+              preload="metadata"
+              tabindex="-1"
+            ></video>
+
+            <!-- Drawing Overlay (mode dessin intégré) -->
+            <div id="drawing-overlay" class="drawing-overlay hidden">
+              <canvas id="drawing-lightbox" class="drawing-canvas"></canvas>
+              <canvas id="drawing-canvas" class="drawing-canvas"></canvas>
+              <canvas id="drawing-measures" class="drawing-canvas"></canvas>
+              <canvas id="drawing-preview" class="drawing-canvas"></canvas>
+              <!-- Info mesures -->
+              <div id="drawing-measure-info" class="measure-info hidden"></div>
+            </div>
+
+            <!-- Infos de mesure regroupées (positionnées à droite du cadre, déplaçables) -->
+            <div id="drawing-infos-container" class="drawing-infos-container">
+              <div id="drawing-unit-info" class="unit-info hidden">
+                <span class="unit-label"
+                  ><span data-i18n="drawing.unitLabel">Unité:</span> <span id="drawing-unit-value">--</span></span
+                >
+                <button
+                  type="button"
+                  id="drawing-reset-unit"
+                  data-i18n-title="drawing.resetUnit"
+                >
+                  ×
+                </button>
+              </div>
+              <div
+                id="drawing-total-distance-info"
+                class="unit-info total-distance hidden"
+              >
+                <span class="unit-label"
+                  ><span data-i18n="drawing.totalLabel">Total:</span>
+                  <span id="drawing-total-distance-value">0px</span></span
+                >
+              </div>
+            </div>
+
+            <!-- Barre de contrôle vidéo (apparaît au hover sur vidéo) -->
+            <div id="video-controls-bar" class="video-controls-bar">
+              <!-- Timeline/Scrubber -->
+              <div id="video-timeline" class="video-timeline">
+                <div
+                  id="video-timeline-progress"
+                  class="video-timeline-progress"
+                ></div>
+                <div
+                  id="video-timeline-handle"
+                  class="video-timeline-handle"
+                ></div>
+              </div>
+              <!-- Contrôles -->
+              <div class="video-controls-buttons">
+                <button
+                  type="button"
+                  id="video-play-btn"
+                  class="video-control-btn"
+                  data-tooltip="Lecture/Pause vidéo (Shift+Espace)"
+                ></button>
+                <div class="video-time-display">
+                  <span id="video-current-time">0:00</span>
+                  <span class="video-time-separator">/</span>
+                  <span id="video-duration">0:00</span>
+                </div>
+                <div class="video-speed-indicator">
+                  <span id="video-speed-display">1x</span>
+                </div>
+                <button
+                  type="button"
+                  id="video-slower-btn"
+                  class="video-control-btn"
+                  data-tooltip="Ralentir (-)"
+                ></button>
+                <button
+                  type="button"
+                  id="video-faster-btn"
+                  class="video-control-btn"
+                  data-tooltip="Accélérer (+)"
+                ></button>
+                <button
+                  type="button"
+                  id="video-prev-frame-btn"
+                  class="video-control-btn"
+                  data-tooltip="Frame précédente (')"
+                ></button>
+                <button
+                  type="button"
+                  id="video-next-frame-btn"
+                  class="video-control-btn"
+                  data-tooltip="Frame suivante (()"
+                ></button>
+                <button
+                  type="button"
+                  id="video-loop-btn"
+                  class="video-control-btn active"
+                  data-tooltip="Boucle (L)"
+                ></button>
+                <button
+                  type="button"
+                  id="video-config-btn"
+                  class="video-control-btn"
+                  data-tooltip="Configuration vidéo (Shift+V)"
+                ></button>
+              </div>
+            </div>
+            <!-- Écran de masquage pour mode mémoire -->
+            <div id="memory-overlay" class="memory-overlay hidden">
+              <div class="memory-overlay-content">
+                <p data-i18n="modes.relax.clickToNext">Cliquez pour passer à l'image suivante</p>
+                <div class="memory-overlay-buttons">
+                  <button
+                    id="memory-peek-btn"
+                    class="memory-overlay-btn"
+                    type="button"
+                  >
+                    <span data-i18n="modes.memory.peek">Coup d'œil</span>
+                  </button>
+                  <button
+                    id="memory-reveal-btn"
+                    class="memory-overlay-btn"
+                    type="button"
+                  >
+                    <span data-i18n="modes.memory.reveal">Révéler</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Barre latérale de contrôle -->
+        <div class="scrollingbared-sidebar">
+          <div class="sidebar">
+            <!-- Section Timer et compteur d'images -->
+            <div class="sidebar-section">
+              <div id="timer-display" class="timer-display" data-tooltip="">
+                1:00
+              </div>
+              <div id="image-counter" class="image-counter">1 / 0</div>
+              <button
+                type="button"
+                id="toggle-timer-btn"
+                class="control-btn-small"
+                data-tooltip="Afficher/Masquer timer"
+              ></button>
+            </div>
+            <!-- Bouton son -->
+            <button
+              type="button"
+              id="sound-btn"
+              class="control-btn-small"
+              data-tooltip="Activer/Désactiver son"
+            ></button>
+
+            <!-- Contrôles de lecture (Précédent / Play-Pause / Suivant) -->
+            <div class="sidebar-section controls-section">
+              <button
+                type="button"
+                id="prev-btn"
+                class="control-btn"
+                data-tooltip="Précédent (←)"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="24"
+                  height="24"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <polygon points="19 20 9 12 19 4 19 20"></polygon>
+                  <line x1="5" y1="19" x2="5" y2="5"></line>
+                </svg>
+              </button>
+              <button
+                type="button"
+                id="play-pause-btn"
+                class="control-btn play-btn"
+                data-tooltip="Play/Pause (Espace)"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="32"
+                  height="32"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                </svg>
+              </button>
+              <button
+                type="button"
+                id="next-btn"
+                class="control-btn"
+                data-tooltip="Suivant (→)"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="24"
+                  height="24"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <polygon points="5 4 15 12 5 20 5 4"></polygon>
+                  <line x1="19" y1="5" x2="19" y2="19"></line>
+                </svg>
+              </button>
+            </div>
+
+            <!-- Contrôles de transformation d'image -->
+            <div class="sidebar-section transform-controls">
+              <div class="sidebar-divider"></div>
+              <button
+                type="button"
+                id="flip-horizontal-btn"
+                class="control-btn-small"
+                data-tooltip="Miroir Horizontal"
+              ></button>
+              <button
+                type="button"
+                id="flip-vertical-btn"
+                class="control-btn-small"
+                data-tooltip="Miroir Vertical"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  height="24px"
+                  viewBox="0 -960 960 960"
+                  width="24px"
+                  fill="#e3e3e3"
+                  transform="rotate(90)"
+                >
+                  <path
+                    d="M360-120H200q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h160v80H200v560h160v80Zm80 80v-880h80v880h-80Zm160-80v-80h80v80h-80Zm0-640v-80h80v80h-80Zm160 640v-80h80q0 33-23.5 56.5T760-120Zm0-160v-80h80v80h-80Zm0-160v-80h80v80h-80Zm0-160v-80h80v80h-80Zm0-160v-80q33 0 56.5 23.5T840-760h-80Z"
+                  ></path>
+                </svg>
+              </button>
+              <button
+                type="button"
+                id="grayscale-btn"
+                class="control-btn-small"
+                data-tooltip="Noir et Blanc"
+              ></button>
+              <button
+                type="button"
+                id="blur-btn"
+                class="control-btn-small"
+                data-tooltip="Mode Focus (F)"
+              ></button>
+              <button
+                type="button"
+                id="annotate-btn"
+                class="control-btn-small"
+                data-tooltip="Dessiner / Analyser (B)"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  height="24px"
+                  viewBox="0 -960 960 960"
+                  width="24px"
+                  fill="#e3e3e3"
+                >
+                  <path
+                    d="M200-120q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h357l-80 80H200v560h560v-278l80-80v358q0 33-23.5 56.5T760-120H200Zm280-360ZM360-360v-170l367-367q12-12 27-18t30-6q16 0 30.5 6t26.5 18l56 57q11 11 17 26t6 30q0 15-5.5 29.5T897-728L530-360H360Zm440-368-56-56 56 56ZM440-440h56l232-232-28-28-29-28-231 231v57Zm260-260-29-28 29 28 28 28-28-28Z"
+                  />
+                </svg>
+              </button>
+              <!-- progressive-blur-btn retiré de la sidebar (accessible via menu contextuel) -->
+
+              <div class="sidebar-divider"></div>
+              <!-- Boutons d'action (Révéler / Supprimer) -->
+              <button
+                type="button"
+                id="reveal-btn"
+                class="control-btn-small"
+                data-tooltip="Ouvrir dans Eagle"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="20"
+                  height="20"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <circle cx="11" cy="11" r="8"></circle>
+                  <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
+              </button>
+              <button
+                type="button"
+                id="delete-btn"
+                class="control-btn-small"
+                data-tooltip="Supprimer (définitif)"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="20"
+                  height="20"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <polyline points="3 6 5 6 21 6"></polyline>
+                  <path
+                    d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"
+                  ></path>
+                  <line x1="10" y1="11" x2="10" y2="17"></line>
+                  <line x1="14" y1="11" x2="14" y2="17"></line>
+                </svg>
+              </button>
+            </div>
+
+            <!-- Contrôles secondaires (Quitter / Paramètres) -->
+            <div class="sidebar-section secondary-controls">
+              <button
+                type="button"
+                id="stop-btn"
+                class="control-btn-small"
+                data-tooltip="Terminer la session (Esc)"
+              >
+                <div class="stop-square"></div>
+              </button>
+              <button
+                type="button"
+                id="settings-btn"
+                class="control-btn-small"
+                data-tooltip="Paramètres"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  height="24px"
+                  viewBox="0 -960 960 960"
+                  width="24px"
+                  fill="#e3e3e3"
+                >
+                  <path
+                    d="m370-80-16-128q-13-5-24.5-12T307-235l-119 50L78-375l103-78q-1-7-1-13.5v-27q0-6.5 1-13.5L78-585l110-190 119 50q11-8 23-15t24-12l16-128h220l16 128q13 5 24.5 12t22.5 15l119-50 110 190-103 78q1 7 1 13.5v27q0 6.5-2 13.5l103 78-110 190-118-50q-11 8-23 15t-24 12L590-80H370Zm70-80h79l14-106q31-8 57.5-23.5T639-327l99 41 39-68-86-65q5-14 7-29.5t2-31.5q0-16-2-31.5t-7-29.5l86-65-39-68-99 42q-22-23-48.5-38.5T533-694l-13-106h-79l-14 106q-31 8-57.5 23.5T321-633l-99-41-39 68 86 64q-5 15-7 30t-2 32q0 16 2 31t7 30l-86 65 39 68 99-42q22 23 48.5 38.5T427-266l13 106Zm42-180q58 0 99-41t41-99q0-58-41-99t-99-41q-59 0-99.5 41T342-480q0 58 40.5 99t99.5 41Zm-2-140Z"
+                  />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================================================ -->
+      <!-- DRAWING TOOLBAR (standalone, overlay mode)                  -->
+      <!-- Contenu généré dynamiquement par populateDrawingToolbar()   -->
+      <!-- ============================================================ -->
+      <div id="drawing-toolbar" class="annotation-toolbar hidden"></div>
+
+      <!-- ============================================================ -->
+      <!-- MODAL GESTION DES TAGS                                      -->
+      <!-- ============================================================ -->
+      <div id="tags-modal" class="modal hidden">
+        <div class="modal-content">
+          <div id="tags-modal-header" class="modal-header">
+            <h2 data-i18n="tags.manage">Gérer les tags</h2>
+            <button type="button" id="close-tags-modal" class="modal-close-btn">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                height="24px"
+                viewBox="0 -960 960 960"
+                width="24px"
+                fill="currentColor"
+              >
+                <path
+                  d="m256-200-56-56 224-224-224-224 56-56 224 224 224-224 56 56-224 224 224 224-56 56-224-224-224 224Z"
+                />
+              </svg>
+            </button>
+          </div>
+
+          <div class="modal-body">
+            <div class="modal-section">
+              <label data-i18n="tags.create">Créer un nouveau tag</label>
+              <div style="display: flex; gap: 8px; position: relative">
+                <div style="flex: 1; position: relative">
+                  <input
+                    type="text"
+                    id="new-tag-input"
+                    data-i18n-placeholder="tags.tagName"
+                    class="modal-input"
+                    autocomplete="off"
+                  />
+                  <div
+                    id="tag-autocomplete"
+                    class="tag-autocomplete hidden"
+                  ></div>
+                </div>
+                <button type="button" id="create-tag-btn" class="modal-btn">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    height="18px"
+                    viewBox="0 -960 960 960"
+                    width="18px"
+                    fill="currentColor"
+                  >
+                    <path
+                      d="M440-440H200v-80h240v-240h80v240h240v80H520v240h-80v-240Z"
+                    />
+                  </svg>
+                  <span data-i18n="tags.createBtn">Créer</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="modal-section">
+              <label data-i18n="tags.available">Tags disponibles</label>
+              <div class="tags-content-wrapper">
+                <div class="tags-groups-sidebar">
+                  <div class="group-item active" data-group="all">
+                    <span class="group-name" data-i18n="tags.all">Tous les tags</span>
+                  </div>
+                  <div id="tags-groups-list"></div>
+                </div>
+                <div id="available-tags-list" class="tags-list"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================================================ -->
+      <!-- ÉCRAN DE REVUE (FIN DE SESSION)                             -->
+      <!-- ============================================================ -->
+      <div id="review-screen" class="screen hidden">
+        <div class="review-container">
+          <div class="review-header">
+            <h2 data-i18n="notifications.sessionFinished">C'est fini !</h2>
+            <p id="review-stats" data-i18n="drawing.noDrawnPoses">Tu as dessiné 0 poses</p>
+          </div>
+          <div class="review-actions">
+            <button type="button" id="close-review-btn" class="primary-btn">
+              <span data-i18n="settings.newSession">Nouvelle Session</span>
+            </button>
+          </div>
+          <div class="settings-divider"></div>
+          <div id="review-grid" class="review-grid"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- POPUP GESTION DES PLANS DE SESSION                           -->
+    <!-- ============================================================ -->
+    <div id="session-plans-modal" class="modal hidden">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2 data-i18n="modes.custom.managePlans">Plans de Session</h2>
+          <button type="button" id="close-plans-modal" class="modal-close-btn">
+            &times;
+          </button>
+        </div>
+        <div class="modal-body">
+          <!-- Sauvegarder le plan actuel -->
+          <div class="plan-section">
+            <h3 data-i18n="modes.custom.savePlan">Sauvegarder le plan actuel</h3>
+            <div class="plan-save-form">
+              <input
+                type="text"
+                id="plan-name-input"
+                data-i18n-placeholder="modes.custom.planName"
+                maxlength="50"
+              />
+              <button type="button" id="save-plan-btn" class="plan-action-btn">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  height="18px"
+                  viewBox="0 -960 960 960"
+                  width="18px"
+                  fill="currentColor"
+                >
+                  <path
+                    d="M840-680v480q0 33-23.5 56.5T760-120H200q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h480l160 160Zm-80 34L646-760H200v560h560v-446ZM480-240q50 0 85-35t35-85q0-50-35-85t-85-35q-50 0-85 35t-35 85q0 50 35 85t85 35ZM240-560h360v-160H240v160Zm-40-86v446-560 114Z"
+                  />
+                </svg>
+                <span data-i18n="modes.custom.saveBtn">Sauvegarder</span>
+              </button>
+            </div>
+          </div>
+          <!-- Liste des plans sauvegardés -->
+          <div class="plan-section">
+            <h3 data-i18n="modes.custom.savedPlans">Plans sauvegardés</h3>
+            <div id="saved-plans-list" class="saved-plans-list">
+              <div class="empty-plans-msg" data-i18n="modes.custom.noPlansSaved">Aucun plan sauvegardé</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Script de détection du mode frame -->
+    <script>
+      // Détecte si la fenêtre utilise le frame natif ou personnalisé
+      // En mode frameless (frame: false), ajoute la classe "frameless" au body
+      (async function () {
+        try {
+          // Lit le manifest.json pour vérifier la valeur de frame
+          const response = await fetch("manifest.json");
+          const manifest = await response.json();
+
+          // Si frame est false, on affiche la barre de titre personnalisée
+          if (manifest.main && manifest.main.frame === false) {
+            document.body.classList.add("frameless");
+          }
+        } catch (e) {
+          console.error("Erreur lors de la détection du mode frame:", e);
+          // En cas d'erreur, on considère qu'on est en mode frameless par défaut
+          document.body.classList.add("frameless");
+        }
+      })();
+    </script>
+
+    <script src="js/config.js"></script>
+    <script src="js/timeline.js"></script>
+    <script src="js/plugin.js"></script>
+    <script src="js/draw.js"></script>
+  </body>
+</html>

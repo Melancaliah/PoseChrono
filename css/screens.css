@@ -1,0 +1,1096 @@
+/* ============================================
+   ÉCRANS PRINCIPAUX - PoseChrono
+   ============================================ */
+
+/* ============================================
+   SETTINGS SCREEN & FORMS
+   ============================================ */
+
+.settings-container {
+  background: var(--bg-window);
+  border-radius: 20px;
+  padding: 40px;
+  max-width: 550px;
+  width: 90%;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.settings-container h1 {
+  font-size: 2.5em;
+  text-align: center;
+  margin-bottom: 8px;
+  background: none;
+  -webkit-background-clip: unset;
+  -webkit-text-fill-color: unset;
+}
+
+.subtitle {
+  text-align: center;
+  color: #888;
+  margin-bottom: 40px;
+}
+
+.setting-group {
+  margin-bottom: 30px;
+  width: 100%;
+}
+
+.setting-group label {
+  display: block;
+  font-size: 0.95em;
+  color: #ccc;
+  margin-bottom: 12px;
+  font-weight: 500;
+}
+
+.icon {
+  margin-right: 8px;
+}
+
+.label-icon {
+  width: 18px;
+  height: 18px;
+  vertical-align: middle;
+  margin-right: 8px;
+}
+
+.duration-row {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.options-row {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.mode-selector {
+  display: flex;
+  border-radius: 8px;
+  padding: 4px;
+  margin-bottom: 20px;
+}
+
+#session-description {
+  display: flex;
+  justify-content: center;
+  opacity: 1;
+  font-size: 0.8em;
+  color: var(--color-primary);
+  margin-bottom: 20px;
+}
+
+.settings-panel {
+  transition:
+    opacity var(--transition-normal) ease-out,
+    transform var(--transition-normal) ease-out;
+  position: absolute;
+  width: 100%;
+  left: 0;
+  top: 0;
+  padding-top: 10vh;
+}
+
+.settings-panel.fade-slide-out {
+  opacity: 0;
+  transform: translateX(-20px);
+}
+
+.settings-panel.fade-slide-in {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.settings-modes-container {
+  position: relative;
+  transition: min-height 0.35s ease-in-out;
+  overflow: hidden;
+}
+
+#mode-classique-settings,
+#mode-custom-settings {
+  width: 100%;
+  transition:
+    opacity 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+    transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+  transform-origin: center top;
+}
+
+#mode-classique-settings.fade-in,
+#mode-custom-settings.fade-in {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+#mode-classique-settings.fade-out,
+#mode-custom-settings.fade-out {
+  opacity: 0;
+  transform: translateY(-15px) scale(0.98);
+  pointer-events: none;
+}
+
+#mode-classique-settings.mode-frozen,
+#mode-custom-settings.mode-frozen,
+#mode-memory-settings.mode-frozen {
+  opacity: 0.15;
+  pointer-events: none;
+  filter: grayscale(0.3);
+  transition:
+    opacity var(--transition-normal),
+    filter var(--transition-normal);
+}
+
+.fade-out {
+  opacity: 0;
+  transform: translateY(10px);
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  transition:
+    opacity var(--transition-normal),
+    transform var(--transition-normal);
+  z-index: 0;
+}
+
+.fade-in {
+  opacity: 1;
+  transform: translateY(0);
+  position: relative;
+  transition:
+    opacity var(--transition-normal),
+    transform var(--transition-normal);
+  z-index: 1;
+  pointer-events: all;
+}
+
+#mode-custom-settings {
+  display: none;
+}
+
+#mode-classique-settings {
+  display: block;
+}
+
+/* ============================================
+   DRAWING SCREEN & LAYOUT
+   ============================================ */
+
+#drawing-screen {
+  background: black;
+  padding: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  justify-content: flex-start;
+}
+
+.sidebar {
+  display: flex;
+  position: fixed;
+  width: 95px;
+  min-width: 95px;
+  height: 100vh;
+  margin-top: -36px;
+  padding-top: 62px;
+  padding: 30px 0;
+  background: var(--bg-dark);
+  right: 0;
+  top: 36px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: center;
+
+  z-index: 1005; /* Au-dessus des unit-info (1002) */
+  border-left: 1px solid var(--border-light);
+  flex-shrink: 0;
+  transition:
+    transform var(--transition-normal),
+    opacity var(--transition-normal);
+  order: 2;
+}
+
+.sidebar.sidebar-hidden {
+  transform: translateX(120px);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.sidebar-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+}
+
+.sidebar-section.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.sidebar-btn svg {
+  width: 30px;
+  height: 30px;
+}
+
+.sidebar-btn.active {
+  background-color: #667eea !important;
+  border-radius: 8px;
+}
+
+.sidebar-btn.active svg {
+  fill: white !important;
+}
+
+.timer-display {
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(var(--blur-default));
+  padding: 12px 10px;
+  margin-top: 20px;
+  border-radius: 12px;
+  font-size: 1.5em;
+  font-weight: bold;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  text-align: center;
+  min-width: 75px;
+  cursor: context-menu;
+  transition: all var(--transition-normal);
+}
+
+.image-counter {
+  padding: 0;
+  font-weight: 600;
+  text-align: center;
+  color: #888;
+}
+
+.session-info-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  line-height: 1.1;
+}
+
+.group-info {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  font-weight: 600;
+  opacity: 0.9;
+}
+
+.group-info span {
+  opacity: 0.5;
+  font-weight: 400;
+}
+
+.pose-info {
+  display: flex;
+  align-items: baseline;
+  gap: 3px;
+}
+
+.current-pose {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--color-primary);
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.total-poses {
+  font-size: 13px;
+  opacity: 0.4;
+  font-weight: 400;
+  color: var(--color-primary);
+}
+
+.global-progress {
+  font-size: 10px;
+  color: var(--text-primary);
+  opacity: 0.3;
+  margin-top: 2px;
+  padding-top: 2px;
+  width: 100%;
+  text-align: center;
+}
+
+.controls-section {
+  flex: 1;
+  justify-content: center;
+  margin: 15px;
+  gap: 10px;
+}
+
+.transform-controls {
+  flex-direction: column;
+  gap: 8px;
+}
+
+.secondary-controls {
+  margin-top: 30px;
+  gap: 8px;
+}
+
+#sound-btn {
+  margin-top: 10px;
+  margin-bottom: 15px;
+}
+
+#sound-btn.muted {
+  opacity: 0.6;
+}
+
+#settings-btn {
+  border-radius: 50%;
+}
+
+#home-progressive-blur-btn:disabled {
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+#blur-btn.active {
+  background-color: #4a9eff;
+}
+
+.image-container {
+  flex: 1;
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  overflow: hidden;
+  position: relative;
+}
+
+img {
+  cursor: pointer !important;
+}
+
+video {
+  cursor: pointer !important;
+  border-left: solid 5px var(--color-primary-light);
+  border-right: solid 5px var(--color-primary-light);
+}
+
+.sidebar-hidden ~ .image-container {
+  width: 100vw;
+}
+
+.image-wrapper {
+  display: inline-flex;
+  flex-direction: column;
+  max-width: 80%;
+  max-height: 100%;
+  align-items: center;
+  position: relative;
+}
+
+/* ============================================
+   DRAWING MODE OVERLAY INDICATOR
+   Les bordures sont maintenant des éléments div (.drawing-mode-borders)
+   définis dans modals.css pour suivre correctement le zoom
+   ============================================ */
+
+@keyframes drawing-mode-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    box-shadow: 0 0 8px var(--color-drawing-badge);
+  }
+  50% {
+    opacity: 0.6;
+    box-shadow: 0 0 15px var(--color-drawing-badge);
+  }
+}
+
+/* ============================================
+   TOOLBAR DOCK ZONE (snap magnétique)
+   ============================================ */
+
+.toolbar-dock-zone {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  height: 50px;
+  width: 60%;
+  max-width: 600px;
+  border: 2px dashed transparent;
+  border-radius: 12px;
+  pointer-events: none;
+  opacity: 0;
+  transition:
+    opacity 0.2s ease,
+    border-color 0.2s ease,
+    background 0.2s ease;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.toolbar-dock-zone.visible {
+  opacity: 1;
+  border-color: rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.toolbar-dock-zone.active {
+  border-color: var(--color-primary);
+  background: rgba(var(--color-primary-rgb, 102, 126, 234), 0.15);
+  box-shadow: 0 0 20px rgba(var(--color-primary-rgb, 102, 126, 234), 0.3);
+}
+
+.toolbar-dock-zone-label {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.toolbar-dock-zone.active .toolbar-dock-zone-label {
+  color: var(--color-primary);
+}
+
+/* Barre de progression */
+
+.progress-bar {
+  flex-shrink: 0;
+  width: 100%;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 5px 5px 0 0;
+  overflow: hidden;
+  position: relative;
+  z-index: 20;
+  cursor: pointer;
+
+  transition:
+    transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 0.3s ease,
+    margin-bottom 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  will-change: background;
+}
+
+.progress-bar.hidden {
+  display: block !important;
+  opacity: 0;
+  transform: translateY(100%);
+  margin-bottom: -6px;
+  pointer-events: none;
+}
+
+.progress-bar.paused {
+  background: rgba(255, 255, 255, 0.08);
+  transition: background 0.4s ease;
+}
+
+.progress-bar.paused .progress-fill {
+  background: #888;
+  box-shadow: none;
+  opacity: 0.4;
+  transition: all 0.4s ease;
+}
+
+@keyframes progressPulse {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #ff6b35 0%, #ff8c42 50%, #ffa600 100%);
+  box-shadow: 0 0 10px rgba(255, 107, 53, 0.6);
+  width: 100%;
+  transition:
+    width 0s linear,
+    background 0.4s ease,
+    box-shadow 0.4s ease,
+    opacity 0.4s ease;
+}
+
+#current-image {
+  display: block;
+  max-width: 100%;
+  max-height: calc(100vh - 40px - 6px);
+  width: auto;
+  height: auto;
+  z-index: 2;
+  min-height: 0;
+  transition: filter var(--transition-fast);
+}
+
+#current-image.flip-animation {
+  animation: flip3d 0.3s ease-in-out forwards;
+}
+
+/* ============================================
+   BADGES CONTAINER & STATUS BADGES
+   ============================================ */
+
+/* Conteneur des badges (pause, dessin, etc.) */
+.badges-container {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+
+/* Style commun pour tous les badges */
+.status-badge {
+  background: var(--color-primary-elegant);
+  color: white;
+  padding: 8px 24px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  pointer-events: auto;
+  cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
+  white-space: nowrap;
+  opacity: 0;
+  transform: translateY(-20px);
+  transition:
+    opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+    transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.status-badge.hidden {
+  display: block !important;
+  opacity: 0;
+  transform: translateY(-20px);
+  pointer-events: none;
+}
+
+.status-badge:not(.hidden) {
+  opacity: 0.9;
+  transform: translateY(0);
+}
+
+/* Badge PAUSE */
+.pause-badge {
+  background: var(--color-primary-elegant);
+}
+
+/* Badge DESSIN */
+.drawing-badge {
+  background: var(--color-drawing-badge);
+}
+
+/* Lueur statique autour du timer-display en pause */
+.timer-display.timer-paused {
+  box-shadow:
+    0 0 0 3px var(--color-primary-elegant),
+    0 0 20px var(--color-primary-elegant),
+    0 0 40px var(--color-primary-elegant);
+  border-color: var(--color-primary-light);
+}
+
+/* ============================================
+   PAUSE OVERLAY & SESSION STATE
+   ============================================ */
+
+#pause-overlay {
+  flex: 1;
+  height: 100vh;
+  width: 100vw;
+  position: fixed;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  overflow: hidden;
+  background: var(--bg-dark);
+  flex-direction: column;
+  gap: 40px;
+  top: 0;
+  left: 0;
+  z-index: 1;
+  text-align: center;
+}
+
+#pause-overlay.hidden {
+  display: none !important;
+}
+
+.pause-content .pause-icon {
+  font-size: 80px;
+  display: block;
+}
+
+#next-step-info {
+  font-size: 1.2em;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  margin: 0;
+  padding: 0 20px;
+  margin-top: 20px;
+  font-size: 1.1em;
+  color: var(--text-tertiary);
+  padding: 0 20px;
+}
+
+.pause-central-block {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 400px;
+  height: 400px;
+  cursor: context-menu;
+}
+
+.pause-progress-svg {
+  width: 400px;
+  height: 400px;
+  position: absolute;
+  transform: rotate(-90deg);
+  pointer-events: none;
+}
+
+.pause-progress-svg .bg {
+  fill: none;
+  stroke: var(--border-light);
+  stroke-width: 8;
+}
+
+.pause-progress-svg .progress {
+  fill: none;
+  stroke: var(--color-primary);
+  stroke-width: 8;
+  stroke-linecap: round;
+  stroke-dasharray: 440;
+  stroke-dashoffset: 440;
+  transition: stroke-dashoffset 1s linear;
+}
+
+/* ============================================
+   REVIEW GRID & IMAGE GALLERY
+   ============================================ */
+
+.review-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.review-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 15px;
+  padding: 20px;
+  overflow-y: auto;
+  max-height: 70vh;
+  margin-top: 20px;
+  justify-content: center;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.review-grid .review-item {
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 8px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  transition: transform var(--transition-normal);
+  transform: scale(1);
+  cursor: zoom-in;
+}
+
+.review-item:hover {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -1px;
+  z-index: 10;
+}
+
+.review-item:active {
+  transform: scale(1) !important;
+  transition: none !important;
+}
+
+.review-item.zoomed {
+  position: fixed;
+  top: -10px;
+  left: -10px;
+  width: calc(100vw + 20px);
+  height: calc(100vh + 20px);
+  z-index: 1000;
+  background: var(--bg-overlay);
+  cursor: zoom-out;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-direction: column;
+  animation: fadeIn 0.2s ease-out;
+  transition: none !important; /* Désactiver la transition héritée de .review-item */
+  transform: none !important; /* Désactiver le transform hérité */
+}
+
+.review-item.zoomed:hover {
+  border: none;
+  outline: none;
+  z-index: 999;
+}
+
+.review-item.zoomed img {
+  max-width: 90%;
+  max-height: 80vh;
+  max-width: 95%;
+  max-height: 95%;
+  object-fit: contain;
+  border-radius: 4px;
+  cursor: pointer;
+  will-change: transform; /* Éviter les décalages lors des reflows */
+}
+
+/* Images dans la review grid (pas le zoom) */
+.review-grid .review-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Image dans le zoom overlay */
+.review-item.zoomed img {
+  max-width: 90%;
+  max-height: 80vh;
+  object-fit: contain;
+}
+
+.review-header {
+  text-align: center;
+  padding: 40px 20px 20px;
+}
+
+.review-header h2 {
+  font-size: 2em;
+  color: var(--color-primary);
+  margin-bottom: 10px;
+}
+
+.review-actions {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  padding: 15px 0 25px 0;
+}
+
+#close-review-btn {
+  width: fit-content;
+  padding: 12px 40px;
+  margin: 0 auto;
+}
+
+#zoom-overlay:hover {
+  cursor: zoom-out !important;
+}
+
+#zoom-overlay {
+  cursor: zoom-out !important;
+  z-index: 999;
+  /* Masquer les coins arrondis du body */
+  top: -10px;
+  left: -10px;
+  width: calc(100vw + 20px);
+  height: calc(100vh + 20px);
+}
+
+.zoom-toolbar {
+  position: fixed;
+  bottom: 20px;
+  left: 0;
+  right: 0;
+  margin: 0 auto;
+  width: fit-content;
+  display: flex;
+  gap: 10px;
+  background: #000000d0;
+  padding: 10px 20px;
+  border-radius: 30px;
+  backdrop-filter: blur(5px);
+  /* Désactiver toute transition/transform */
+  transition: none !important;
+  transform: none !important;
+}
+
+.zoom-toolbar .control-btn-small {
+  width: 45px;
+  height: 45px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* === ZOOM DRAWING MODE === */
+.zoom-drawing-wrapper {
+  pointer-events: none;
+  z-index: 10;
+}
+
+.zoom-drawing-active {
+  cursor: default !important;
+}
+
+.zoom-drawing-active img {
+  cursor: default !important;
+}
+
+.zoom-drawing-toolbar {
+  position: fixed;
+  bottom: 40px;
+  left: 0;
+  right: 0;
+  margin: 0 auto;
+  width: fit-content;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(0, 0, 0, 0.85);
+  padding: 8px 16px;
+  border-radius: 12px;
+  backdrop-filter: blur(10px);
+  z-index: 1001;
+  /* Désactiver toute transition/transform */
+  transition: none !important;
+  transform: none !important;
+}
+
+/* Mode horizontal (par défaut) */
+.zoom-drawing-toolbar.horizontal {
+  flex-direction: row;
+  bottom: 40px;
+  left: 0;
+  right: 0;
+  top: auto;
+  margin: 0 auto;
+}
+
+/* Mode vertical (clic droit) */
+.zoom-drawing-toolbar:not(.horizontal) {
+  flex-direction: column;
+  left: 10px;
+  right: auto;
+  top: 50%;
+  bottom: auto;
+  transform: translateY(-50%) !important;
+  padding: 16px 8px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.zoom-toolbar-group {
+  display: flex;
+  gap: 4px;
+}
+
+.zoom-toolbar-separator {
+  width: 1px;
+  height: 28px;
+  background: rgba(255, 255, 255, 0.15);
+  margin: 0 4px;
+}
+
+/* Séparateur vertical en mode vertical */
+.zoom-drawing-toolbar:not(.horizontal) .zoom-toolbar-separator {
+  width: 28px;
+  height: 1px;
+  margin: 4px 0;
+}
+
+.zoom-drawing-toolbar .control-btn-small {
+  width: 36px;
+  height: 36px;
+  padding: 6px;
+}
+
+.zoom-drawing-toolbar .zoom-tool-btn.active {
+  background: var(--color-primary);
+  color: white;
+}
+
+.zoom-color-input {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  background: transparent;
+}
+
+.zoom-color-input::-webkit-color-swatch-wrapper {
+  padding: 2px;
+}
+
+.zoom-color-input::-webkit-color-swatch {
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.zoom-size-input {
+  width: 80px;
+  height: 6px;
+  -webkit-appearance: none;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+/* Slider vertical en mode vertical */
+.zoom-drawing-toolbar:not(.horizontal) .zoom-size-input {
+  width: 6px;
+  height: 80px;
+  writing-mode: bt-lr; /* Bottom to top for IE */
+  -webkit-appearance: slider-vertical;
+}
+
+.zoom-size-input::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  background: var(--color-primary);
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+/* Export menu pour le zoom */
+#zoom-export-menu {
+  background: rgba(30, 30, 35, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 8px 0;
+  min-width: 220px;
+  backdrop-filter: blur(10px);
+}
+
+#zoom-export-menu .context-menu-title {
+  padding: 8px 16px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  margin-bottom: 4px;
+}
+
+#zoom-export-menu .context-menu-item {
+  padding: 10px 16px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+#zoom-export-menu .context-menu-item:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+#zoom-export-menu .context-menu-separator {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 4px 0;
+}
+
+/* === REVIEW ITEM VIDEO INDICATOR === */
+.review-item.is-video {
+  position: relative;
+}
+
+.review-item .video-indicator {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 40px;
+  height: 40px;
+  background: rgba(0, 0, 0, 0.6);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s ease;
+}
+
+.review-item .video-indicator svg {
+  width: 20px;
+  height: 20px;
+  fill: white;
+}
+
+.review-item.is-video:hover .video-indicator {
+  opacity: 0.8;
+}
+
+/* === ZOOM VIDEO WRAPPER === */
+.zoom-video-wrapper {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-width: 95%;
+  max-height: 75vh;
+  margin-bottom: 80px; /* Espace pour la toolbar des filtres */
+}
+
+.zoom-video-wrapper video {
+  max-width: 100%;
+  max-height: calc(75vh - 80px);
+  object-fit: contain;
+  border-radius: 4px;
+}
+
+/* Barre de contrôle vidéo dans le zoom overlay */
+.zoom-video-controls-bar {
+  position: relative;
+  bottom: auto;
+  left: auto;
+  right: auto;
+  width: 100%;
+  max-width: 800px;
+  margin-top: 10px;
+  opacity: 1;
+  visibility: visible;
+  background: rgba(0, 0, 0, 0.85);
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+
+.zoom-video-controls-bar .video-timeline {
+  cursor: pointer;
+}
+
+.zoom-video-controls-bar .video-controls-buttons {
+  padding: 6px 0;
+}
+
+/* ============================================
+   FIN DES STYLES SCREENS
+   Les styles du module de dessin ont �t� d�plac�s dans modals.css
+   ============================================ */
