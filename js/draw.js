@@ -2892,8 +2892,8 @@ function handleCommonDrawingKeydown(e, options) {
   const key = e.key.toLowerCase();
   const { onClose, onExport, onLightboxToggle, onToolSelect } = options;
 
-  // Escape pour fermer ou annuler l'opération en cours
-  if (e.key === "Escape") {
+  // Touche configurable pour fermer ou annuler l'opération en cours
+  if (e.key === CONFIG.HOTKEYS.DRAWING_CLOSE) {
     e.preventDefault();
     if (options.stopPropagation) e.stopPropagation();
 
@@ -2929,8 +2929,8 @@ function handleCommonDrawingKeydown(e, options) {
     return true;
   }
 
-  // Ctrl+S pour export
-  if ((e.ctrlKey || e.metaKey) && key === "s") {
+  // Ctrl+touche configurable pour export
+  if ((e.ctrlKey || e.metaKey) && key === CONFIG.HOTKEYS.DRAWING_EXPORT.toLowerCase()) {
     e.preventDefault();
     onExport();
     return true;
@@ -2987,8 +2987,9 @@ function handleCommonDrawingKeydown(e, options) {
     return true;
   }
 
-  // Shift+B pour laser
-  if (e.shiftKey && key === "b") {
+  // Laser (Shift+touche configurable, ex: Shift+B)
+  const laserKey = CONFIG.HOTKEYS.DRAWING_TOOL_LASER;
+  if (laserKey && e.shiftKey && key === laserKey.toLowerCase()) {
     e.preventDefault();
     onToolSelect("laser");
     return true;
@@ -3001,8 +3002,9 @@ function handleCommonDrawingKeydown(e, options) {
     return true;
   }
 
-  // Shift+U pour rapporteur
-  if (e.shiftKey && key === "u") {
+  // Rapporteur (Shift+touche configurable, ex: Shift+U)
+  const protractorKey = CONFIG.HOTKEYS.DRAWING_TOOL_PROTRACTOR;
+  if (protractorKey && e.shiftKey && key === protractorKey.toLowerCase()) {
     e.preventDefault();
     onToolSelect("protractor");
     return true;

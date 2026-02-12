@@ -65,6 +65,61 @@ function tl(key, options = {}, fallback = "") {
 }
 
 /**
+ * Ouvre une confirmation stylée (fallback Eagle si indisponible).
+ * @param {Object} options
+ * @param {string} options.title
+ * @param {string} options.message
+ * @param {string} options.confirmText
+ * @param {string} options.cancelText
+ * @param {string} [options.checkboxLabel]
+ * @returns {Promise<{confirmed: boolean, checkboxChecked: boolean}>}
+ */
+async function openTimelineConfirmDialog(options = {}) {
+  const {
+    title = "",
+    message = "",
+    confirmText = "OK",
+    cancelText = "Cancel",
+    checkboxLabel = "",
+  } = options;
+
+  // Utiliser la modal custom du plugin si disponible
+  if (
+    typeof window !== "undefined" &&
+    typeof window.showPoseChronoConfirmDialog === "function"
+  ) {
+    return window.showPoseChronoConfirmDialog({
+      title,
+      message,
+      confirmText,
+      cancelText,
+      checkboxLabel,
+    });
+  }
+
+  // Fallback legacy (dialog Eagle native)
+  try {
+    const result = await eagle.dialog.showMessageBox({
+      type: "warning",
+      title,
+      message,
+      buttons: [cancelText, confirmText],
+      defaultId: 0,
+      cancelId: 0,
+      ...(checkboxLabel ? { checkboxLabel } : {}),
+    });
+
+    return {
+      confirmed: result.response === 1,
+      checkboxChecked: !!result.checkboxChecked,
+    };
+  } catch (e) {
+    console.error("[Timeline] Erreur ouverture dialog:", e);
+    return { confirmed: false, checkboxChecked: false };
+  }
+}
+
+/**
  * Récupère les labels des jours (abrégés)
  * @returns {string[]}
  */
@@ -394,8 +449,92 @@ const TimelineData = {
 
     this._data.stats.totalPoses = totalPoses;
     this._data.stats.totalTime = totalTime;
-    // Note: currentStreak et bestStreak nécessitent un recalcul complexe
-    // On les garde telles quelles pour l'instant
+    this._recalculateStreak();
+  },
+
+  /**
+   * Recalcule le streak (jours consécutifs) à partir des données journalières
+   * Parcourt les jours depuis aujourd'hui en arrière pour trouver la série actuelle
+   */
+  _recalculateStreak() {
+    const days = this._data.days;
+    const sortedKeys = Object.keys(days).sort().reverse(); // Du plus récent au plus ancien
+
+    if (sortedKeys.length === 0) {
+      this._data.stats.currentStreak = 0;
+      this._data.stats.bestStreak = 0;
+      this._data.stats.lastSessionDate = null;
+      return;
+    }
+
+    // Mettre à jour lastSessionDate
+    this._data.stats.lastSessionDate = sortedKeys[0];
+
+    // Calculer le streak actuel depuis aujourd'hui
+    const today = DateUtils.getToday();
+    const todayKey = DateUtils.toKey(today);
+    let currentStreak = 0;
+    let checkDate = new Date(today);
+
+    // Le streak actuel commence aujourd'hui ou hier
+    // Si aujourd'hui n'a pas d'activité, on commence à vérifier depuis hier
+    if (!days[todayKey]) {
+      checkDate.setDate(checkDate.getDate() - 1);
+      const yesterdayKey = DateUtils.toKey(checkDate);
+      if (!days[yesterdayKey]) {
+        // Ni aujourd'hui ni hier : streak = 0
+        this._data.stats.currentStreak = 0;
+        // Recalculer bestStreak en parcourant tout l'historique
+        this._data.stats.bestStreak = this._findBestStreak(sortedKeys);
+        return;
+      }
+    }
+
+    // Compter les jours consécutifs en arrière
+    while (true) {
+      const key = DateUtils.toKey(checkDate);
+      if (days[key]) {
+        currentStreak++;
+        checkDate.setDate(checkDate.getDate() - 1);
+      } else {
+        break;
+      }
+    }
+
+    this._data.stats.currentStreak = currentStreak;
+
+    // Recalculer bestStreak
+    const bestStreak = this._findBestStreak(sortedKeys);
+    this._data.stats.bestStreak = Math.max(bestStreak, currentStreak);
+  },
+
+  /**
+   * Trouve la meilleure série dans tout l'historique
+   * @param {string[]} sortedKeys - Clés de dates triées (ordre décroissant)
+   * @returns {number}
+   */
+  _findBestStreak(sortedKeys) {
+    if (sortedKeys.length === 0) return 0;
+
+    // Trier en ordre croissant pour parcourir chronologiquement
+    const keys = sortedKeys.slice().sort();
+    let bestStreak = 1;
+    let streak = 1;
+
+    for (let i = 1; i < keys.length; i++) {
+      const prevDate = new Date(keys[i - 1]);
+      const currDate = new Date(keys[i]);
+      const diff = DateUtils.diffInDays(currDate, prevDate);
+
+      if (diff === 1) {
+        streak++;
+        if (streak > bestStreak) bestStreak = streak;
+      } else {
+        streak = 1;
+      }
+    }
+
+    return bestStreak;
   },
 
   /**
@@ -449,6 +588,15 @@ const TimelineData = {
   getDayData(dateKey) {
     const data = this.getData();
     return data.days[dateKey] || { poses: 0, time: 0, sessions: [] };
+  },
+
+  /**
+   * Alias lisible pour récupérer une journée (compatibilité avec le renderer)
+   * @param {string} dateKey - Format "YYYY-MM-DD"
+   * @returns {{poses: number, time: number, sessions: Array}}
+   */
+  getDay(dateKey) {
+    return this.getDayData(dateKey);
   },
 
   /**
@@ -608,6 +756,9 @@ const TimelineData = {
 
     // Supprimer la journée
     delete data.days[dateKey];
+
+    // Recalculer le streak
+    this._recalculateStreak();
 
     this.save();
     return true;
@@ -1500,47 +1651,44 @@ class TimelineRenderer {
       localStorage.getItem("timeline-skip-session-delete-confirm") === "true";
 
     if (!skipConfirm) {
+      const dayData = TimelineData.getDay(dateKey);
+      const targetSession =
+        dayData && dayData.sessions ? dayData.sessions[sessionIndex] : null;
+
       const title = tl(
         "timeline.deleteSessionTitle",
         {},
         "Supprimer la session",
       );
-      const message = tl(
+      const baseMessage = tl(
         "timeline.deleteSessionConfirm",
         {},
         "Êtes-vous sûr de vouloir supprimer cette session ?",
       );
+      const detailLine = targetSession
+        ? `${targetSession.poses || 0} ${tl("timeline.poses", {}, "poses")}  |  ${FormatUtils.time(targetSession.time || 0)}`
+        : "";
+      const message = detailLine ? `${baseMessage}\n${detailLine}` : baseMessage;
 
-      try {
-        // Utiliser une dialog custom avec checkbox
-        const result = await eagle.dialog.showMessageBox({
-          type: "warning",
-          title: title,
-          message: message,
-          buttons: [
-            tl("timeline.deleteCancel", {}, "Annuler"),
-            tl("timeline.deleteConfirmBtn", {}, "Supprimer"),
-          ],
-          defaultId: 0,
-          cancelId: 0,
-          checkboxLabel: tl(
-            "timeline.skipConfirm",
-            {},
-            "Ne plus demander confirmation",
-          ),
-        });
+      const { confirmed, checkboxChecked } = await openTimelineConfirmDialog({
+        title,
+        message,
+        cancelText: tl("timeline.deleteCancel", {}, "Annuler"),
+        confirmText: tl("timeline.deleteConfirmBtn", {}, "Supprimer"),
+        checkboxLabel: tl(
+          "timeline.skipConfirm",
+          {},
+          "Ne plus demander confirmation",
+        ),
+      });
 
-        // Sauvegarder la préférence si cochée
-        if (result.checkboxChecked) {
-          localStorage.setItem("timeline-skip-session-delete-confirm", "true");
-        }
+      // Sauvegarder la préférence si cochée
+      if (checkboxChecked) {
+        localStorage.setItem("timeline-skip-session-delete-confirm", "true");
+      }
 
-        if (result.response !== 1) {
-          return; // Annulé
-        }
-      } catch (e) {
-        console.error("[Timeline] Erreur dialog:", e);
-        return;
+      if (!confirmed) {
+        return; // Annulé
       }
     }
 
@@ -2133,50 +2281,52 @@ class TimelineRenderer {
    * Demande confirmation avant de réinitialiser l'historique
    */
   async _confirmResetHistory() {
+    const data = TimelineData.getData();
+    const sessionsCount = Object.values(data.days || {}).reduce(
+      (sum, day) => sum + ((day.sessions && day.sessions.length) || 0),
+      0,
+    );
+
     const title = tl("timeline.resetTitle", {}, "Réinitialiser l'historique");
-    const message = tl(
+    const baseMessage = tl(
       "timeline.resetConfirm",
       {},
       "Êtes-vous sûr de vouloir réinitialiser tout l'historique ? Cette action est irréversible.",
     );
+    const totalPoses = data.stats && typeof data.stats.totalPoses === "number"
+      ? data.stats.totalPoses
+      : 0;
+    const detailLine = `${totalPoses} ${tl("timeline.poses", {}, "poses")}  |  ${sessionsCount} ${tl("timeline.sessionsLabel", {}, "sessions")}`;
+    const message = `${baseMessage}\n${detailLine}`;
 
-    try {
-      const result = await eagle.dialog.showMessageBox({
-        type: "warning",
-        title: title,
-        message: message,
-        buttons: [
-          tl("timeline.resetCancel", {}, "Annuler"),
-          tl("timeline.resetConfirmBtn", {}, "Réinitialiser"),
-        ],
-        defaultId: 0,
-        cancelId: 0,
-      });
+    const { confirmed } = await openTimelineConfirmDialog({
+      title,
+      message,
+      cancelText: tl("timeline.resetCancel", {}, "Annuler"),
+      confirmText: tl("timeline.resetConfirmBtn", {}, "Réinitialiser"),
+    });
 
-      if (result.response === 1) {
-        TimelineData.reset();
-        this.render();
+    if (confirmed) {
+      TimelineData.reset();
+      this.render();
 
-        // Notification de confirmation
-        if (
-          typeof eagle !== "undefined" &&
-          eagle.notification &&
-          eagle.notification.show
-        ) {
-          eagle.notification.show({
-            title: tl("timeline.resetNotifTitle", {}, "Historique effacé"),
-            body: tl(
-              "timeline.resetNotifBody",
-              {},
-              "Tout l'historique a été effacé",
-            ),
-            mute: false,
-            duration: 3000,
-          });
-        }
+      // Notification de confirmation
+      if (
+        typeof eagle !== "undefined" &&
+        eagle.notification &&
+        eagle.notification.show
+      ) {
+        eagle.notification.show({
+          title: tl("timeline.resetNotifTitle", {}, "Historique effacé"),
+          body: tl(
+            "timeline.resetNotifBody",
+            {},
+            "Tout l'historique a été effacé",
+          ),
+          mute: false,
+          duration: 3000,
+        });
       }
-    } catch (e) {
-      console.error("[Timeline] Erreur dialog Eagle:", e);
     }
   }
 
@@ -2186,56 +2336,58 @@ class TimelineRenderer {
    */
   async _confirmDeleteDay(dateKey) {
     const date = new Date(dateKey);
+    const dayData = TimelineData.getDay(dateKey);
+    const sessionsCount =
+      dayData && dayData.sessions ? dayData.sessions.length : 0;
+    const posesCount = dayData && typeof dayData.poses === "number"
+      ? dayData.poses
+      : 0;
+    const totalTime = dayData && typeof dayData.time === "number"
+      ? dayData.time
+      : 0;
     const dateStr = date.toLocaleDateString(getLocale(), {
       day: "numeric",
       month: "long",
       year: "numeric",
     });
     const title = tl("timeline.deleteDayTitle", {}, "Supprimer la journée");
-    const message = tl(
+    const baseMessage = tl(
       "timeline.deleteDayConfirm",
       { date: dateStr },
       `Êtes-vous sûr de vouloir supprimer l'historique du ${dateStr} ?`,
     );
+    const detailLine = `${sessionsCount} ${tl("timeline.sessionsLabel", {}, "sessions")}  |  ${posesCount} ${tl("timeline.poses", {}, "poses")}  |  ${FormatUtils.time(totalTime)}`;
+    const message = `${baseMessage}\n${detailLine}`;
 
-    try {
-      const result = await eagle.dialog.showMessageBox({
-        type: "warning",
-        title: title,
-        message: message,
-        buttons: [
-          tl("timeline.deleteCancel", {}, "Annuler"),
-          tl("timeline.deleteConfirmBtn", {}, "Supprimer"),
-        ],
-        defaultId: 0,
-        cancelId: 0,
-      });
+    const { confirmed } = await openTimelineConfirmDialog({
+      title,
+      message,
+      cancelText: tl("timeline.deleteCancel", {}, "Annuler"),
+      confirmText: tl("timeline.deleteConfirmBtn", {}, "Supprimer"),
+    });
 
-      if (result.response === 1) {
-        TimelineData.deleteDay(dateKey);
-        this._closeDayDetail();
-        this.render();
+    if (confirmed) {
+      TimelineData.deleteDay(dateKey);
+      this._closeDayDetail();
+      this.render();
 
-        // Notification de confirmation
-        if (
-          typeof eagle !== "undefined" &&
-          eagle.notification &&
-          eagle.notification.show
-        ) {
-          eagle.notification.show({
-            title: tl("timeline.deleteNotifTitle", {}, "Journée supprimée"),
-            body: tl(
-              "timeline.deleteNotifBody",
-              {},
-              "L'historique de la journée a bien été effacé",
-            ),
-            mute: false,
-            duration: 3000,
-          });
-        }
+      // Notification de confirmation
+      if (
+        typeof eagle !== "undefined" &&
+        eagle.notification &&
+        eagle.notification.show
+      ) {
+        eagle.notification.show({
+          title: tl("timeline.deleteNotifTitle", {}, "Journée supprimée"),
+          body: tl(
+            "timeline.deleteNotifBody",
+            {},
+            "L'historique de la journée a bien été effacé",
+          ),
+          mute: false,
+          duration: 3000,
+        });
       }
-    } catch (e) {
-      console.error("[Timeline] Erreur dialog Eagle:", e);
     }
   }
 

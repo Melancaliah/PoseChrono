@@ -42,7 +42,8 @@ const CONFIG = {
     SILHOUETTE: "s", // Toggle silhouette (default : s)
     SILHOUETTE_MODAL: "S", // Ouvrir modal configuration silhouette (Shift+S) (default : S)
     THEME: "F4", // Changer de thème (default : F4)
-    ANNOTATE: "b", // Ouvrir le mode dessin/annotation (default : d)
+    ANNOTATE: "b", // Ouvrir le mode dessin/annotation (default : b)
+    TAGS: "t", // Ouvrir le modal des tags (default : t)
 
     // Contrôles vidéo
     VIDEO_SLOWER: "-", // Ralentir la vidéo (default : -)
@@ -72,6 +73,50 @@ const CONFIG = {
     DRAWING_SIZE_INCREASE: '"', // Augmenter la taille (default : ")
   },
 };
+
+// ================================================================
+// VALEURS PAR DÉFAUT DES RACCOURCIS (pour reset)
+// ================================================================
+
+const DEFAULT_HOTKEYS = {
+  FLIP_H: "F1",
+  GRAYSCALE: "y",
+  BLUR: "f",
+  MUTE: "m",
+  GRID: "h",
+  GRID_MODAL: "H",
+  SIDEBAR: "Tab",
+  INFO: "i",
+  SILHOUETTE: "s",
+  SILHOUETTE_MODAL: "S",
+  THEME: "F4",
+  ANNOTATE: "b",
+  TAGS: "t",
+  VIDEO_SLOWER: "-",
+  VIDEO_FASTER: "+",
+  VIDEO_PREV_FRAME: "'",
+  VIDEO_NEXT_FRAME: "(",
+  VIDEO_LOOP: "l",
+  VIDEO_CONFIG: "V",
+  DRAWING_EXPORT: "s",
+  DRAWING_LIGHTBOX: ")",
+  DRAWING_CLOSE: "Escape",
+  DRAWING_TOOL_PENCIL: "b",
+  DRAWING_TOOL_ERASER: "e",
+  DRAWING_TOOL_RECTANGLE: "r",
+  DRAWING_TOOL_CIRCLE: "c",
+  DRAWING_TOOL_LINE: "l",
+  DRAWING_TOOL_ARROW: "a",
+  DRAWING_TOOL_MEASURE: "m",
+  DRAWING_TOOL_CALIBRATE: "u",
+  DRAWING_TOOL_LASER: "B",
+  DRAWING_TOOL_PROTRACTOR: "U",
+  DRAWING_SIZE_DECREASE: "é",
+  DRAWING_SIZE_INCREASE: '"',
+};
+
+// Clé localStorage pour les raccourcis personnalisés
+const HOTKEYS_STORAGE_KEY = "posechrono_hotkeys";
 
 // ================================================================
 // CONSTANTES SÉMANTIQUES

@@ -2551,3 +2551,572 @@
   right: 0;
   border-radius: 0 4px 4px 0;
 }
+
+/* ================================================================
+   MODAL DES RACCOURCIS CLAVIER
+   ================================================================ */
+
+.hotkeys-container {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.hotkey-category {
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 8px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.hotkey-category-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-primary, #8b5cf6);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 0 0 10px 0;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.hotkey-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.hotkey-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-radius: 6px;
+  transition: background 0.2s ease;
+}
+
+.hotkey-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.hotkey-description {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.8);
+  flex: 1;
+  margin-right: 12px;
+}
+
+.hotkey-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hotkey-value-btn {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  padding: 4px 10px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  min-width: 60px;
+  text-align: center;
+}
+
+.hotkey-value-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: var(--color-primary, #8b5cf6);
+}
+
+.hotkey-value-btn kbd {
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-primary-light, #a5b4fc);
+}
+
+.hotkey-reset-btn {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.4);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  opacity: 1;
+}
+
+.hotkey-reset-btn:hover:not(.disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.hotkey-reset-btn.disabled {
+  opacity: 0.2;
+  cursor: not-allowed;
+}
+
+/* Overlay de capture de touche */
+.hotkey-capture-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10001;
+  backdrop-filter: blur(4px);
+}
+
+.hotkeys-warning-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(5, 8, 12, 0.78);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10002;
+  backdrop-filter: blur(2px);
+}
+
+.hotkeys-warning-dialog {
+  width: min(430px, calc(100vw - 40px));
+  background: linear-gradient(180deg, rgba(19, 23, 31, 0.98) 0%, rgba(14, 18, 24, 0.98) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 12px;
+  padding: 20px 22px;
+  box-shadow: 0 20px 54px rgba(0, 0, 0, 0.58), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.hotkeys-warning-dialog .dialog-container {
+  display: flex;
+  flex-direction: row;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.hotkeys-warning-dialog .image-vue.dialog-icon {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+}
+
+.hotkeys-warning-dialog .image-vue.dialog-icon img {
+  width: 36px;
+  height: 36px;
+  display: block;
+}
+
+.hotkeys-warning-dialog .main {
+  min-width: 0;
+  flex: 1;
+}
+
+.hotkeys-warning-dialog .title {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.94);
+  font-size: 16px;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  font-weight: 600;
+}
+
+.hotkeys-warning-dialog .description {
+  margin: 8px 0 0;
+  color: rgba(255, 255, 255, 0.66);
+  font-size: 13px;
+  line-height: 1.35;
+  white-space: pre-line;
+}
+
+.hotkeys-warning-checkbox {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 12px;
+  user-select: none;
+}
+
+.hotkeys-warning-checkbox-input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: #5ea4ff;
+}
+
+.hotkeys-warning-dialog .action {
+  margin-top: 18px;
+  display: grid;
+  grid-template-columns: 1fr 1.5fr;
+  gap: 10px;
+}
+
+.hotkeys-warning-btn {
+  border-radius: 9px;
+  border: 1px solid transparent;
+  height: 44px;
+  padding: 0 14px;
+  font-size: 14px;
+  line-height: 1.1;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  white-space: nowrap;
+}
+
+.hotkeys-warning-btn-cancel {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.hotkeys-warning-btn-cancel:hover {
+  background: rgba(255, 255, 255, 0.09);
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+.hotkeys-warning-btn-confirm {
+  background: linear-gradient(180deg, #5ea4ff 0%, #4b8ee8 100%);
+  border-color: rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+}
+
+.hotkeys-warning-btn-confirm:hover {
+  filter: brightness(1.07);
+}
+
+.hotkeys-warning-btn:focus-visible {
+  outline: 2px solid rgba(104, 173, 255, 0.9);
+  outline-offset: 2px;
+}
+
+@media (max-width: 720px) {
+  .hotkeys-warning-dialog .title {
+    font-size: 16px;
+  }
+
+  .hotkeys-warning-dialog .description {
+    font-size: 13px;
+  }
+
+  .hotkeys-warning-dialog .action {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .hotkeys-warning-btn {
+    font-size: 13px;
+    height: 40px;
+  }
+}
+
+.hotkey-capture-dialog {
+  background: var(--bg-window, #1c1c1f);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 24px 32px;
+  text-align: center;
+  min-width: 280px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.hotkey-capture-dialog .capture-title {
+  color: rgb(255 255 255 / 85%);
+  font-size: 15px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 0;
+}
+
+.hotkey-capture-dialog .capture-function {
+  color: #646464;
+  font-size: 13px;
+  margin: 0 0 10px 0;
+}
+
+/* Boutons de la capture dialog */
+.capture-buttons {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+
+.capture-buttons button {
+  width: auto;
+  min-width: 80px;
+  align-self: center;
+  margin: 0;
+}
+
+/* Indicateur de raccourci modifié */
+.hotkey-item.hotkey-modified .hotkey-value-btn {
+  border-color: var(--color-primary, #8b5cf6);
+  background: rgba(139, 92, 246, 0.1);
+}
+
+/* Raccourci non assigné */
+.hotkey-value-btn.hotkey-unassigned {
+  border-style: dashed;
+  border-color: rgba(255, 255, 255, 0.15);
+  background: transparent;
+}
+
+.hotkey-value-btn.hotkey-unassigned kbd {
+  color: rgba(255, 255, 255, 0.3);
+  font-style: italic;
+  text-transform: none;
+}
+
+/* Header du modal hotkeys avec search bar */
+#hotkeys-modal .modal-header {
+  flex-wrap: wrap;
+}
+
+/* Barre de recherche (dans le header) */
+.hotkeys-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding-top: 10px;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.hotkeys-search-bar input {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.2s ease;
+}
+
+.hotkeys-search-bar input:focus {
+  border-color: var(--color-primary, #8b5cf6);
+}
+
+.hotkeys-search-bar input::placeholder {
+  color: rgba(255, 255, 255, 0.3);
+}
+
+/* Toggle button group (Name / Key) */
+.hotkeys-search-toggle {
+  display: flex;
+  border-radius: 6px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.search-toggle-btn {
+  background: #2e2e2e;
+  border: none;
+  color: rgb(255 255 255 / 50%);
+  font-size: 11px;
+  font-weight: 500;
+  padding: 8px 11px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.search-toggle-btn:not(:last-child) {
+  border-right: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.search-toggle-btn:hover:not(.active) {
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.search-toggle-btn.active {
+  background: var(--color-primary, #8b5cf6);
+  color: white;
+}
+
+/* Message de conflit */
+.capture-conflict {
+  color: #ef4444;
+  font-size: 12px;
+  margin: 0;
+  padding: 4px 8px;
+  background: rgba(239, 68, 68, 0.1);
+  border-radius: 4px;
+  transition: opacity 0.2s ease;
+}
+
+.capture-conflict.hidden {
+  display: none;
+}
+
+/* Valeur actuelle dans la capture dialog */
+.capture-current {
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 12px;
+  margin: 0;
+}
+
+.capture-current kbd {
+  color: rgba(255, 255, 255, 0.6);
+  font-weight: 500;
+  font-family: inherit;
+}
+
+.hotkey-preview {
+  display: inline-block;
+  background: rgba(255, 255, 255, 0.1);
+  border: 2px solid var(--color-primary, #8b5cf6);
+  border-radius: 8px;
+  padding: 12px 24px;
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--color-primary-light, #a5b4fc);
+  margin-bottom: 16px;
+  min-width: 80px;
+}
+
+/* Flash animation après modification */
+@keyframes hotkey-flash {
+  0% { background: rgba(139, 92, 246, 0.25); }
+  100% { background: transparent; }
+}
+
+.hotkey-item.hotkey-flash {
+  animation: hotkey-flash 0.6s ease-out;
+}
+
+/* Message aucun résultat */
+.hotkeys-no-results {
+  text-align: center;
+  color: rgba(255, 255, 255, 0.35);
+  font-size: 13px;
+  padding: 20px 0;
+  margin: 0;
+}
+
+.hotkeys-no-results.hidden {
+  display: none;
+}
+
+/* Footer discret du modal hotkeys */
+.hotkeys-footer {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+}
+
+.hotkeys-footer-btn {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 12px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.hotkeys-footer-btn:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.hotkeys-reset-all-btn:hover {
+  background: rgba(239, 68, 68, 0.1);
+  color: #f87171;
+}
+
+/* Modal overlay générique */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  backdrop-filter: blur(4px);
+}
+
+.modal-container {
+  background: var(--bg-window, #1c1c1f);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  width: 90%;
+  max-width: 600px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.modal-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 18px;
+  font-weight: 600;
+  color: white;
+  margin: 0;
+}
+
+.modal-title svg {
+  color: var(--color-primary, #8b5cf6);
+}
+
+.modal-close-btn {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal-close-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+}
+
+.modal-body {
+  padding: 20px;
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 16px 20px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.modal-footer {
+  padding: 8px 16px;
+  font-size: 13px;
+}

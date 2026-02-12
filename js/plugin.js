@@ -1415,6 +1415,9 @@ function translateStaticHTML() {
  * Charge le DOM, initialise les gestionnaires, configure les événements
  */
 async function initPlugin() {
+  // Charger les raccourcis clavier personnalisés depuis localStorage
+  loadHotkeysFromStorage();
+
   // Initialiser le gestionnaire de sons
   SoundManager.init();
 
@@ -1820,6 +1823,27 @@ function setupEventListeners() {
     return parts.join(" ");
   }
 
+  // Labels i18n singulier/pluriel via `count` pour la section des plans
+  function getPlanWord(base, count) {
+    const safeCount = Number.isFinite(Number(count)) ? Number(count) : 0;
+
+    if (base === "pose") {
+      return i18next.t("modes.custom.pose", {
+        count: safeCount,
+        defaultValue: safeCount === 1 ? "pose" : "poses",
+      });
+    }
+
+    if (base === "step") {
+      return i18next.t("modes.custom.step", {
+        count: safeCount,
+        defaultValue: safeCount === 1 ? "step" : "steps",
+      });
+    }
+
+    return "";
+  }
+
   // Afficher la liste des plans
   function displaySavedPlans() {
     const plans = loadSessionPlans();
@@ -1832,12 +1856,16 @@ function setupEventListeners() {
       .map((plan, index) => {
         //- ${new Date(plan.date).toLocaleDateString()} pour rajouter la date d'ajout dans la div si besoin
         const totalDuration = calculatePlanDuration(plan.steps);
+        const totalPoses = calculatePlanPoses(plan.steps);
+        const totalSteps = (plan.steps || []).length;
         const durationText = formatDuration(totalDuration);
+        const posesLabel = getPlanWord("pose", totalPoses);
+        const stepsLabel = getPlanWord("step", totalSteps);
         return `
       <div class="plan-item">
         <div class="plan-info">
           <div class="plan-name" data-index="${index}" contenteditable="false" style="cursor: pointer;">${plan.name}</div>
-          <div class="plan-meta">${durationText} - ${plan.steps.length} ${i18next.t("modes.custom.steps", { defaultValue: "step(s)" })}</div>
+          <div class="plan-meta">${durationText} - ${totalPoses} ${posesLabel} - ${totalSteps} ${stepsLabel}</div>
         </div>
         <div class="plan-actions">
           <button type="button" class="plan-btn plan-load-btn" data-index="${index}">${i18next.t("modes.custom.loadPlan", { defaultValue: "Load" })}</button>
@@ -1857,6 +1885,14 @@ function setupEventListeners() {
     plans.splice(index, 1);
     saveSessionPlans(plans);
     displaySavedPlans();
+  }
+
+  // Calculer le total de poses d'un plan (hors pauses)
+  function calculatePlanPoses(steps) {
+    return (steps || []).reduce((total, step) => {
+      if (step.type === "pause") return total;
+      return total + (Number(step.count) || 0);
+    }, 0);
   }
 
   // Ouvrir le modal
@@ -1951,11 +1987,14 @@ function setupEventListeners() {
       // Feedback visuel
       savePlanBtn.textContent = i18next.t("notifications.planSaved");
       setTimeout(() => {
+        const saveBtnLabel = i18next.t("modes.custom.saveBtn", {
+          defaultValue: "Save",
+        });
         savePlanBtn.innerHTML = `
-          <svg xmlns="http://www.w3.org/2000/svg" height="24x" viewBox="0 -960 960 960" width="24px" fill="currentColor">
+          <svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="currentColor">
             <path d="M840-680v480q0 33-23.5 56.5T760-120H200q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h480l160 160Zm-80 34L646-760H200v560h560v-446ZM480-240q50 0 85-35t35-85q0-50-35-85t-85-35q-50 0-85 35t-35 85q0 50 35 85t85 35ZM240-560h360v-160H240v160Zm-40-86v446-560 114Z"/>
           </svg>
-          Sauvegarder
+          ${saveBtnLabel}
         `;
         // Réactiver explicitement l'input
         planNameInput.disabled = false;
@@ -1966,7 +2005,7 @@ function setupEventListeners() {
 
   // Délégation d'événements pour charger/supprimer les plans
   if (savedPlansList) {
-    savedPlansList.addEventListener("click", (e) => {
+    savedPlansList.addEventListener("click", async (e) => {
       const loadBtn = e.target.closest(".plan-load-btn");
       const deleteBtn = e.target.closest(".plan-delete-btn");
       const planName = e.target.closest(".plan-name");
@@ -1982,7 +2021,29 @@ function setupEventListeners() {
         }
       } else if (deleteBtn) {
         const index = parseInt(deleteBtn.dataset.index, 10);
-        deletePlan(index);
+        const plans = loadSessionPlans();
+        const plan = plans[index];
+        if (!plan) return;
+
+        const totalDuration = formatDuration(calculatePlanDuration(plan.steps));
+        const totalPoses = calculatePlanPoses(plan.steps);
+        const stepsCount = (plan.steps || []).length;
+        const posesLabel = getPlanWord("pose", totalPoses);
+        const stepsLabel = getPlanWord("step", stepsCount);
+        const title = i18next.t("modes.custom.managePlans", { defaultValue: "Session Plans" });
+        const message = `${i18next.t("modes.custom.confirmDeletePlan", { defaultValue: "Delete this plan?" })}\n${plan.name} (${totalDuration} - ${totalPoses} ${posesLabel}, ${stepsCount} ${stepsLabel})`;
+
+        const { confirmed } = await showPoseChronoConfirmDialog({
+          title,
+          message,
+          confirmText: i18next.t("notifications.deleteConfirm", { defaultValue: "Delete" }),
+          cancelText: i18next.t("notifications.deleteCancel", { defaultValue: "Cancel" }),
+          container: sessionPlansModal,
+        });
+
+        if (confirmed) {
+          deletePlan(index);
+        }
       } else if (planName && planName.contentEditable === "false") {
         // Activer l'édition du nom
         const originalName = planName.textContent;
@@ -2488,9 +2549,26 @@ function setupEventListeners() {
       closeDrawingMode();
     }
     if (timerDisplay) timerDisplay.classList.remove("timer-paused");
-    if (pauseBadge) pauseBadge.classList.add("hidden");
+
+    // Vérifier si on est déjà sur l'écran settings
+    if (!settingsScreen.classList.contains("hidden")) {
+      // Retour à l'accueil (eagle)
+      if (typeof eagle !== "undefined" && eagle?.window?.hide) {
+        eagle.window.hide();
+      }
+      return;
+    }
+
+    // Sinon, retourner à l'écran settings normalement
     drawingScreen.classList.add("hidden");
+    reviewScreen.classList.add("hidden");
     settingsScreen.classList.remove("hidden");
+  });
+
+  // Clic droit sur le bouton settings ouvre directement le modal des raccourcis
+  settingsBtn.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    showHotkeysModal();
   });
 
   // === FILTRES ET TRANSFORMATIONS ===
@@ -3027,11 +3105,13 @@ function setupEventListeners() {
     }
   });
 
-  // === RACCOURCI TAGS (T) ===
-  document.addEventListener("keydown", (e) => {
-    // Ouvrir la modal tags avec T (si pas en train de taper dans un input)
+  // === RACCOURCI TAGS (désactivé pour l'instant) ===
+  /* document.addEventListener("keydown", (e) => {
+    // Ouvrir la modal tags (si pas en train de taper dans un input)
+    const tagsKey = "T";
+    const pressedKey = e.key.length === 1 ? e.key.toUpperCase() : e.key;
     if (
-      e.code === "KeyT" &&
+      pressedKey === tagsKey &&
       !e.shiftKey &&
       !e.ctrlKey &&
       !e.altKey &&
@@ -3064,7 +3144,7 @@ function setupEventListeners() {
 
       openTagsModal();
     }
-  });
+  }); */
 
   // === MENU CONTEXTUEL SUR L'ÉCRAN SETTINGS (clic droit en dehors du contenu) ===
   const settingsScreenBody = document.getElementById("settings-screen");
@@ -3320,8 +3400,8 @@ function handleKeyboardShortcuts(e) {
       break;
   }
 
-  // === Touches configurables (Grayscale, Blur, Mute, Grid, Silhouette, Sidebar, Info) ===
-  // Grayscale : Y ou Ctrl+Alt+G (comme dans Eagle)
+  // === Touches configurables (Grayscale, Blur, Annotate, Mute, Grid, Silhouette, Sidebar, Info) ===
+  // Grayscale : configurable ou Ctrl+Alt+G (comme dans Eagle)
   if (
     keyLow === hk.GRAYSCALE.toLowerCase() ||
     (e.ctrlKey && e.altKey && keyLow === "g")
@@ -3329,8 +3409,7 @@ function handleKeyboardShortcuts(e) {
     toggleGrayscale();
   } else if (keyLow === hk.BLUR.toLowerCase()) {
     if (!state.isProgressiveBlur && blurBtn) blurBtn.click();
-  } else if (keyLow === "b") {
-    // B pour ouvrir le mode dessin
+  } else if (keyLow === hk.ANNOTATE.toLowerCase()) {
     e.preventDefault();
     if (typeof openDrawingMode === "function") {
       openDrawingMode();
@@ -3347,35 +3426,35 @@ function handleKeyboardShortcuts(e) {
     toggleSidebar();
   } else if (keyLow === hk.INFO.toLowerCase()) {
     toggleImageInfo();
+  } else if (keyLow === hk.TAGS.toLowerCase()) {
+    e.preventDefault();
+    if (typeof openTagsModal === "function") {
+      openTagsModal();
+    }
   }
 
   // === RACCOURCIS VIDÉO (uniquement si vidéo affichée) ===
   if (state.isVideoFile) {
-    // Ralentir (-)
-    if (key === "-" || key === hk.VIDEO_SLOWER) {
+    if (key === hk.VIDEO_SLOWER) {
       e.preventDefault();
       changeVideoSpeed(-1);
       return;
     }
-    // Accélérer (+)
-    if (key === "+" || key === "=" || key === hk.VIDEO_FASTER) {
+    if (key === hk.VIDEO_FASTER) {
       e.preventDefault();
       changeVideoSpeed(1);
       return;
     }
-    // Frame précédente (' ou PageDown)
-    if (key === "'" || key === "PageDown" || key === hk.VIDEO_PREV_FRAME) {
+    if (key === hk.VIDEO_PREV_FRAME) {
       e.preventDefault();
       stepFrame(-1, e.repeat);
       return;
     }
-    // Frame suivante (( ou PageUp)
-    if (key === "(" || key === "PageUp" || key === hk.VIDEO_NEXT_FRAME) {
+    if (key === hk.VIDEO_NEXT_FRAME) {
       e.preventDefault();
       stepFrame(1, e.repeat);
       return;
     }
-    // Toggle boucle (L)
     if (keyLow === hk.VIDEO_LOOP.toLowerCase()) {
       e.preventDefault();
       toggleVideoLoop();
@@ -3387,7 +3466,7 @@ function handleKeyboardShortcuts(e) {
       toggleVideoPlayPause();
       return;
     }
-    // Modal config vidéo (Shift+V)
+    // Modal config vidéo
     if (e.shiftKey && key === hk.VIDEO_CONFIG) {
       e.preventDefault();
       showVideoConfig();
@@ -6123,9 +6202,849 @@ function showSettingsContextMenu(x, y) {
         }
       },
     },
+    "separator",
+    {
+      text: t("controls.configuration", "Configuration"),
+      label: true,
+    },
+    {
+      text: t("hotkeys.configure", "Configurer les raccourcis clavier"),
+      icon: `<svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="currentColor"><path d="M120-160q-33 0-56.5-23.5T40-240v-480q0-33 23.5-56.5T120-800h720q33 0 56.5 23.5T920-720v480q0 33-23.5 56.5T840-160H120Zm0-80h720v-480H120v480Zm200-40h320v-80H320v80ZM200-420h80v-80h-80v80Zm160 0h80v-80h-80v80Zm160 0h80v-80h-80v80Zm160 0h80v-80h-80v80ZM200-560h80v-80h-80v80Zm160 0h80v-80h-80v80Zm160 0h80v-80h-80v80Zm160 0h80v-80h-80v80ZM120-240v-480 480Z"/></svg>`,
+      onClick: () => {
+        showHotkeysModal();
+      },
+    },
   ];
 
   buildContextMenu("settings-context-menu", items, x, y);
+}
+
+// ================================================================
+// MODAL DES RACCOURCIS CLAVIER
+// ================================================================
+
+/**
+ * Raccourcis ayant un modificateur implicite non encodé dans la valeur config.
+ * Par ex. DRAWING_EXPORT vaut "s" mais est déclenché par Ctrl+S dans draw.js.
+ */
+const HOTKEY_IMPLICIT_MODIFIERS = {
+  DRAWING_EXPORT: "Ctrl",
+};
+
+/**
+ * Formate la valeur d'un raccourci pour l'affichage humain.
+ * - Lettre majuscule seule (A-Z) → "Shift + X"
+ * - Raccourci avec modificateur implicite (ex: DRAWING_EXPORT) → "Ctrl + S"
+ * - Combinaisons explicites (Ctrl+Alt+S) → affichées telles quelles avec " + "
+ */
+function formatHotkeyDisplay(hotkeyName, value) {
+  if (!value) return "";
+
+  // Si la valeur contient déjà des modificateurs explicites (ex: "Ctrl+Alt+S")
+  if (value.includes("+")) {
+    return value.split("+").join(" + ");
+  }
+
+  let parts = [];
+
+  // Ajouter les modificateurs implicites
+  const implicitMod = HOTKEY_IMPLICIT_MODIFIERS[hotkeyName];
+  if (implicitMod) {
+    parts.push(implicitMod);
+  }
+
+  // Détecter Shift implicite : lettre majuscule A-Z sans autre modificateur
+  if (!implicitMod && value.length === 1 && value >= "A" && value <= "Z") {
+    parts.push("Shift");
+  }
+
+  // Ajouter la touche elle-même (toujours en majuscule pour l'affichage)
+  parts.push(value.length === 1 ? value.toUpperCase() : value);
+
+  return parts.join(" + ");
+}
+
+/**
+ * Structure des catégories de raccourcis clavier
+ */
+const HOTKEY_CATEGORIES = {
+  general: [
+    "FLIP_H", "GRAYSCALE", "BLUR", "MUTE", "GRID", "GRID_MODAL",
+    "SIDEBAR", "INFO", "SILHOUETTE", "SILHOUETTE_MODAL", "THEME", "ANNOTATE", "TAGS"
+  ],
+  drawing: [
+    "DRAWING_EXPORT", "DRAWING_LIGHTBOX", "DRAWING_CLOSE",
+    "DRAWING_SIZE_DECREASE", "DRAWING_SIZE_INCREASE",
+    "DRAWING_TOOL_PENCIL", "DRAWING_TOOL_ERASER", "DRAWING_TOOL_RECTANGLE",
+    "DRAWING_TOOL_CIRCLE", "DRAWING_TOOL_LINE", "DRAWING_TOOL_ARROW",
+    "DRAWING_TOOL_MEASURE", "DRAWING_TOOL_CALIBRATE", "DRAWING_TOOL_LASER",
+    "DRAWING_TOOL_PROTRACTOR"
+  ],
+  video: [
+    "VIDEO_SLOWER", "VIDEO_FASTER", "VIDEO_PREV_FRAME",
+    "VIDEO_NEXT_FRAME", "VIDEO_LOOP", "VIDEO_CONFIG"
+  ]
+};
+
+/**
+ * Dialog de confirmation stylée (réutilisable dans le plugin + timeline).
+ * @param {Object} options
+ * @param {string} options.title
+ * @param {string} options.message
+ * @param {string} options.confirmText
+ * @param {string} options.cancelText
+ * @param {string} [options.checkboxLabel]
+ * @param {boolean} [options.checkboxChecked]
+ * @param {HTMLElement} [options.container]
+ * @returns {Promise<{confirmed: boolean, checkboxChecked: boolean}>}
+ */
+let poseChronoConfirmDialogQueue = Promise.resolve();
+let poseChronoConfirmDialogCounter = 0;
+
+function showPoseChronoConfirmDialog(options = {}) {
+  const i18nDefault = (key, fallback) => {
+    if (typeof i18next !== "undefined" && i18next.t) {
+      return i18next.t(key, { defaultValue: fallback });
+    }
+    return fallback;
+  };
+
+  const openDialog = () =>
+    new Promise((resolve) => {
+      const {
+        title = "",
+        message = "",
+        confirmText = i18nDefault("notifications.deleteConfirm", "Confirm"),
+        cancelText = i18nDefault("notifications.deleteCancel", "Cancel"),
+        checkboxLabel = "",
+        checkboxChecked = false,
+        container = document.body,
+      } = options;
+
+      const host =
+        container && typeof container.appendChild === "function"
+          ? container
+          : document.body;
+
+      if (!host) {
+        resolve({ confirmed: false, checkboxChecked: false });
+        return;
+      }
+
+      const dialogIndex = ++poseChronoConfirmDialogCounter;
+      const titleId = `posechrono-confirm-title-${dialogIndex}`;
+      const descriptionId = `posechrono-confirm-description-${dialogIndex}`;
+
+      const warningOverlay = document.createElement("div");
+      warningOverlay.className = "hotkeys-warning-overlay";
+
+      const warningDialog = document.createElement("div");
+      warningDialog.className = "hotkeys-warning-dialog";
+      warningDialog.setAttribute("role", "alertdialog");
+      warningDialog.setAttribute("aria-modal", "true");
+      warningDialog.setAttribute("aria-labelledby", titleId);
+      warningDialog.setAttribute("aria-describedby", descriptionId);
+      warningDialog.tabIndex = -1;
+
+      const dialogContainer = document.createElement("div");
+      dialogContainer.className = "dialog-container";
+
+      const iconWrapper = document.createElement("div");
+      iconWrapper.className = "image-vue dialog-icon";
+      const iconImage = document.createElement("img");
+      iconImage.src = "assets/icones/dialog-warning.png";
+      iconImage.alt = "dialog-warning";
+      iconImage.loading = "lazy";
+      iconWrapper.appendChild(iconImage);
+
+      const main = document.createElement("div");
+      main.className = "main";
+
+      const titleEl = document.createElement("div");
+      titleEl.className = "title";
+      titleEl.id = titleId;
+      titleEl.textContent = title;
+
+      const descriptionEl = document.createElement("div");
+      descriptionEl.className = "description";
+      descriptionEl.id = descriptionId;
+      descriptionEl.textContent = message;
+
+      main.appendChild(titleEl);
+      main.appendChild(descriptionEl);
+
+      let checkboxEl = null;
+      if (checkboxLabel) {
+        const checkboxLabelEl = document.createElement("label");
+        checkboxLabelEl.className = "hotkeys-warning-checkbox";
+
+        checkboxEl = document.createElement("input");
+        checkboxEl.type = "checkbox";
+        checkboxEl.className = "hotkeys-warning-checkbox-input";
+        checkboxEl.checked = !!checkboxChecked;
+
+        const checkboxText = document.createElement("span");
+        checkboxText.textContent = checkboxLabel;
+
+        checkboxLabelEl.appendChild(checkboxEl);
+        checkboxLabelEl.appendChild(checkboxText);
+        main.appendChild(checkboxLabelEl);
+      }
+
+      const action = document.createElement("div");
+      action.className = "action";
+
+      const cancelBtn = document.createElement("button");
+      cancelBtn.type = "button";
+      cancelBtn.className = "hotkeys-warning-btn hotkeys-warning-btn-cancel cancel";
+      cancelBtn.textContent = cancelText;
+
+      const confirmBtn = document.createElement("button");
+      confirmBtn.type = "button";
+      confirmBtn.className = "hotkeys-warning-btn hotkeys-warning-btn-confirm ok";
+      confirmBtn.textContent = confirmText;
+
+      action.appendChild(cancelBtn);
+      action.appendChild(confirmBtn);
+      main.appendChild(action);
+
+      dialogContainer.appendChild(iconWrapper);
+      dialogContainer.appendChild(main);
+      warningDialog.appendChild(dialogContainer);
+      warningOverlay.appendChild(warningDialog);
+      host.appendChild(warningOverlay);
+
+      const previouslyFocused = document.activeElement;
+
+      const getFocusableElements = () =>
+        Array.from(
+          warningDialog.querySelectorAll(
+            'button, input, select, textarea, [href], [tabindex]:not([tabindex="-1"])',
+          ),
+        ).filter((el) => !el.disabled);
+
+      const cleanupAndResolve = (confirmed) => {
+        const checked = checkboxEl ? checkboxEl.checked : false;
+        warningOverlay.removeEventListener("click", handleOverlayClick);
+        warningDialog.removeEventListener("keydown", handleKeyDown);
+        cancelBtn.removeEventListener("click", handleCancelClick);
+        confirmBtn.removeEventListener("click", handleConfirmClick);
+        warningOverlay.remove();
+
+        if (previouslyFocused && typeof previouslyFocused.focus === "function") {
+          previouslyFocused.focus();
+        }
+
+        resolve({ confirmed, checkboxChecked: checked });
+      };
+
+      const handleOverlayClick = (e) => {
+        if (e.target === warningOverlay) {
+          cleanupAndResolve(false);
+        }
+      };
+
+      const handleCancelClick = () => cleanupAndResolve(false);
+      const handleConfirmClick = () => cleanupAndResolve(true);
+
+      const handleKeyDown = (e) => {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          e.stopPropagation();
+          cleanupAndResolve(false);
+          return;
+        }
+
+        if (e.key === "Tab") {
+          const focusables = getFocusableElements();
+          if (focusables.length === 0) return;
+
+          const first = focusables[0];
+          const last = focusables[focusables.length - 1];
+          const active = document.activeElement;
+
+          if (e.shiftKey && active === first) {
+            e.preventDefault();
+            last.focus();
+          } else if (!e.shiftKey && active === last) {
+            e.preventDefault();
+            first.focus();
+          }
+          return;
+        }
+
+        if (
+          e.key === "Enter" &&
+          !(e.target instanceof HTMLButtonElement) &&
+          !(e.target instanceof HTMLInputElement)
+        ) {
+          e.preventDefault();
+          e.stopPropagation();
+          cleanupAndResolve(true);
+        }
+      };
+
+      warningOverlay.addEventListener("click", handleOverlayClick);
+      warningDialog.addEventListener("keydown", handleKeyDown);
+      cancelBtn.addEventListener("click", handleCancelClick);
+      confirmBtn.addEventListener("click", handleConfirmClick);
+
+      confirmBtn.focus();
+    });
+
+  const resultPromise = poseChronoConfirmDialogQueue.then(() => openDialog());
+  poseChronoConfirmDialogQueue = resultPromise
+    .then(() => undefined)
+    .catch(() => undefined);
+  return resultPromise;
+}
+
+if (typeof window !== "undefined") {
+  window.showPoseChronoConfirmDialog = showPoseChronoConfirmDialog;
+}
+
+/**
+ * Affiche le modal de configuration des raccourcis clavier
+ */
+function showHotkeysModal() {
+  closeAllContextMenus();
+  
+  // Empêcher l'ouverture si un autre modal est ouvert
+  if (document.getElementById("hotkeys-modal")) return;
+
+  // Créer le modal
+  const modal = document.createElement("div");
+  modal.id = "hotkeys-modal";
+  modal.className = "modal-overlay";
+
+  // Helper pour obtenir les traductions
+  const t = (key, fallback = "") => {
+    if (typeof i18next !== "undefined" && i18next.isInitialized) {
+      return i18next.t(key, { defaultValue: fallback });
+    }
+    return fallback;
+  };
+
+  // Générer le contenu des catégories
+  const generateCategorySection = (categoryKey, hotkeyKeys) => {
+    const categoryTitle = t(`hotkeys.categories.${categoryKey}`, categoryKey);
+
+    const items = hotkeyKeys.map(key => {
+      const currentValue = CONFIG.HOTKEYS[key] ?? "";
+      const description = t(`hotkeys.descriptions.${key}`, key);
+      const defaultValue = DEFAULT_HOTKEYS[key] ?? "";
+      const isDefault = currentValue === defaultValue;
+      const displayValue = currentValue ? formatHotkeyDisplay(key, currentValue) : t('hotkeys.none', '—');
+      const isEmpty = !currentValue;
+
+      return `
+        <div class="hotkey-item ${isDefault ? '' : 'hotkey-modified'} ${isEmpty ? 'hotkey-empty' : ''}" data-key="${key}">
+          <span class="hotkey-description">${description}</span>
+          <div class="hotkey-actions">
+            <button type="button" class="hotkey-value-btn ${isEmpty ? 'hotkey-unassigned' : ''}" data-key="${key}" aria-label="${t('hotkeys.pressKey', 'Press a key')} - ${description}">
+              <kbd>${displayValue}</kbd>
+            </button>
+            <button type="button" class="hotkey-reset-btn ${isDefault ? 'disabled' : ''}" data-key="${key}" data-default="${defaultValue}" ${isDefault ? 'disabled' : ''} aria-label="${t('hotkeys.resetIndividual', 'Reset to default')}" title="${t('hotkeys.resetIndividual', 'Reset to default')}">
+              <svg xmlns="http://www.w3.org/2000/svg" height="16px" viewBox="0 -960 960 960" width="16px" fill="currentColor">
+                <path d="M480-160q-134 0-227-93t-93-227q0-134 93-227t227-93q69 0 132 28.5T720-690v-110h80v280H520v-80h168q-32-56-88.5-88T480-720q-100 0-170 70t-70 170q0 100 70 170t170 70q77 0 139-44t87-116h84q-28 106-114 173t-196 67Z"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      `;
+    }).join("");
+
+    return `
+      <div class="hotkey-category">
+        <h4 class="hotkey-category-title">${categoryTitle}</h4>
+        <div class="hotkey-list">${items}</div>
+      </div>
+    `;
+  };
+
+  // Construire le contenu du modal
+  const categoriesContent = Object.entries(HOTKEY_CATEGORIES)
+    .map(([cat, keys]) => generateCategorySection(cat, keys))
+    .join("");
+
+  modal.innerHTML = `
+    <div class="modal-container" style="max-width: 600px; max-height: 80vh;">
+      <div class="modal-header">
+        <h3 class="modal-title">
+          <svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="currentColor">
+            <path d="M120-160q-33 0-56.5-23.5T40-240v-480q0-33 23.5-56.5T120-800h720q33 0 56.5 23.5T920-720v480q0 33-23.5 56.5T840-160H120Zm0-80h720v-480H120v480Zm200-40h320v-80H320v80ZM200-420h80v-80h-80v80Zm160 0h80v-80h-80v80Zm160 0h80v-80h-80v80Zm160 0h80v-80h-80v80ZM200-560h80v-80h-80v80Zm160 0h80v-80h-80v80Zm160 0h80v-80h-80v80Zm160 0h80v-80h-80v80ZM120-240v-480 480Z"/>
+          </svg>
+          ${t("hotkeys.title", "Keyboard Shortcuts")}
+        </h3>
+        <button type="button" class="modal-close-btn" id="close-hotkeys-modal" aria-label="${t('notifications.deleteCancel', 'Close')}">
+          <svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="currentColor">
+            <path d="m256-200-56-56 224-224-224-224 56-56 224 224 224-224 56 56-224 224 224 224-56 56-224-224-224 224Z"/>
+          </svg>
+        </button>
+        <div class="hotkeys-search-bar">
+          <svg xmlns="http://www.w3.org/2000/svg" height="18px" viewBox="0 -960 960 960" width="18px" fill="currentColor">
+            <path d="M784-120 532-372q-30 24-69 38t-83 14q-109 0-184.5-75.5T120-580q0-109 75.5-184.5T380-840q109 0 184.5 75.5T640-580q0 44-14 83t-38 69l252 252-56 56ZM380-400q75 0 127.5-52.5T560-580q0-75-52.5-127.5T380-760q-75 0-127.5 52.5T200-580q0 75 52.5 127.5T380-400Z"/>
+          </svg>
+          <input type="text" id="hotkeys-search-input" placeholder="${t('hotkeys.search', 'Search shortcuts...')}" autocomplete="off" />
+          <div class="hotkeys-search-toggle">
+            <button type="button" class="search-toggle-btn active" data-mode="name">${t('hotkeys.searchByName', 'Name')}</button>
+            <button type="button" class="search-toggle-btn" data-mode="key">${t('hotkeys.searchByKey', 'Key')}</button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-body" style="overflow-y: auto; max-height: 55vh;">
+        <div class="hotkeys-container">
+          ${categoriesContent}
+        </div>
+        <p class="hotkeys-no-results hidden">${t('hotkeys.noResults', 'No results found.')}</p>
+      </div>
+      <div class="modal-footer hotkeys-footer">
+        <button type="button" class="hotkeys-footer-btn hotkeys-reset-all-btn" id="reset-hotkeys-btn">
+          <svg xmlns="http://www.w3.org/2000/svg" height="14px" viewBox="0 -960 960 960" width="14px" fill="currentColor">
+            <path d="M480-160q-134 0-227-93t-93-227q0-134 93-227t227-93q69 0 132 28.5T720-690v-110h80v280H520v-80h168q-32-56-88.5-88T480-720q-100 0-170 70t-70 170q0 100 70 170t170 70q77 0 139-44t87-116h84q-28 106-114 173t-196 67Z"/>
+          </svg>
+          ${t("hotkeys.reset", "Reset")}
+        </button>
+        <button type="button" class="hotkeys-footer-btn" id="close-hotkeys-btn">
+          ${t("notifications.deleteCancel", "Close")}
+        </button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+
+  // Cleanup unique pour fermer le modal proprement
+  const closeModal = () => {
+    document.removeEventListener("keydown", handleEscape, true);
+    modal.remove();
+  };
+
+  // Fermer avec Escape (capture phase pour intercepter avant les autres handlers)
+  const handleEscape = (e) => {
+    if (e.key === "Escape") {
+      // Ne pas interférer si la capture overlay est ouverte
+      if (
+        document.querySelector(".hotkey-capture-overlay") ||
+        document.querySelector(".hotkeys-warning-overlay")
+      ) return;
+      e.preventDefault();
+      e.stopPropagation();
+      closeModal();
+    }
+  };
+  document.addEventListener("keydown", handleEscape, true);
+
+  modal.querySelector("#close-hotkeys-modal").addEventListener("click", closeModal);
+  modal.querySelector("#close-hotkeys-btn").addEventListener("click", closeModal);
+
+  modal.addEventListener("click", (e) => {
+    if (e.target === modal) closeModal();
+  });
+
+  // Helper pour rafraîchir l'affichage d'un item dans le DOM
+  const refreshHotkeyItem = (item) => {
+    const key = item.dataset.key;
+    const currentValue = CONFIG.HOTKEYS[key] ?? "";
+    const defaultValue = DEFAULT_HOTKEYS[key] ?? "";
+    const isDefault = currentValue === defaultValue;
+    const isEmpty = !currentValue;
+
+    item.querySelector(".hotkey-value-btn kbd").textContent = currentValue ? formatHotkeyDisplay(key, currentValue) : t('hotkeys.none', '—');
+    item.querySelector(".hotkey-value-btn").classList.toggle("hotkey-unassigned", isEmpty);
+    item.classList.toggle("hotkey-modified", !isDefault);
+    item.classList.toggle("hotkey-empty", isEmpty);
+
+    const resetBtn = item.querySelector(".hotkey-reset-btn");
+    if (resetBtn) {
+      resetBtn.classList.toggle("disabled", isDefault);
+      resetBtn.disabled = isDefault;
+    }
+  };
+
+  // Événement pour réinitialiser tous les raccourcis
+  modal.querySelector("#reset-hotkeys-btn").addEventListener("click", async () => {
+    const { confirmed } = await showPoseChronoConfirmDialog({
+      title: t("hotkeys.title", "Keyboard Shortcuts"),
+      message: t("hotkeys.resetAll", "Reset all shortcuts to default?"),
+      confirmText: t("hotkeys.reset", "Reset"),
+      cancelText: t("notifications.deleteCancel", "Cancel"),
+      container: modal,
+    });
+
+    if (confirmed) {
+      Object.keys(DEFAULT_HOTKEYS).forEach(key => {
+        CONFIG.HOTKEYS[key] = DEFAULT_HOTKEYS[key];
+      });
+      try {
+        localStorage.removeItem(HOTKEYS_STORAGE_KEY);
+      } catch (e) {
+        console.error("Error removing hotkeys from localStorage:", e);
+      }
+      // Rafraîchir le DOM sans recréer le modal
+      modal.querySelectorAll(".hotkey-item").forEach(refreshHotkeyItem);
+
+      // Notification Eagle
+      if (typeof eagle !== "undefined" && eagle.notification) {
+        eagle.notification.show({
+          title: t("hotkeys.title", "Keyboard Shortcuts"),
+          body: t("hotkeys.resetDone", "All shortcuts reset to default."),
+          mute: true,
+          duration: 2000,
+        });
+      }
+    }
+  });
+
+  // Événements pour éditer les raccourcis (délégation d'événements)
+  modal.querySelector(".hotkeys-container").addEventListener("click", (e) => {
+    const valueBtn = e.target.closest(".hotkey-value-btn");
+    if (valueBtn) {
+      editHotkey(valueBtn.dataset.key, valueBtn);
+      return;
+    }
+
+    const resetBtn = e.target.closest(".hotkey-reset-btn");
+    if (resetBtn && !resetBtn.disabled) {
+      const hotkeyName = resetBtn.dataset.key;
+      const defaultValue = resetBtn.dataset.default;
+
+      CONFIG.HOTKEYS[hotkeyName] = defaultValue;
+      saveHotkeysToStorage();
+
+      const item = resetBtn.closest(".hotkey-item");
+      if (item) {
+        refreshHotkeyItem(item);
+        item.classList.add("hotkey-flash");
+        setTimeout(() => item.classList.remove("hotkey-flash"), 600);
+      }
+    }
+  });
+
+  // Barre de recherche avec toggle button group
+  const searchInput = modal.querySelector("#hotkeys-search-input");
+  const toggleBtns = modal.querySelectorAll(".search-toggle-btn");
+  let searchMode = "name";
+
+  // Autofocus sur la recherche à l'ouverture du modal
+  requestAnimationFrame(() => {
+    if (searchInput && document.body.contains(searchInput)) {
+      searchInput.focus();
+      searchInput.select();
+    }
+  });
+
+  const performSearch = () => {
+    const query = searchInput.value.toLowerCase().trim();
+    const items = modal.querySelectorAll(".hotkey-item");
+    const categories = modal.querySelectorAll(".hotkey-category");
+
+    items.forEach(item => {
+      if (!query) {
+        item.style.display = "";
+        return;
+      }
+      if (searchMode === "key") {
+        const kbd = item.querySelector("kbd").textContent.toLowerCase();
+        item.style.display = kbd.includes(query) ? "" : "none";
+      } else {
+        const desc = item.querySelector(".hotkey-description").textContent.toLowerCase();
+        item.style.display = desc.includes(query) ? "" : "none";
+      }
+    });
+
+    // Masquer les catégories vides
+    let totalVisible = 0;
+    categories.forEach(cat => {
+      const visibleCount = Array.from(cat.querySelectorAll(".hotkey-item")).filter(
+        item => item.style.display !== "none"
+      ).length;
+      totalVisible += visibleCount;
+      cat.style.display = visibleCount > 0 ? "" : "none";
+    });
+
+    // Afficher le message "aucun résultat"
+    const noResults = modal.querySelector(".hotkeys-no-results");
+    if (noResults) {
+      noResults.classList.toggle("hidden", !query || totalVisible > 0);
+    }
+  };
+
+  toggleBtns.forEach(btn => {
+    btn.addEventListener("click", () => {
+      toggleBtns.forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      searchMode = btn.dataset.mode;
+      performSearch();
+    });
+  });
+
+  searchInput.addEventListener("input", performSearch);
+
+  // Empêcher la propagation du clavier depuis le champ de recherche
+  searchInput.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if (e.key === "Escape") {
+      if (searchInput.value) {
+        searchInput.value = "";
+        performSearch();
+      } else {
+        closeModal();
+      }
+    }
+  });
+}
+
+/**
+ * Sauvegarde les raccourcis clavier personnalisés dans localStorage
+ */
+function saveHotkeysToStorage() {
+  try {
+    const hotkeysToSave = {};
+    Object.keys(DEFAULT_HOTKEYS).forEach(key => {
+      if (CONFIG.HOTKEYS[key] !== DEFAULT_HOTKEYS[key]) {
+        hotkeysToSave[key] = CONFIG.HOTKEYS[key];
+      }
+    });
+    
+    if (Object.keys(hotkeysToSave).length > 0) {
+      localStorage.setItem(HOTKEYS_STORAGE_KEY, JSON.stringify(hotkeysToSave));
+    } else {
+      localStorage.removeItem(HOTKEYS_STORAGE_KEY);
+    }
+  } catch (e) {
+    console.error("Error saving hotkeys to localStorage:", e);
+  }
+}
+
+/**
+ * Charge les raccourcis clavier personnalisés depuis localStorage
+ */
+function loadHotkeysFromStorage() {
+  try {
+    const saved = localStorage.getItem(HOTKEYS_STORAGE_KEY);
+    if (saved) {
+      const hotkeys = JSON.parse(saved);
+      Object.keys(hotkeys).forEach(key => {
+        if (CONFIG.HOTKEYS.hasOwnProperty(key)) {
+          CONFIG.HOTKEYS[key] = hotkeys[key];
+        }
+      });
+    }
+  } catch (e) {
+    console.error("Error loading hotkeys from localStorage:", e);
+  }
+}
+
+/**
+ * Cherche les conflits de raccourcis dans la même catégorie contextuelle
+ * Retourne le nom de la fonction en conflit ou null
+ */
+function findHotkeyConflict(hotkeyName, newValue) {
+  if (!newValue) return null; // Pas de conflit si vide
+
+  // Déterminer la "zone" du raccourci (drawing vs global)
+  const isDrawingKey = hotkeyName.startsWith("DRAWING_");
+
+  // Normaliser pour comparer : le handler utilise toLowerCase() pour les touches simples
+  const normalizeForCompare = (v) => {
+    if (!v) return "";
+    // Les touches avec modifiers (Ctrl+, Alt+, Shift+) sont comparées exactement
+    if (v.includes("+")) return v;
+    // Les touches simples sont comparées en lowercase dans le handler
+    return v.toLowerCase();
+  };
+
+  const normalizedNew = normalizeForCompare(newValue);
+
+  for (const [key, value] of Object.entries(CONFIG.HOTKEYS)) {
+    if (key === hotkeyName) continue;
+    if (!value) continue;
+
+    const normalizedExisting = normalizeForCompare(value);
+    if (normalizedExisting !== normalizedNew) continue;
+
+    // Un raccourci drawing ne peut confliter qu'avec un autre drawing
+    // Un raccourci global ne peut confliter qu'avec un autre global
+    const isOtherDrawing = key.startsWith("DRAWING_");
+    if (isDrawingKey === isOtherDrawing) {
+      return key;
+    }
+  }
+  return null;
+}
+
+/**
+ * Permet d'éditer un raccourci clavier
+ */
+function editHotkey(hotkeyName, buttonElement) {
+  const t = (key, fallback = "") => {
+    if (typeof i18next !== "undefined" && i18next.isInitialized) {
+      return i18next.t(key, { defaultValue: fallback });
+    }
+    return fallback;
+  };
+
+  // Obtenir la description de la fonction et la valeur actuelle
+  const functionName = t(`hotkeys.descriptions.${hotkeyName}`, hotkeyName);
+  const currentValue = CONFIG.HOTKEYS[hotkeyName] ?? "";
+  const currentDisplay = currentValue ? formatHotkeyDisplay(hotkeyName, currentValue) : t('hotkeys.none', '—');
+
+  // Créer un overlay temporaire pour capturer la touche
+  const captureOverlay = document.createElement("div");
+  captureOverlay.className = "hotkey-capture-overlay";
+  captureOverlay.innerHTML = `
+    <div class="hotkey-capture-dialog">
+      <p class="capture-title">${t("hotkeys.pressKey", "Press a key...")}</p>
+      <p class="capture-function">${functionName}</p>
+      <p class="capture-current">${t("hotkeys.current", "Current")}: <kbd>${currentDisplay}</kbd></p>
+      <kbd class="hotkey-preview">...</kbd>
+      <p class="capture-conflict hidden"></p>
+      <div class="capture-buttons">
+        <button type="button" class="guide-add-btn" id="clear-hotkey-capture">
+          ${t("hotkeys.clear", "Clear")}
+        </button>
+        <button type="button" class="guide-add-btn" id="cancel-hotkey-capture">
+          ${t("notifications.deleteCancel", "Cancel")}
+        </button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(captureOverlay);
+
+  const preview = captureOverlay.querySelector(".hotkey-preview");
+  const conflictMsg = captureOverlay.querySelector(".capture-conflict");
+  let capturedKey = null;
+
+  const cleanup = () => {
+    document.removeEventListener("keydown", handleKeyDown, true);
+    captureOverlay.remove();
+  };
+
+  // Appliquer le raccourci capturé
+  const applyHotkey = (newValue) => {
+    // Vérifier les conflits (sauf si on vide le raccourci)
+    if (newValue) {
+      const conflictKey = findHotkeyConflict(hotkeyName, newValue);
+      if (conflictKey) {
+        const conflictName = t(`hotkeys.descriptions.${conflictKey}`, conflictKey);
+        conflictMsg.textContent = t("hotkeys.conflict", `Already used by: ${conflictName}`).replace("{{action}}", conflictName);
+        conflictMsg.classList.remove("hidden");
+        // Ne pas valider, laisser l'utilisateur réessayer
+        capturedKey = null;
+        return;
+      }
+    }
+
+    CONFIG.HOTKEYS[hotkeyName] = newValue;
+    const defaultValue = DEFAULT_HOTKEYS[hotkeyName] ?? "";
+    const isDefault = newValue === defaultValue;
+    const isEmpty = !newValue;
+    const t2 = t; // closure
+
+    buttonElement.querySelector("kbd").textContent = newValue ? formatHotkeyDisplay(hotkeyName, newValue) : t2('hotkeys.none', '—');
+    buttonElement.classList.toggle("hotkey-unassigned", isEmpty);
+
+    // Activer le bouton reset si on n'est plus sur la valeur par défaut
+    const resetBtn = buttonElement.parentElement.querySelector(".hotkey-reset-btn");
+    if (resetBtn) {
+      resetBtn.classList.toggle("disabled", isDefault);
+      resetBtn.disabled = isDefault;
+    }
+
+    // Mettre à jour l'indicateur modifié + flash animation
+    const item = buttonElement.closest(".hotkey-item");
+    if (item) {
+      item.classList.toggle("hotkey-modified", !isDefault);
+      item.classList.toggle("hotkey-empty", isEmpty);
+      // Flash de confirmation
+      item.classList.add("hotkey-flash");
+      setTimeout(() => item.classList.remove("hotkey-flash"), 600);
+    }
+
+    saveHotkeysToStorage();
+    cleanup();
+  };
+
+  // Capturer la touche
+  const handleKeyDown = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    // Ignorer les touches de modification seules
+    if (["Shift", "Control", "Alt", "Meta"].includes(e.key)) {
+      return;
+    }
+
+    if (e.key === "Escape" && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+      cleanup();
+      return;
+    }
+
+    // Construire la représentation de la touche
+    let keyCombo = "";
+    if (e.ctrlKey) keyCombo += "Ctrl+";
+    if (e.altKey) keyCombo += "Alt+";
+
+    // Pour les touches simples, on stocke la casse réelle (e.key)
+    // Shift n'est ajouté comme préfixe que pour les touches spéciales ou combinaisons
+    const specialKeys = ["Enter", "Escape", "Tab", "Space", "Backspace", "Delete",
+      "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
+      "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12",
+      "PageUp", "PageDown", "Home", "End", "Insert"];
+
+    if (specialKeys.includes(e.key)) {
+      if (e.shiftKey) keyCombo += "Shift+";
+      keyCombo += e.key;
+    } else if (e.key.length === 1) {
+      // Pour un caractère simple : stocker tel quel (la casse encode déjà Shift)
+      // Sauf si Ctrl ou Alt sont aussi pressés, là on ajoute Shift explicitement
+      if (e.shiftKey && (e.ctrlKey || e.altKey)) {
+        keyCombo += "Shift+";
+        keyCombo += e.key.toUpperCase();
+      } else {
+        // Stocker e.key tel quel : "a" pour a, "A" pour Shift+A, "é" pour é, etc.
+        keyCombo += e.key;
+      }
+    } else {
+      if (e.shiftKey) keyCombo += "Shift+";
+      keyCombo += e.key;
+    }
+
+    capturedKey = keyCombo;
+    preview.textContent = formatHotkeyDisplay(hotkeyName, capturedKey);
+    conflictMsg.classList.add("hidden");
+
+    // Vérifier immédiatement s'il y a un conflit (feedback visuel)
+    const conflictKey = findHotkeyConflict(hotkeyName, capturedKey);
+    if (conflictKey) {
+      const conflictName = t(`hotkeys.descriptions.${conflictKey}`, conflictKey);
+      conflictMsg.textContent = t("hotkeys.conflict", `Already used by: ${conflictName}`).replace("{{action}}", conflictName);
+      conflictMsg.classList.remove("hidden");
+      // Ne pas auto-valider, laisser l'utilisateur réessayer une autre touche
+      return;
+    }
+
+    // Valider après un court instant pour laisser voir la preview
+    setTimeout(() => {
+      if (capturedKey) {
+        applyHotkey(capturedKey);
+      }
+    }, 150);
+  };
+
+  document.addEventListener("keydown", handleKeyDown, true);
+
+  // Bouton Clear : vider le raccourci
+  captureOverlay.querySelector("#clear-hotkey-capture").addEventListener("click", () => {
+    applyHotkey("");
+  });
+
+  captureOverlay.querySelector("#cancel-hotkey-capture").addEventListener("click", cleanup);
+  captureOverlay.addEventListener("click", (e) => {
+    if (e.target === captureOverlay) cleanup();
+  });
 }
 
 function showProgressiveBlurMenu(x, y) {
@@ -7153,7 +8072,15 @@ function openZoomForImage(image, options = {}) {
       btnDelete.setAttribute("data-tooltip", i18next.t("drawing.deleteImage"));
       btnDelete.innerHTML = ICONS.DELETE;
       btnDelete.onclick = async () => {
-        if (!confirm(i18next.t("drawing.deleteImage"))) return;
+        try {
+          const result = await eagle.dialog.showMessageBox({
+            type: "warning",
+            title: i18next.t("drawing.deleteImage"),
+            message: i18next.t("drawing.deleteImage"),
+            buttons: [i18next.t("notifications.deleteConfirm", "Supprimer"), i18next.t("notifications.deleteCancel", "Annuler")],
+          });
+          if (result.response !== 0) return;
+        } catch (e) { return; }
         await image.moveToTrash();
         onDelete();
       };
@@ -7867,7 +8794,15 @@ function showReview() {
     btnDelete.setAttribute("data-tooltip", i18next.t("drawing.deleteImage"));
     btnDelete.innerHTML = ICONS.DELETE;
     btnDelete.onclick = async () => {
-      if (!confirm(i18next.t("drawing.deleteImage"))) return;
+      try {
+        const result = await eagle.dialog.showMessageBox({
+          type: "warning",
+          title: i18next.t("drawing.deleteImage"),
+          message: i18next.t("drawing.deleteImage"),
+          buttons: [i18next.t("notifications.deleteConfirm", "Supprimer"), i18next.t("notifications.deleteCancel", "Annuler")],
+        });
+        if (result.response !== 0) return;
+      } catch (e) { return; }
       await image.moveToTrash();
       state.imagesSeen.splice(currentZoomIndex, 1);
       renderReviewGrid();
