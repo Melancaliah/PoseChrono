@@ -2385,8 +2385,14 @@
 
 /* Label dans un menu */
 .context-menu-label {
-  font-size: 13px;
-  color: #b5b5b5e6;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.4);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 8px 12px 4px;
+  cursor: default;
+  pointer-events: none;
 }
 
 /* Valeur affichée pour un slider */

@@ -5,6 +5,7 @@
 const CONFIG = {
   enableTimeline: true, // Activer/désactiver le module historique/timeline (default : true)
   timelineVisibleByDefault: false, // Timeline visible par défaut à chaque ouverture (true) ou caché (false) - (default : false)
+  backgroundGrid: true, // Afficher une grille en arrière-plan (default : true)
 
   defaultSessionMode: "classique", // Mode de session par défaut : "classique" | "custom" | "relax" | "memory"
 

@@ -1719,6 +1719,12 @@ async function openDrawingMode() {
     drawingBadge.classList.remove("hidden");
   }
 
+  // Activer visuellement le bouton annotate
+  const annotateBtn = document.getElementById("annotate-btn");
+  if (annotateBtn) {
+    annotateBtn.classList.add("active");
+  }
+
   isDrawingModeActive = true;
   debugLog("Drawing mode: activé");
 }
@@ -1814,6 +1820,12 @@ function closeDrawingMode() {
   const drawingBadge = document.getElementById("drawing-badge");
   if (drawingBadge) {
     drawingBadge.classList.add("hidden");
+  }
+
+  // Désactiver visuellement le bouton annotate
+  const annotateBtn = document.getElementById("annotate-btn");
+  if (annotateBtn) {
+    annotateBtn.classList.remove("active");
   }
 
   debugLog("Drawing mode: désactivé");

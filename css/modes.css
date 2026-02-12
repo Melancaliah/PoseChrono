@@ -50,6 +50,11 @@
 .memory-drawing-time {
   margin-top: 20px;
   margin-bottom: 15px;
+  padding: 15px 0;
+  border-top: 1px dashed rgba(255, 255, 255, 0.1);
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.1);
+  border-right: none;
+  border-left: none;
 }
 
 .drawing-time-controls {
@@ -91,7 +96,9 @@
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: opacity 0.3s ease, backdrop-filter 0.2s ease;
+  transition:
+    opacity 0.3s ease,
+    backdrop-filter 0.2s ease;
   z-index: 10;
 }
 
@@ -132,7 +139,9 @@
 .memory-overlay.peek-content-hidden .memory-overlay-content {
   opacity: 0;
   visibility: hidden;
-  transition: opacity 0.2s ease, visibility 0.2s ease;
+  transition:
+    opacity 0.2s ease,
+    visibility 0.2s ease;
 }
 
 /* ============================================

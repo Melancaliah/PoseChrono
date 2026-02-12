@@ -37,7 +37,7 @@
     "addThesePoses": "これらのポーズを追加",
     "randomShuffle": "ランダム",
     "randomShuffleTooltip": "画像をランダムにシャッフル",
-    "flipRandomly": "画像をランダムに反転 (右クリックで設定)",
+    "flipRandomly": "自動反転",
     "posesOf": "ポーズ、計",
     "clickToEnterValue": "クリックして正確な値を入力",
     "loadedFromSession": "セッションから {{count}} 枚読み込み",
@@ -186,7 +186,11 @@
     "sidebar": "サイドバー切り替え",
     "showTimer": "タイマーを表示",
     "playPauseTooltip": "再生/停止 (スペース)",
-    "spaceKey": "スペース"
+    "spaceKey": "スペース",
+    "appearance": "外観",
+    "showGrid": "背景グリッドを表示",
+    "hideGrid": "背景グリッドを非表示",
+    "changeTheme": "テーマを変更"
   },
   "tags": {
     "manage": "タグを管理",

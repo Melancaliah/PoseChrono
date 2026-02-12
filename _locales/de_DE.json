@@ -186,7 +186,11 @@
     "sidebar": "Seitenleiste umschalten",
     "showTimer": "Timer anzeigen",
     "playPauseTooltip": "Abspielen/Pause (Leertaste)",
-    "spaceKey": "Leertaste"
+    "spaceKey": "Leertaste",
+    "appearance": "Erscheinungsbild",
+    "showGrid": "Hintergrundraster anzeigen",
+    "hideGrid": "Hintergrundraster ausblenden",
+    "changeTheme": "Thema wechseln"
   },
   "tags": {
     "manage": "Tags verwalten",

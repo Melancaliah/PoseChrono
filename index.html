@@ -131,7 +131,13 @@
             </h1>
             <p class="subtitle">Session de modèles vivants pour Eagle</p>
             <div class="setting-group">
-              <p id="folder-info" class="info-text" data-i18n="settings.loadingImages">Chargement des images...</p>
+              <p
+                id="folder-info"
+                class="info-text"
+                data-i18n="settings.loadingImages"
+              >
+                Chargement des images...
+              </p>
             </div>
 
             <!-- Sélection du type de session -->
@@ -168,7 +174,9 @@
                     margin-bottom: 12px;
                   "
                 >
-                  <label data-i18n="settings.numberOfPoses">NOMBRES DE POSES</label>
+                  <label data-i18n="settings.numberOfPoses"
+                    >NOMBRES DE POSES</label
+                  >
                   <button
                     type="button"
                     id="manage-plans-btn"
@@ -186,7 +194,9 @@
                         d="M200-120q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h357l-80 80H200v560h560v-278l80-80v358q0 33-23.5 56.5T760-120H200Zm280-360ZM360-360v-170l367-367q12-12 27-18t30-6q16 0 30.5 6t26.5 18l56 57q11 12 17 26.5t6 29.5q0 15-5.5 29.5T897-728L530-360H360Zm481-424-56-56 56 56ZM440-440h56l232-232-28-28-29-28-231 231v57Zm260-260-29-28 29 28 28 28-28-28Z"
                       />
                     </svg>
-                    <span data-i18n="modes.custom.managePlans">Plans de session</span>
+                    <span data-i18n="modes.custom.managePlans"
+                      >Plans de session</span
+                    >
                   </button>
                 </div>
                 <div class="custom-builder-container">
@@ -195,7 +205,10 @@
                       class="custom-field"
                       data-i18n-tooltip="modes.custom.numberOfRepetitions"
                     >
-                      <label for="custom-count-input" class="field-label" data-i18n="settings.posesLabel"
+                      <label
+                        for="custom-count-input"
+                        class="field-label"
+                        data-i18n="settings.posesLabel"
                         >POSES</label
                       >
                       <input
@@ -213,7 +226,11 @@
                       class="custom-field"
                       data-i18n-tooltip="settings.durationLabel"
                     >
-                      <label class="field-label" data-i18n="settings.durationLabelShort">DURÉE</label>
+                      <label
+                        class="field-label"
+                        data-i18n="settings.durationLabelShort"
+                        >DURÉE</label
+                      >
                       <div class="hms-builder">
                         <div class="time-field">
                           <input
@@ -290,7 +307,10 @@
                 </div>
                 <!-- Liste des étapes personnalisées -->
                 <div id="custom-steps-list" class="steps-queue">
-                  <div class="empty-queue-msg" data-i18n="modes.custom.emptyQueueMsg">
+                  <div
+                    class="empty-queue-msg"
+                    data-i18n="modes.custom.emptyQueueMsg"
+                  >
                     Ajoute des étapes pour construire ta session
                   </div>
                 </div>
@@ -298,15 +318,25 @@
 
               <!-- Mode Mémoire -->
               <div id="mode-memory-settings" class="setting-group fade-out">
-                <label data-i18n="modes.memory.trainingType">TYPE D'ENTRAÎNEMENT</label>
+                <label data-i18n="modes.memory.trainingType"
+                  >TYPE D'ENTRAÎNEMENT</label
+                >
                 <div class="memory-type-selector">
                   <button
                     type="button"
                     class="memory-type-btn active"
                     data-memory-type="flash"
                   >
-                    <div class="memory-type-label" data-i18n="modes.memory.flash">Flash</div>
-                    <div class="memory-type-desc" data-i18n="modes.memory.flashDescription">
+                    <div
+                      class="memory-type-label"
+                      data-i18n="modes.memory.flash"
+                    >
+                      Flash
+                    </div>
+                    <div
+                      class="memory-type-desc"
+                      data-i18n="modes.memory.flashDescription"
+                    >
                       L'image disparaît après quelques secondes
                     </div>
                   </button>
@@ -315,8 +345,16 @@
                     class="memory-type-btn"
                     data-memory-type="progressive"
                   >
-                    <div class="memory-type-label" data-i18n="modes.memory.progressive">Progressif</div>
-                    <div class="memory-type-desc" data-i18n="modes.memory.progressiveDescription">
+                    <div
+                      class="memory-type-label"
+                      data-i18n="modes.memory.progressive"
+                    >
+                      Progressif
+                    </div>
+                    <div
+                      class="memory-type-desc"
+                      data-i18n="modes.memory.progressiveDescription"
+                    >
                       L'image devient floue progressivement
                     </div>
                   </button>
@@ -324,15 +362,34 @@
 
                 <!-- Configuration Flash -->
                 <div id="memory-flash-settings" class="memory-subconfig">
-                  <label
-                    style="
-                      color: #ccc;
-                      font-size: 13px;
-                      margin-bottom: 8px;
-                      display: block;
-                    "
-                    data-i18n="modes.memory.displayDuration">DURÉE D'AFFICHAGE</label
-                  >
+                  <div style="display: flex; gap: 6px; margin-bottom: 4px">
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      height="14px"
+                      viewBox="0 -960 960 960"
+                      width="14px"
+                      fill="currentColor"
+                      style="
+                        color: #ccc;
+                        flex-shrink: 0;
+                        transform: translateY(1px);
+                      "
+                    >
+                      <path
+                        d="M607.5-372.5Q660-425 660-500t-52.5-127.5Q555-680 480-680t-127.5 52.5Q300-575 300-500t52.5 127.5Q405-320 480-320t127.5-52.5Zm-204-51Q372-455 372-500t31.5-76.5Q435-608 480-608t76.5 31.5Q588-545 588-500t-31.5 76.5Q525-392 480-392t-76.5-31.5ZM214-281.5Q94-363 40-500q54-137 174-218.5T480-800q146 0 266 81.5T920-500q-54 137-174 218.5T480-200q-146 0-266-81.5ZM480-500Zm207.5 160.5Q782-399 832-500q-50-101-144.5-160.5T480-720q-113 0-207.5 59.5T128-500q50 101 144.5 160.5T480-280q113 0 207.5-59.5Z"
+                      ></path>
+                    </svg>
+                    <label
+                      style="
+                        color: #ccc;
+                        font-size: 13px;
+                        display: block;
+                        line-height: 1;
+                      "
+                      data-i18n="modes.memory.displayDuration"
+                      >Display duration</label
+                    >
+                  </div>
                   <div class="duration-row">
                     <button
                       type="button"
@@ -390,16 +447,29 @@
 
                   <!-- Temps de dessin -->
                   <div class="memory-drawing-time">
-                    <label
-                      style="
-                        color: #ccc;
-                        font-size: 13px;
-                        margin-bottom: 8px;
-                        display: block;
-                      "
-                    >
-                      <span data-i18n="modes.memory.drawingTime">TEMPS DE DESSIN</span>
-                    </label>
+                    <div style="display: flex; gap: 6px; margin-bottom: 4px">
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        height="14px"
+                        viewBox="0 -960 960 960"
+                        width="14px"
+                        fill="currentColor"
+                      >
+                        <path
+                          d="M200-200h57l391-391-57-57-391 391v57Zm-80 80v-170l528-527q12-11 26.5-17t30.5-6q16 0 31 6t26 18l55 56q12 11 17.5 26t5.5 30q0 16-5.5 30.5T817-647L290-120H120Zm640-584-56-56 56 56Zm-141 85-28-29 57 57-29-28Z"
+                        />
+                      </svg>
+                      <label
+                        style="
+                          color: #ccc;
+                          font-size: 13px;
+                          display: block;
+                          line-height: 1;
+                        "
+                        data-i18n="modes.memory.drawingTime"
+                        >TEMPS DE DESSIN</label
+                      >
+                    </div>
                     <div class="drawing-time-controls">
                       <div
                         class="time-input-group"
@@ -429,7 +499,9 @@
                         class="no-pressure-btn active"
                         id="no-pressure-btn"
                       >
-                        <span data-i18n="modes.memory.noPressure">Sans limite de temps de dessin</span>
+                        <span data-i18n="modes.memory.noPressure"
+                          >Sans limite de temps de dessin</span
+                        >
                       </button>
                     </div>
                   </div>
@@ -446,7 +518,9 @@
                         margin-bottom: 5px;
                       "
                     >
-                      <span data-i18n="modes.memory.numberOfPoses">NOMBRE DE POSES</span>
+                      <span data-i18n="modes.memory.numberOfPoses"
+                        >NOMBRE DE POSES</span
+                      >
                       <span id="memory-poses-value">10</span>
                     </label>
                     <input
@@ -471,8 +545,10 @@
                       display: none;
                     "
                   >
-                    <span style="font-style: italic"
-                      data-i18n="modes.custom.totalDuration">Durée totale de la session :</span
+                    <span
+                      style="font-style: italic"
+                      data-i18n="modes.custom.totalDuration"
+                      >Durée totale de la session :</span
                     >
                     <span
                       id="memory-total-duration-value"
@@ -500,7 +576,8 @@
                       font-size: 13px;
                       margin-bottom: 8px;
                     "
-                    data-i18n="modes.memory.progressiveTimer">CHRONO (FLOU PROGRESSIF)</label
+                    data-i18n="modes.memory.progressiveTimer"
+                    >CHRONO (FLOU PROGRESSIF)</label
                   >
                   <div class="duration-row">
                     <button
@@ -568,7 +645,9 @@
                         margin-bottom: 5px;
                       "
                     >
-                      <span data-i18n="modes.memory.numberOfPoses">NOMBRE DE POSES</span>
+                      <span data-i18n="modes.memory.numberOfPoses"
+                        >NOMBRE DE POSES</span
+                      >
                       <span id="memory-progressive-poses-value">10</span>
                     </label>
                     <input
@@ -626,7 +705,10 @@
                 <!-- Durée personnalisée -->
                 <div class="custom-time-section">
                   <div class="custom-time-inputs">
-                    <div class="time-input-group" data-i18n-tooltip="timer.hours">
+                    <div
+                      class="time-input-group"
+                      data-i18n-tooltip="timer.hours"
+                    >
                       <input
                         type="number"
                         id="hours-input"
@@ -636,7 +718,10 @@
                       />
                       <span class="time-unit">h</span>
                     </div>
-                    <div class="time-input-group" data-i18n-tooltip="timer.minutes">
+                    <div
+                      class="time-input-group"
+                      data-i18n-tooltip="timer.minutes"
+                    >
                       <input
                         type="number"
                         id="minutes-input"
@@ -646,7 +731,10 @@
                       />
                       <span class="time-unit">min</span>
                     </div>
-                    <div class="time-input-group" data-i18n-tooltip="timer.seconds">
+                    <div
+                      class="time-input-group"
+                      data-i18n-tooltip="timer.seconds"
+                    >
                       <input
                         type="number"
                         id="seconds-input"
@@ -665,7 +753,9 @@
             <div id="bloc-settings-bottom">
               <div class="settings-divider"></div>
               <div id="session-settings" class="setting-group">
-                <label class="label-small" data-i18n="settings.sessionOptions">Options de la session</label>
+                <label class="label-small" data-i18n="settings.sessionOptions"
+                  >Options de la session</label
+                >
                 <div class="options-row">
                   <button
                     type="button"
@@ -703,7 +793,7 @@
                         d="M360-120H200q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h160v80H200v560h160v80Zm80 80v-880h80v880h-80Zm160-80v-80h80v80h-80Zm0-640v-80h80v80h-80Zm160 640v-80h80q0 33-23.5 56.5T760-120Zm0-160v-80h80v80h-80Zm0-160v-80h80v80h-80Zm0-160v-80h80v80h-80Zm0-160v-80q33 0 56.5 23.5T840-760h-80Z"
                       />
                     </svg>
-                    <span>Auto-Flip</span>
+                    <span data-i18n="filters.autoFlip">Auto-Flip</span>
                   </button>
                   <button
                     type="button"
@@ -713,7 +803,13 @@
                   ></button>
                 </div>
               </div>
-              <button type="button" id="start-btn" class="start-btn" disabled data-i18n="settings.startSession">
+              <button
+                type="button"
+                id="start-btn"
+                class="start-btn"
+                disabled
+                data-i18n="settings.startSession"
+              >
                 Commencer la session
               </button>
             </div>
@@ -782,7 +878,10 @@
               /></span>
               <h2 data-i18n="drawing.pause">PAUSE</h2>
               <p>
-                <span data-i18n="drawing.nextSeriesIn">Prochaine série dans</span> <span id="pause-timer-display">00:00</span>
+                <span data-i18n="drawing.nextSeriesIn"
+                  >Prochaine série dans</span
+                >
+                <span id="pause-timer-display">00:00</span>
               </p>
             </div>
           </div>
@@ -793,10 +892,18 @@
         <div class="image-container">
           <!-- Conteneur des badges (pause, dessin, etc.) -->
           <div id="badges-container" class="badges-container">
-            <div id="pause-badge" class="status-badge pause-badge hidden" data-i18n="drawing.pause">
+            <div
+              id="pause-badge"
+              class="status-badge pause-badge hidden"
+              data-i18n="drawing.pause"
+            >
               PAUSE
             </div>
-            <div id="drawing-badge" class="status-badge drawing-badge hidden" data-i18n="drawing.drawingBadge">
+            <div
+              id="drawing-badge"
+              class="status-badge drawing-badge hidden"
+              data-i18n="drawing.drawingBadge"
+            >
               DESSIN
             </div>
           </div>
@@ -828,7 +935,8 @@
             <div id="drawing-infos-container" class="drawing-infos-container">
               <div id="drawing-unit-info" class="unit-info hidden">
                 <span class="unit-label"
-                  ><span data-i18n="drawing.unitLabel">Unité:</span> <span id="drawing-unit-value">--</span></span
+                  ><span data-i18n="drawing.unitLabel">Unité:</span>
+                  <span id="drawing-unit-value">--</span></span
                 >
                 <button
                   type="button"
@@ -919,7 +1027,9 @@
             <!-- Écran de masquage pour mode mémoire -->
             <div id="memory-overlay" class="memory-overlay hidden">
               <div class="memory-overlay-content">
-                <p data-i18n="modes.relax.clickToNext">Cliquez pour passer à l'image suivante</p>
+                <p data-i18n="modes.relax.clickToNext">
+                  Cliquez pour passer à l'image suivante
+                </p>
                 <div class="memory-overlay-buttons">
                   <button
                     id="memory-peek-btn"
@@ -1241,7 +1351,9 @@
               <div class="tags-content-wrapper">
                 <div class="tags-groups-sidebar">
                   <div class="group-item active" data-group="all">
-                    <span class="group-name" data-i18n="tags.all">Tous les tags</span>
+                    <span class="group-name" data-i18n="tags.all"
+                      >Tous les tags</span
+                    >
                   </div>
                   <div id="tags-groups-list"></div>
                 </div>
@@ -1259,7 +1371,9 @@
         <div class="review-container">
           <div class="review-header">
             <h2 data-i18n="notifications.sessionFinished">C'est fini !</h2>
-            <p id="review-stats" data-i18n="drawing.noDrawnPoses">Tu as dessiné 0 poses</p>
+            <p id="review-stats" data-i18n="drawing.noDrawnPoses">
+              Tu as dessiné 0 poses
+            </p>
           </div>
           <div class="review-actions">
             <button type="button" id="close-review-btn" class="primary-btn">
@@ -1286,7 +1400,9 @@
         <div class="modal-body">
           <!-- Sauvegarder le plan actuel -->
           <div class="plan-section">
-            <h3 data-i18n="modes.custom.savePlan">Sauvegarder le plan actuel</h3>
+            <h3 data-i18n="modes.custom.savePlan">
+              Sauvegarder le plan actuel
+            </h3>
             <div class="plan-save-form">
               <input
                 type="text"
@@ -1314,7 +1430,12 @@
           <div class="plan-section">
             <h3 data-i18n="modes.custom.savedPlans">Plans sauvegardés</h3>
             <div id="saved-plans-list" class="saved-plans-list">
-              <div class="empty-plans-msg" data-i18n="modes.custom.noPlansSaved">Aucun plan sauvegardé</div>
+              <div
+                class="empty-plans-msg"
+                data-i18n="modes.custom.noPlansSaved"
+              >
+                Aucun plan sauvegardé
+              </div>
             </div>
           </div>
         </div>

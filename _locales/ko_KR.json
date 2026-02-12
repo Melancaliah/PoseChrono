@@ -186,7 +186,11 @@
     "sidebar": "사이드바 전환",
     "showTimer": "타이머 표시",
     "playPauseTooltip": "재생/일시정지 (스페이스)",
-    "spaceKey": "스페이스"
+    "spaceKey": "스페이스",
+    "appearance": "외관",
+    "showGrid": "배경 그리드 표시",
+    "hideGrid": "배경 그리드 숨기기",
+    "changeTheme": "테마 변경"
   },
   "tags": {
     "manage": "태그 관리",

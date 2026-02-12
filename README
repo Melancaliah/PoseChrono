@@ -1,3 +1,0 @@
-For french users : As eagle doesnt support french natively, we have to do a simple mannipulation to "force" PoseChrono to be in french. Just found the plugin folder (execute > %appdata% > eagle > plugin > b459df53-4b7c-4116-a996-647c1ef63dc9). In "_Locales", swap the filenames and rename "en.json" to "en_backup.json" and "fr.json" to "en.json"
-
-

@@ -206,7 +206,11 @@
     "sidebar": "Basculer la barre latérale",
     "showTimer": "Afficher le chrono",
     "playPauseTooltip": "Play/Pause (Espace)",
-    "spaceKey": "Espace"
+    "spaceKey": "Espace",
+    "appearance": "Apparence",
+    "showGrid": "Afficher la grille de fond",
+    "hideGrid": "Masquer la grille de fond",
+    "changeTheme": "Changer de thème"
   },
   "tags": {
     "manage": "Gérer les tags",

@@ -186,7 +186,11 @@
     "sidebar": "Alternar barra lateral",
     "showTimer": "Mostrar cronómetro",
     "playPauseTooltip": "Reproducir/Pausa (Espacio)",
-    "spaceKey": "Espacio"
+    "spaceKey": "Espacio",
+    "appearance": "Apariencia",
+    "showGrid": "Mostrar cuadrícula de fondo",
+    "hideGrid": "Ocultar cuadrícula de fondo",
+    "changeTheme": "Cambiar tema"
   },
   "tags": {
     "manage": "Gestionar etiquetas",

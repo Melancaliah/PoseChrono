@@ -186,7 +186,11 @@
     "sidebar": "切换侧边栏",
     "showTimer": "显示计时器",
     "playPauseTooltip": "播放/暂停 (空格)",
-    "spaceKey": "空格"
+    "spaceKey": "空格",
+    "appearance": "外观",
+    "showGrid": "显示背景网格",
+    "hideGrid": "隐藏背景网格",
+    "changeTheme": "更改主题"
   },
   "tags": {
     "manage": "管理标签",

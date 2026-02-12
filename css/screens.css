@@ -12,7 +12,7 @@
   padding: 40px;
   max-width: 550px;
   width: 90%;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  box-shadow: -1px 8px 20px 11px rgb(0 0 0 / 30%);
   border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
@@ -696,6 +696,11 @@ video {
   width: 100%;
   max-width: 1200px;
   margin: 0 auto;
+  background: var(--bg-window);
+  border-radius: 20px;
+  padding: 40px;
+  box-shadow: -1px 7px 19px 9px rgb(0 0 0 / 20%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .review-grid {
@@ -1089,8 +1094,3 @@ video {
 .zoom-video-controls-bar .video-controls-buttons {
   padding: 6px 0;
 }
-
-/* ============================================
-   FIN DES STYLES SCREENS
-   Les styles du module de dessin ont �t� d�plac�s dans modals.css
-   ============================================ */

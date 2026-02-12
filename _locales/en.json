@@ -186,7 +186,11 @@
     "sidebar": "Toggle sidebar",
     "showTimer": "Show timer",
     "playPauseTooltip": "Play/Pause (Space)",
-    "spaceKey": "Space"
+    "spaceKey": "Space",
+    "appearance": "Appearance",
+    "showGrid": "Show background grid",
+    "hideGrid": "Hide background grid",
+    "changeTheme": "Change theme"
   },
   "tags": {
     "manage": "Manage tags",

@@ -13,6 +13,7 @@
   overflow-y: auto !important;
   overflow-x: hidden;
   display: block;
+  scrollbar-gutter: stable;
 }
 
 #settings-screen > .screen {
@@ -32,7 +33,7 @@
   max-width: 900px;
   margin: 24px auto 0;
   padding: 12px 20px;
-  background: rgba(30, 30, 35, 0.5);
+  background: #1a1a1d;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 10px;
   color: rgba(255, 255, 255, 0.7);
@@ -43,7 +44,7 @@
 }
 
 .timeline-toggle-btn:hover {
-  background: rgba(40, 40, 48, 0.7);
+  background: #1c1c1f;
   border-color: rgba(255, 255, 255, 0.15);
   color: rgba(255, 255, 255, 0.9);
 }
@@ -61,7 +62,7 @@
 }
 
 .timeline-toggle-btn.expanded {
-  background: rgba(30, 30, 35, 0.5);
+  background: #1a1a1d;
   border: 1px solid rgba(255, 255, 255, 0.1);
   color: rgba(187, 187, 187, 0.7);
 }
@@ -98,7 +99,7 @@
 
 /* Container principal */
 .timeline-module {
-  background: rgba(30, 30, 35, 0.6);
+  background: #1c1c1f;
   border-radius: 12px;
   padding: 20px;
   margin: 24px auto;

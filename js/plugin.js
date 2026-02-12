@@ -1098,6 +1098,7 @@ function setupTitlebarControls() {
       if (pauseBadge) pauseBadge.classList.add("hidden");
       drawingScreen.classList.add("hidden");
       reviewScreen.classList.add("hidden");
+      document.body.classList.remove("review-active");
       settingsScreen.classList.remove("hidden");
 
       eagle.window.hide();
@@ -1205,13 +1206,10 @@ let translationsLoaded = false;
 async function loadTranslations() {
   // Si déjà chargé, ne rien faire
   if (translationsLoaded) {
-
     return true;
   }
 
   try {
-
-
     // Charger le fichier de traduction
     const response = await fetch("./_locales/en.json");
     if (!response.ok) {
@@ -1219,7 +1217,6 @@ async function loadTranslations() {
     }
 
     const translations = await response.json();
-
 
     // Initialiser i18next avec les ressources
     if (typeof i18next !== "undefined" && typeof i18next.init === "function") {
@@ -1232,20 +1229,17 @@ async function loadTranslations() {
           },
         },
       });
-
     } else if (
       typeof i18next !== "undefined" &&
       typeof i18next.addResourceBundle === "function"
     ) {
       // Si i18next est déjà initialisé, ajouter juste les ressources
       i18next.addResourceBundle("en", "translation", translations, true, true);
-
     }
 
     translationsLoaded = true;
     return true;
   } catch (error) {
-
     return false;
   }
 }
@@ -1255,11 +1249,8 @@ async function loadTranslations() {
  * Appelé au démarrage de l'application
  */
 function translateStaticHTML() {
-
-
   // Vérifier que i18next est disponible
   if (typeof i18next === "undefined" || typeof i18next.t !== "function") {
-
     return;
   }
 
@@ -1339,17 +1330,13 @@ function translateStaticHTML() {
   // Traduire les boutons de mode
   const modeButtons = document.querySelectorAll(".mode-btn");
 
-
   modeButtons.forEach((btn) => {
     const mode = btn.dataset.mode;
     const modeKey = mode === "classique" ? "classic" : mode;
     try {
       const translated = i18next.t(`modes.${modeKey}.title`);
       btn.textContent = translated;
-
-    } catch (e) {
-
-    }
+    } catch (e) {}
   });
 
   Object.entries(elements).forEach(([selector, config]) => {
@@ -1360,7 +1347,6 @@ function translateStaticHTML() {
           const translated = i18next.t(config.key);
           el.textContent = translated;
           if (selector === "#session-type-section label") {
-
           }
         } else if (config.attr) {
           el.setAttribute(
@@ -1368,11 +1354,8 @@ function translateStaticHTML() {
             config.fn ? config.fn() : i18next.t(config.key),
           );
         }
-      } catch (e) {
-
-      }
+      } catch (e) {}
     } else {
-
     }
   });
 
@@ -1392,9 +1375,7 @@ function translateStaticHTML() {
     const key = el.getAttribute("data-i18n");
     try {
       el.textContent = i18next.t(key);
-    } catch (e) {
-
-    }
+    } catch (e) {}
   });
 
   // Attributs data-i18n-tooltip génériques
@@ -1402,9 +1383,7 @@ function translateStaticHTML() {
     const key = el.getAttribute("data-i18n-tooltip");
     try {
       el.setAttribute("data-tooltip", i18next.t(key));
-    } catch (e) {
-
-    }
+    } catch (e) {}
   });
 
   // Attributs data-i18n-placeholder génériques
@@ -1412,9 +1391,7 @@ function translateStaticHTML() {
     const key = el.getAttribute("data-i18n-placeholder");
     try {
       el.setAttribute("placeholder", i18next.t(key));
-    } catch (e) {
-
-    }
+    } catch (e) {}
   });
 
   // Attributs data-i18n-title génériques
@@ -1422,9 +1399,7 @@ function translateStaticHTML() {
     const key = el.getAttribute("data-i18n-title");
     try {
       el.setAttribute("title", i18next.t(key));
-    } catch (e) {
-
-    }
+    } catch (e) {}
   });
 
   // Mettre à jour la langue du document et le titre
@@ -1433,8 +1408,6 @@ function translateStaticHTML() {
   document.title = `${i18next.t("app.title")} - ${i18next.t("app.subtitle")}`;
   const metaDesc = document.querySelector('meta[name="description"]');
   if (metaDesc) metaDesc.setAttribute("content", i18next.t("app.description"));
-
-
 }
 
 /**
@@ -1667,6 +1640,18 @@ async function initPlugin() {
 
   // === Subscriptions StateManager pour réactivité UI ===
   setupStateSubscriptions();
+
+  // === Initialisation de la grille d'arrière-plan ===
+  initBackgroundGrid();
+}
+
+/**
+ * Initialise la grille d'arrière-plan selon la configuration
+ */
+function initBackgroundGrid() {
+  if (CONFIG?.backgroundGrid) {
+    document.body.classList.add("grid-enabled");
+  }
 }
 
 /**
@@ -1736,6 +1721,7 @@ function setupEventListeners() {
   stopBtn.addEventListener("click", showReview);
   document.getElementById("close-review-btn").addEventListener("click", () => {
     reviewScreen.classList.add("hidden");
+    document.body.classList.remove("review-active");
     settingsScreen.classList.remove("hidden");
   });
 
@@ -2544,11 +2530,19 @@ function setupEventListeners() {
     });
   }
 
-  // Bouton Dessiner / Analyser
+  // Bouton Dessiner / Analyser (toggle)
   if (annotateBtn) {
     annotateBtn.addEventListener("click", () => {
-      if (typeof openDrawingMode === "function") {
-        openDrawingMode();
+      if (typeof isDrawingModeActive !== "undefined" && isDrawingModeActive) {
+        // Mode dessin actif → le fermer
+        if (typeof closeDrawingMode === "function") {
+          closeDrawingMode();
+        }
+      } else {
+        // Mode dessin inactif → l'ouvrir
+        if (typeof openDrawingMode === "function") {
+          openDrawingMode();
+        }
       }
     });
   }
@@ -3071,6 +3065,36 @@ function setupEventListeners() {
       openTagsModal();
     }
   });
+
+  // === MENU CONTEXTUEL SUR L'ÉCRAN SETTINGS (clic droit en dehors du contenu) ===
+  const settingsScreenBody = document.getElementById("settings-screen");
+  if (settingsScreenBody) {
+    settingsScreenBody.addEventListener("contextmenu", (e) => {
+      // Afficher le menu seulement si on clique en dehors du settings-container
+      const target = e.target;
+      const isInsideContainer = target.closest(".settings-container");
+
+      if (isInsideContainer) return;
+
+      e.preventDefault();
+      showSettingsContextMenu(e.clientX, e.clientY);
+    });
+  }
+
+  // === MENU CONTEXTUEL SUR L'ÉCRAN REVIEW (clic droit en dehors du contenu) ===
+  const reviewScreenBody = document.getElementById("review-screen");
+  if (reviewScreenBody) {
+    reviewScreenBody.addEventListener("contextmenu", (e) => {
+      // Afficher le menu seulement si on clique en dehors du review-container
+      const target = e.target;
+      const isInsideContainer = target.closest(".review-container");
+
+      if (isInsideContainer) return;
+
+      e.preventDefault();
+      showSettingsContextMenu(e.clientX, e.clientY);
+    });
+  }
 }
 
 /**
@@ -3691,6 +3715,7 @@ function startSession() {
 
   settingsScreen.classList.add("hidden");
   reviewScreen.classList.add("hidden");
+  document.body.classList.remove("review-active");
   drawingScreen.classList.remove("hidden");
 
   // Re-mélanger les images à chaque nouvelle session si l'option est activée
@@ -4861,6 +4886,14 @@ function buildContextMenu(id, items, x, y, options = {}) {
 
   // Fonction helper pour créer un élément de menu
   const createItem = (config) => {
+    // Item de type "label" (non cliquable, titre de section)
+    if (config.label) {
+      const label = document.createElement("div");
+      label.className = "context-menu-label";
+      label.textContent = config.text;
+      return label;
+    }
+
     const item = document.createElement("div");
     const hasShortcut = !!config.shortcut;
     const isActive = !!config.active;
@@ -5963,7 +5996,7 @@ function getSilhouetteFilterCSS() {
 
 function closeAllContextMenus() {
   const menus = document.querySelectorAll(
-    "#flip-animation-context-menu, #progressive-blur-context-menu, #image-context-menu, #next-image-context-menu, #prev-image-context-menu, #reveal-context-menu, #blur-context-menu, #timer-context-menu, #progressbar-context-menu, #pause-circle-context-menu",
+    "#flip-animation-context-menu, #progressive-blur-context-menu, #image-context-menu, #next-image-context-menu, #prev-image-context-menu, #reveal-context-menu, #blur-context-menu, #timer-context-menu, #progressbar-context-menu, #pause-circle-context-menu, #settings-context-menu",
   );
   menus.forEach((menu) => menu.remove());
 }
@@ -6038,6 +6071,61 @@ function showFlipAnimationMenu(x, y) {
 
   menu.appendChild(option);
   adjustMenuPosition(menu, x, y, true);
+}
+
+/**
+ * Menu contextuel pour l'écran settings (clic droit sur le body)
+ * Permet d'activer/désactiver la grille et changer de thème
+ */
+function showSettingsContextMenu(x, y) {
+  const isGridEnabled = document.body.classList.contains("grid-enabled");
+
+  // Helper pour obtenir les traductions avec fallback
+  const t = (key, fallback) => {
+    if (typeof i18next !== "undefined" && i18next.isInitialized) {
+      return i18next.t(key, { defaultValue: fallback });
+    }
+    return fallback;
+  };
+
+  const items = [
+    {
+      text: t("controls.appearance", "Apparence"),
+      label: true,
+    },
+    {
+      text: isGridEnabled
+        ? t("controls.hideGrid", "Masquer la grille de fond")
+        : t("controls.showGrid", "Afficher la grille de fond"),
+      icon: `<svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="currentColor"><path d="M176-120q-19-4-35.5-20.5T120-176l664-664q21 5 36 20.5t21 35.5L176-120Zm-56-252v-112l356-356h112L120-372Zm0-308v-80q0-33 23.5-56.5T200-840h80L120-680Zm560 560 160-160v80q0 33-23.5 56.5T760-120h-80Zm-308 0 468-468v112L484-120H372Z"/></svg>`,
+      active: isGridEnabled,
+      onClick: () => {
+        document.body.classList.toggle("grid-enabled");
+      },
+    },
+    {
+      text: t("controls.changeTheme", "Changer de thème"),
+      icon: `<svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#e3e3e3"><path d="M346-140 100-386q-10-10-15-22t-5-25q0-13 5-25t15-22l230-229-106-106 62-65 400 400q10 10 14.5 22t4.5 25q0 13-4.5 25T686-386L440-140q-10 10-22 15t-25 5q-13 0-25-5t-22-15Zm47-506L179-432h428L393-646Zm399 526q-36 0-61-25.5T706-208q0-27 13.5-51t30.5-47l42-54 44 54q16 23 30 47t14 51q0 37-26 62.5T792-120Z"/></svg>`,
+      shortcut: CONFIG.HOTKEYS.THEME,
+      onClick: () => {
+        // Cycle vers le thème suivant
+        const currentIndex = THEMES.indexOf(CONFIG.currentTheme);
+        const nextIndex = (currentIndex + 1) % THEMES.length;
+        const nextTheme = THEMES[nextIndex];
+
+        // Appliquer le thème
+        CONFIG.currentTheme = nextTheme;
+        document.documentElement.setAttribute("data-theme", nextTheme);
+
+        // Sauvegarder le thème
+        if (typeof eagle !== "undefined" && eagle?.preferences?.set) {
+          eagle.preferences.set("theme", nextTheme).catch(() => {});
+        }
+      },
+    },
+  ];
+
+  buildContextMenu("settings-context-menu", items, x, y);
 }
 
 function showProgressiveBlurMenu(x, y) {
@@ -7253,6 +7341,7 @@ function showReview() {
   if (pauseBadge) pauseBadge.classList.add("hidden");
   drawingScreen.classList.add("hidden");
   reviewScreen.classList.remove("hidden");
+  document.body.classList.add("review-active");
 
   // Fermer l'image info overlay s'il est ouvert
   const infoOverlay = document.getElementById("image-info-overlay");
@@ -9530,6 +9619,7 @@ async function loadSessionImages(imageIds, options = {}) {
     if (settingsScreen && drawingScreen && reviewScreen) {
       drawingScreen.classList.add("hidden");
       reviewScreen.classList.add("hidden");
+      document.body.classList.remove("review-active");
       settingsScreen.classList.remove("hidden");
 
       // Scroll vers le haut de l'écran settings
@@ -10079,6 +10169,11 @@ window.handleDragEnd = function () {
 };
 
 document.addEventListener("DOMContentLoaded", () => {
+  // Initialisation de la grille d'arrière-plan
+  if (typeof CONFIG !== "undefined" && CONFIG?.backgroundGrid) {
+    document.body.classList.add("grid-enabled");
+  }
+
   const topTimeInputs = document.querySelectorAll(
     "#custom-h-input, #custom-m-input, #custom-s-input",
   );
@@ -10154,10 +10249,7 @@ document.addEventListener("mouseover", (e) => {
         /\(([A-Z0-9+]+)\)/g,
         '<span class="tooltip-shortcut">($1)</span>',
       )
-      .replace(
-        /( - .+)$/,
-        '<span class="tooltip-shortcut">$1</span>',
-      );
+      .replace(/( - .+)$/, '<span class="tooltip-shortcut">$1</span>');
     tooltip.innerHTML = formattedText;
 
     // Détecter si le texte contient un saut de ligne
