@@ -1,0 +1,151 @@
+/* ============================================
+   BARRE DE TITRE PERSONNALISÉE - PoseChrono
+   ============================================ */
+
+/* Masquer la barre de titre personnalisée si frame: true dans manifest.json */
+body:not(.frameless) .custom-titlebar {
+  display: none !important;
+}
+
+header,
+main {
+  color: var(--color-text-primary);
+}
+
+.custom-titlebar {
+  --titlebar-height: 36px;
+
+  -webkit-app-region: drag;
+  user-select: none;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  height: var(--titlebar-height);
+  padding: 0 10px;
+  background: rgba(38, 38, 39, 0.95);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 0;
+  gap: 10px;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 99999;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  pointer-events: auto;
+}
+
+/* Le hover est géré en JavaScript pour éviter les conflits avec webkit-app-region */
+
+/* Zone draggable (logo + titre) */
+.titlebar-drag-zone {
+  /* -webkit-app-region: drag; */
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  height: 100%;
+}
+
+.titlebar-logo {
+  width: 20px;
+  height: 20px;
+  border-radius: 3px;
+  opacity: 0.7;
+  transition: opacity var(--transition-fast);
+}
+
+.titlebar-logo:hover {
+  opacity: 1;
+}
+
+.titlebar-title {
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+  margin: 0;
+  display: flex;
+  align-items: center;
+}
+
+/* Zone des contrôles (boutons) */
+.titlebar-controls {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  height: 100%;
+}
+
+/* Boutons génériques */
+.titlebar-btn {
+  -webkit-app-region: no-drag;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.4);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  padding: 0;
+  margin: 0;
+  border-radius: 6px;
+}
+
+.titlebar-btn svg {
+  width: 16px;
+  height: 16px;
+  stroke-width: 1.5;
+  flex-shrink: 0;
+}
+
+.titlebar-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.titlebar-btn:active {
+  transform: scale(0.95);
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* Pin button */
+.titlebar-btn-pin svg {
+  width: 25px;
+  height: 25px;
+}
+
+.titlebar-btn-pin.active {
+  color: rgba(102, 126, 234, 0.9);
+  background: rgba(102, 126, 234, 0.15);
+}
+
+/* Divider between pin and window controls */
+.titlebar-divider {
+  width: 1px;
+  height: 20px;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 0 4px;
+}
+
+/* Close button - accent rouge discret au hover */
+.titlebar-btn-close svg {
+  width: 27px;
+  height: 27px;
+}
+
+.titlebar-btn-close:hover {
+  color: rgba(255, 100, 100, 0.9);
+  background: rgba(255, 100, 100, 0.1);
+}
+
+.titlebar-btn-close:active {
+  background: rgba(255, 100, 100, 0.15);
+}
+
+/* ============================================
+   HEADER BARRE TITRE (LEGACY - KEPT FOR COMPATIBILITY)
+   ============================================ */

@@ -1,0 +1,28 @@
+{
+  "id": "b459df53-4b7c-4116-a996-647c1ef63dc9",
+  "version": "1.0.0",
+  "platform": "all",
+  "arch": "all",
+  "name": "{{manifest.app.name}}",
+  "logo": "/logo.png",
+  "keywords": ["drawing", "gesture", "pose", "chrono", "timer", "figure"],
+  "devTools": false,
+  "fallbackLanguage": "en",
+  "languages": [
+    "en",
+    "en_US",
+    "es_ES",
+    "zh_CN",
+    "ja_JP",
+    "de_DE",
+    "ko_KR",
+    "ru_RU"
+  ],
+  "main": {
+    "frame": false,
+    "url": "index.html",
+    "width": 1584,
+    "height": 1357,
+    "transparent": true
+  }
+}

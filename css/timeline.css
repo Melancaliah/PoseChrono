@@ -1,0 +1,1197 @@
+/* ================================================================
+   MODULE TIMELINE / HISTORIQUE - PoseChrono
+   ================================================================ */
+
+/* Override pour permettre le scroll dans settings-screen */
+#plugin {
+  height: 100vh;
+  overflow: hidden;
+}
+
+#settings-screen.scrollingbared {
+  height: 100% !important;
+  overflow-y: auto !important;
+  overflow-x: hidden;
+  display: block;
+}
+
+#settings-screen > .screen {
+  height: auto !important;
+  min-height: auto;
+  padding-bottom: 30px;
+}
+
+/* ================================================================
+   BOUTON TOGGLE HISTORIQUE
+   ================================================================ */
+.timeline-toggle-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  max-width: 900px;
+  margin: 24px auto 0;
+  padding: 12px 20px;
+  background: rgba(30, 30, 35, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.timeline-toggle-btn:hover {
+  background: rgba(40, 40, 48, 0.7);
+  border-color: rgba(255, 255, 255, 0.15);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.timeline-toggle-btn:hover svg {
+  fill: var(--color-primary);
+}
+
+.timeline-toggle-btn .chevron {
+  transition: transform 0.3s ease;
+}
+
+.timeline-toggle-btn.expanded .chevron {
+  transform: rotate(180deg);
+}
+
+.timeline-toggle-btn.expanded {
+  background: rgba(30, 30, 35, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(187, 187, 187, 0.7);
+}
+
+.timeline-toggle-btn.expanded svg {
+  fill: #bbbbbbb3;
+}
+
+/* ================================================================
+   CONTENEURS TIMELINE
+   ================================================================ */
+
+/* Conteneur parent (après .screen, dans settings-screen) */
+#timeline-container {
+  width: 100%;
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 0 20px 60px;
+  box-sizing: border-box;
+}
+
+#timeline-container.collapsed {
+  display: none;
+}
+
+/* Conteneur dans l'écran review */
+#timeline-container-review {
+  width: 100%;
+  max-width: 100%;
+  margin: 0 auto;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+/* Container principal */
+.timeline-module {
+  background: rgba(30, 30, 35, 0.6);
+  border-radius: 12px;
+  padding: 20px;
+  margin: 24px auto;
+  max-width: 900px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* Header */
+.timeline-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.timeline-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.timeline-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+  margin-right: 8px;
+}
+
+.timeline-nav-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-primary-light);
+  min-width: 40px;
+  text-align: center;
+}
+
+.timeline-nav-btn {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+  padding: 4px 10px;
+  font-size: 18px;
+  transition: color 0.2s;
+  line-height: 1;
+}
+
+.timeline-nav-btn:hover {
+  color: var(--color-primary-light);
+}
+
+.timeline-stats-summary {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.timeline-streak {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--color-primary-light);
+  font-weight: 500;
+}
+
+.timeline-streak .streak-icon {
+  display: flex;
+  align-items: center;
+}
+
+.timeline-streak .streak-icon svg {
+  fill: rgba(255, 255, 255, 0.5);
+  transition:
+    fill 0.3s ease,
+    filter 0.3s ease;
+}
+
+/* Icône fire orange uniquement si streak > 3 jours */
+.timeline-streak.hot .streak-icon svg {
+  fill: #ff6b35;
+  filter: drop-shadow(0 0 4px rgba(255, 107, 53, 0.6));
+}
+
+/* Icône dans les stats (score) */
+.stat-value .stat-icon {
+  align-items: center;
+  vertical-align: middle;
+}
+
+.stat-value .stat-icon svg {
+  fill: #747474;
+}
+
+.timeline-view-tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.timeline-tab {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.timeline-tab:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.timeline-tab.active {
+  background: var(--bg-primary-subtle);
+  border-color: var(--color-primary);
+  color: var(--color-primary-light);
+}
+
+/* Conteneur Heatmap */
+.timeline-heatmap-container {
+  position: relative;
+}
+
+/* Labels des mois */
+.timeline-months-labels {
+  display: grid;
+  grid-template-columns: repeat(53, 12px);
+  gap: 3px;
+  margin-left: 28px;
+  margin-bottom: 6px;
+  height: 16px;
+}
+
+.month-label {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.5);
+  white-space: nowrap;
+}
+
+/* Grid wrapper */
+.timeline-grid-wrapper {
+  display: flex;
+  gap: 6px;
+}
+
+/* Labels des jours */
+.timeline-day-labels {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-top: 1px;
+}
+
+.timeline-day-labels span {
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.4);
+  height: 12px;
+  line-height: 12px;
+  width: 20px;
+  text-align: right;
+}
+
+/* Grille principale */
+.timeline-grid {
+  display: flex;
+  gap: 3px;
+}
+
+.heatmap-week {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+/* Cellules de la heatmap */
+.heatmap-cell {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.06);
+  transition: all 0.15s ease;
+  cursor: pointer;
+}
+
+.heatmap-cell:hover {
+  transform: scale(1.3);
+  z-index: 10;
+  position: relative;
+}
+
+.heatmap-cell.out-of-range {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.heatmap-cell.out-of-range:hover {
+  transform: none;
+}
+
+.heatmap-cell.today {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+}
+
+/* Niveaux d'activité - Couleurs adaptées au thème (3 niveaux) */
+.heatmap-cell.level-0 {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.heatmap-cell.level-1 {
+  background: var(--bg-primary-hover);
+}
+
+.heatmap-cell.level-2 {
+  background: var(--color-primary-lessintense);
+}
+
+.heatmap-cell.level-3 {
+  background: var(--color-primary);
+}
+
+.heatmap-cell.level-4 {
+  background: var(--color-accentuation1);
+}
+
+/* Footer */
+.timeline-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  position: relative;
+}
+
+/* Légende */
+.timeline-legend {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.legend-label {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.legend-scale {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.legend-text {
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.legend-cell {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+}
+
+.legend-cell.level-0 {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.legend-cell.level-1 {
+  background: var(--bg-primary-hover);
+}
+
+.legend-cell.level-2 {
+  background: var(--color-primary-lessintense);
+}
+
+.legend-cell.level-3 {
+  background: var(--color-primary);
+}
+
+.legend-cell.level-4 {
+  background: var(--color-accentuation1);
+}
+
+/* Bouton de réinitialisation */
+.timeline-reset-btn {
+  position: absolute;
+  bottom: -16px;
+  left: -10px;
+  background: transparent;
+  border: none;
+  padding: 6px;
+  cursor: pointer;
+  opacity: 0.3;
+  transition: opacity 0.2s ease;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+
+.timeline-reset-btn:hover {
+  opacity: 0.8;
+}
+
+.timeline-reset-btn:active {
+  opacity: 1;
+  transform: scale(0.95);
+}
+
+.timeline-reset-btn .reset-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.timeline-reset-btn .reset-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+/* Totaux */
+.timeline-totals {
+  display: flex;
+  gap: 24px;
+}
+
+.timeline-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.timeline-stat .stat-value {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-primary-light);
+}
+
+.timeline-stat .stat-label {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.4);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+/* ================================================================
+   VUE MOIS
+   ================================================================ */
+
+.month-view {
+  flex-direction: column;
+  gap: 8px;
+}
+
+.timeline-day-labels-horizontal {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.timeline-day-labels-horizontal span {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+  text-align: center;
+  font-weight: 500;
+}
+
+.timeline-grid.view-month {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+
+/* Le premier jour commence à la bonne colonne */
+.timeline-grid.view-month .heatmap-cell.month-cell:first-child {
+  grid-column-start: var(--start-col, 1);
+}
+
+.heatmap-cell.month-cell {
+  width: auto;
+  height: 32px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.heatmap-cell.month-cell .day-number {
+  font-size: 11px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.heatmap-cell.month-cell.level-0 .day-number {
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.heatmap-cell.month-cell.empty {
+  background: transparent;
+  pointer-events: none;
+}
+
+.heatmap-cell.month-cell:hover:not(.empty) {
+  transform: scale(1.08);
+}
+
+/* ================================================================
+   VUE SEMAINE
+   ================================================================ */
+
+.timeline-grid.view-week {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 8px;
+}
+
+.heatmap-cell.week-cell {
+  width: auto;
+  height: auto;
+  min-height: 80px;
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.heatmap-cell.week-cell:hover {
+  transform: scale(1.02);
+}
+
+.week-day-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.week-day-name {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.6);
+  text-transform: capitalize;
+}
+
+.week-day-num {
+  font-size: 18px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.week-day-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.week-poses {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-primary-light);
+}
+
+.week-time {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.heatmap-cell.week-cell.level-0 .week-poses,
+.heatmap-cell.week-cell.level-0 .week-time {
+  color: rgba(255, 255, 255, 0.3);
+}
+
+/* Tooltip personnalisé */
+.timeline-tooltip {
+  position: fixed;
+  background: rgba(20, 20, 25, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.9);
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-50%, -100%);
+  transition: opacity 0.15s ease;
+  z-index: 9999;
+  white-space: nowrap;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+  text-align: center;
+  line-height: 1.5;
+}
+
+.timeline-tooltip.visible {
+  opacity: 1;
+}
+
+/* ================================================================
+   RESPONSIVE
+   ================================================================ */
+
+@media (max-width: 900px) {
+  .timeline-module {
+    padding: 16px;
+  }
+
+  .timeline-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .timeline-heatmap-container {
+    overflow-x: auto;
+    padding-bottom: 8px;
+  }
+
+  .timeline-footer {
+    flex-direction: column;
+    gap: 16px;
+    align-items: flex-start;
+  }
+
+  .timeline-totals {
+    width: 100%;
+    justify-content: space-between;
+  }
+}
+
+/* ================================================================
+   ANIMATIONS
+   ================================================================ */
+
+@keyframes timeline-cell-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.1);
+  }
+}
+
+.heatmap-cell.just-added {
+  animation: timeline-cell-pulse 0.5s ease;
+}
+
+/* ================================================================
+   MODAL DE DÉTAIL JOURNÉE
+   ================================================================ */
+
+.timeline-day-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+.timeline-day-modal.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.timeline-day-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+}
+
+.timeline-day-modal-content {
+  position: relative;
+  background: var(--bg-primary, #1a1a1f);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  width: 90%;
+  max-width: 500px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  transform: scale(0.95);
+  transition: transform 0.2s ease;
+}
+
+.timeline-day-modal.visible .timeline-day-modal-content {
+  transform: scale(1);
+}
+
+.timeline-day-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 24px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.timeline-day-modal-header h3 {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary, #fff);
+  margin: 0;
+}
+
+.timeline-day-modal-close {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  transition: all 0.2s;
+}
+
+.timeline-day-modal-close:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.timeline-day-modal-close svg {
+  width: 20px;
+  height: 20px;
+}
+
+.timeline-day-modal-body {
+  padding: 20px 24px;
+  overflow-y: auto;
+}
+
+/* Résumé de la journée */
+.day-summary {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 32px;
+  padding: 16px 48px 16px 16px;
+  border-radius: 12px;
+  margin-bottom: 20px;
+  position: relative;
+}
+
+.day-summary-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.day-summary-item .stat-icon {
+  width: 24px;
+  height: 24px;
+  color: var(--color-primary, #667eea);
+  margin-bottom: 4px;
+}
+
+.day-summary-item .stat-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.day-summary-item .stat-value {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary, #fff);
+}
+
+.day-summary-item .stat-label {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Liste des sessions */
+.day-sessions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.day-detail-session {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+
+.session-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.session-number {
+  font-size: 11px;
+  opacity: 0.2;
+}
+
+.session-time {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.6);
+  font-variant-numeric: tabular-nums;
+}
+
+.session-mode {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+  text-transform: capitalize;
+  margin-left: auto;
+}
+
+.session-stats {
+  display: flex;
+  gap: 16px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.session-poses {
+  color: var(--color-primary-light, #a5b4fc);
+}
+
+.session-duration {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+/* Indicateur sur le nombre de poses pour les sessions custom */
+.session-poses.has-custom-structure {
+  position: relative;
+  cursor: help;
+  border-bottom: 1px dashed var(--color-primary);
+  padding-bottom: 1px;
+}
+
+.session-poses.has-custom-structure:hover {
+  color: var(--color-primary-light, #a5b4fc);
+}
+
+/* Tooltip de structure custom - liste verticale */
+.timeline-custom-tooltip {
+  position: fixed;
+  background: rgb(29, 29, 32);
+  border: 1px solid rgb(104 104 104 / 40%);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.9);
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-50%, 0);
+  transition: opacity 0.15s ease;
+  z-index: 10001;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  min-width: 140px;
+}
+
+.timeline-custom-tooltip.visible {
+  opacity: 1;
+}
+
+.timeline-custom-tooltip::before {
+  content: "";
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-bottom-color: rgb(104 104 104 / 40%);
+}
+
+.timeline-custom-tooltip::after {
+  content: "";
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-bottom-color: rgba(30, 30, 40, 0.98);
+  margin-bottom: -1px;
+}
+
+.timeline-custom-tooltip .custom-structure-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.5);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+  padding-bottom: 6px;
+}
+
+.timeline-custom-tooltip .custom-step {
+  display: block;
+  padding: 10px 0;
+  line-height: 1.4;
+  border-bottom: solid 1px rgba(159, 159, 159, 0.1);
+}
+
+.timeline-custom-tooltip .custom-step.pose {
+  color: rgba(255, 255, 255, 0.9);
+  font-weight: 500;
+}
+
+.timeline-custom-tooltip .custom-step.pause {
+  color: rgba(255, 255, 255, 0.4);
+  position: relative;
+}
+
+.timeline-custom-tooltip .custom-step.pause::after {
+  content: ")";
+}
+.timeline-custom-tooltip .custom-step.pause::before {
+  content: "(";
+}
+
+.timeline-custom-tooltip .custom-step:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+}
+
+/* État vide */
+.day-detail-empty {
+  text-align: center;
+  padding: 40px 20px;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 14px;
+}
+
+/* Bouton de suppression d'une journée */
+.day-delete-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: transparent;
+  border: none;
+  padding: 6px;
+  cursor: pointer;
+  opacity: 0.4;
+  transition: all 0.2s ease;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.day-delete-btn:hover {
+  opacity: 0.9;
+}
+
+.day-delete-btn:active {
+  transform: scale(0.95);
+}
+
+.day-delete-btn .delete-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: rgba(135, 135, 135, 0.8);
+}
+
+.day-delete-btn .delete-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+/* Curseur pointeur sur les cellules cliquables */
+.heatmap-cell {
+  cursor: pointer;
+}
+
+/* ================================================================
+   MODE ALT+CLIC SUPPRESSION SESSION
+   ================================================================ */
+
+.day-detail-session {
+  position: relative;
+  transition: all 0.2s ease;
+}
+
+.session-delete-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(239, 68, 68, 0.9);
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+  z-index: 10;
+  cursor: pointer;
+}
+
+.session-delete-overlay .delete-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: white;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.session-delete-overlay .delete-hint svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* Quand Alt est pressé et qu'on survole une session spécifique */
+.timeline-day-modal.alt-pressed .day-detail-session {
+  cursor: pointer;
+}
+
+.timeline-day-modal.alt-pressed .day-detail-session:hover {
+  transform: scale(0.98);
+}
+
+.timeline-day-modal.alt-pressed
+  .day-detail-session:hover
+  .session-delete-overlay {
+  opacity: 1;
+}
+
+/* Animation au clic */
+.timeline-day-modal.alt-pressed .day-detail-session:hover:active {
+  transform: scale(0.95);
+}
+
+/* ================================================================
+   SESSION IMAGES - WRAPPER ET INDICATEUR VIDÉO
+   ================================================================ */
+
+.session-image-wrapper {
+  position: relative;
+  display: inline-block;
+  width: 48px;
+  height: 48px;
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+/* Images de la session */
+.session-images {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.session-images img {
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  transition: ease all 0.2s;
+}
+
+.session-images img:hover {
+  border: solid 1px var(--color-primary);
+}
+
+.session-images img:active {
+  transform: scale(0.95);
+}
+
+.more-images {
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px dashed rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.6);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  padding: 0;
+}
+
+.more-images:hover {
+  background: rgba(102, 126, 234, 0.2);
+  border-color: rgba(102, 126, 234, 0.5);
+  color: var(--color-primary-light, #a5b4fc);
+}
+
+.more-images:active {
+  transform: scale(0.95);
+}
+
+/* Images supplémentaires après expansion */
+.session-images[data-expanded="true"] img {
+  animation: fadeInImage 0.2s ease;
+}
+
+@keyframes fadeInImage {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Indicateur vidéo */
+.video-thumb-indicator {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.4);
+  border-radius: 6px;
+  pointer-events: none;
+}
+
+.video-thumb-indicator svg {
+  width: 20px;
+  height: 20px;
+  fill: white;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.5));
+}
+
+/* ================================================================
+   BOUTON RÉUTILISER SESSION
+   ================================================================ */
+
+.session-reuse-btn {
+  background: transparent;
+  border: none;
+  padding: 4px 8px;
+  cursor: pointer;
+  opacity: 0.4;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto; /* Pousse à droite */
+}
+
+.session-reuse-btn:hover {
+  opacity: 0.9;
+}
+
+.session-reuse-btn:hover .reuse-icon {
+  color: var(--color-primary, #667eea);
+}
+
+.session-reuse-btn:active {
+  transform: scale(0.95);
+}
+
+.reuse-icon {
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.reuse-icon svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+}

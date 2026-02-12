@@ -1,0 +1,22 @@
+TO DO LIST POSE CHRONO :
+
+=== BUGS ===
+
+ - utiliser le bouton clear fait buger la table lumineuse
+
+ === TRANSLATION ===
+
+-auto-flip ?
+
+=== FEATURES ===
+
+- rotate canvas ? 
+- support more video format ?
+- layers for drawing ? 
+- brush textures/styles ?
+- super gomme
+- settings dans eagle
+- edit rectangle corners
+- more ??
+
+=== OPTIMISATION ===
