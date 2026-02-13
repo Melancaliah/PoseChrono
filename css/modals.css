@@ -119,6 +119,93 @@
   border-color: var(--color-primary);
 }
 
+/* Focus clavier explicite dans les modaux (override du reset global) */
+.modal button:focus-visible,
+.modal input:focus-visible,
+.modal [tabindex]:focus-visible,
+.modal-overlay button:focus-visible,
+.modal-overlay input:focus-visible,
+.modal-overlay [tabindex]:focus-visible,
+.timeline-day-modal button:focus-visible,
+.timeline-day-modal [tabindex]:focus-visible {
+  outline: 2px solid rgba(80, 142, 230, 0.85) !important;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 2px rgba(80, 142, 230, 0.25) !important;
+}
+
+/* ============================================
+   TOASTS (UNDO / FEEDBACK)
+   ============================================ */
+
+.pc-toast-container {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 4100;
+  pointer-events: none;
+}
+
+.pc-toast {
+  min-width: 280px;
+  max-width: 460px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(17, 21, 29, 0.96);
+  color: #e8ebf1;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 0.18s ease, transform 0.18s ease;
+  pointer-events: auto;
+}
+
+.pc-toast.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.pc-toast-message {
+  font-size: 13px;
+  line-height: 1.35;
+  color: inherit;
+}
+
+.pc-toast-action {
+  flex-shrink: 0;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.07);
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.pc-toast-action:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.pc-toast-success {
+  border-color: rgba(50, 184, 120, 0.45);
+}
+
+.pc-toast-error {
+  border-color: rgba(244, 63, 94, 0.45);
+}
+
+.pc-toast-info {
+  border-color: rgba(80, 142, 230, 0.45);
+}
+
 /* ============================================
    MODAL PLANS DE SESSION
    ============================================ */
@@ -2395,6 +2482,14 @@
   pointer-events: none;
 }
 
+.context-menu-label.context-menu-label-normal {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.86);
+  padding: 6px 0;
+}
+
 /* Valeur affichée pour un slider */
 .context-menu-value {
   font-size: 12px;
@@ -2569,21 +2664,49 @@
   border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
+.hotkey-category-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  margin: 0 0 10px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding-bottom: 8px;
+}
+
 .hotkey-category-title {
   font-size: 12px;
   font-weight: 600;
   color: var(--color-primary, #8b5cf6);
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  margin: 0 0 10px 0;
-  padding-bottom: 8px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  margin: 0;
+}
+
+.hotkey-category-chevron {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 14px;
+  line-height: 1;
+  transition: transform 0.16s ease;
+}
+
+.hotkey-category.collapsed .hotkey-category-chevron {
+  transform: rotate(-90deg);
 }
 
 .hotkey-list {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.hotkey-category.collapsed .hotkey-list {
+  display: none;
 }
 
 .hotkey-item {

@@ -1719,6 +1719,8 @@ function setupStateSubscriptions() {
  * Configure tous les écouteurs d'événements
  */
 function setupEventListeners() {
+  initGlobalModalKeyboardSupport();
+
   // === NAVIGATION PRINCIPALE ===
   startBtn.addEventListener("click", startSession);
   stopBtn.addEventListener("click", showReview);
@@ -1887,6 +1889,52 @@ function setupEventListeners() {
     displaySavedPlans();
   }
 
+  // Suppression avec corbeille logique (undo 10s)
+  function deletePlanWithUndo(index) {
+    const plans = loadSessionPlans();
+    if (index < 0 || index >= plans.length) return;
+
+    const deletedPlan = plans[index];
+    const safeIndex = index;
+    const actionId = `plan-delete-${Date.now()}-${index}`;
+
+    // Suppression immédiate de l'UI, restauration possible pendant 10s
+    plans.splice(index, 1);
+    saveSessionPlans(plans);
+    displaySavedPlans();
+
+    const undoLabel = i18next.t("notifications.undo", { defaultValue: "Undo" });
+    const deletedMsg = i18next.t("notifications.deleteQueued", {
+      defaultValue: "Deleted. Undo available for 10 seconds.",
+    });
+
+    if (typeof window.schedulePoseChronoUndoAction === "function") {
+      window.schedulePoseChronoUndoAction({
+        id: actionId,
+        timeoutMs: 10000,
+        message: deletedMsg,
+        undoLabel,
+        onUndo: () => {
+          const currentPlans = loadSessionPlans();
+          const restoreAt = Math.max(0, Math.min(safeIndex, currentPlans.length));
+          currentPlans.splice(restoreAt, 0, deletedPlan);
+          saveSessionPlans(currentPlans);
+          displaySavedPlans();
+
+          if (typeof window.showPoseChronoToast === "function") {
+            window.showPoseChronoToast({
+              type: "success",
+              message: i18next.t("notifications.undoApplied", {
+                defaultValue: "Action undone.",
+              }),
+              duration: 2000,
+            });
+          }
+        },
+      });
+    }
+  }
+
   // Calculer le total de poses d'un plan (hors pauses)
   function calculatePlanPoses(steps) {
     return (steps || []).reduce((total, step) => {
@@ -2042,7 +2090,7 @@ function setupEventListeners() {
         });
 
         if (confirmed) {
-          deletePlan(index);
+          deletePlanWithUndo(index);
         }
       } else if (planName && planName.contentEditable === "false") {
         // Activer l'édition du nom
@@ -6273,7 +6321,7 @@ const HOTKEY_CATEGORIES = {
     "SIDEBAR", "INFO", "SILHOUETTE", "SILHOUETTE_MODAL", "THEME", "ANNOTATE", "TAGS"
   ],
   drawing: [
-    "DRAWING_EXPORT", "DRAWING_LIGHTBOX", "DRAWING_CLOSE",
+    "DRAWING_EXPORT", "DRAWING_LIGHTBOX",
     "DRAWING_SIZE_DECREASE", "DRAWING_SIZE_INCREASE",
     "DRAWING_TOOL_PENCIL", "DRAWING_TOOL_ERASER", "DRAWING_TOOL_RECTANGLE",
     "DRAWING_TOOL_CIRCLE", "DRAWING_TOOL_LINE", "DRAWING_TOOL_ARROW",
@@ -6285,6 +6333,8 @@ const HOTKEY_CATEGORIES = {
     "VIDEO_NEXT_FRAME", "VIDEO_LOOP", "VIDEO_CONFIG"
   ]
 };
+
+const NON_CUSTOMIZABLE_HOTKEYS = new Set(["DRAWING_CLOSE"]);
 
 /**
  * Dialog de confirmation stylée (réutilisable dans le plugin + timeline).
@@ -6300,6 +6350,248 @@ const HOTKEY_CATEGORIES = {
  */
 let poseChronoConfirmDialogQueue = Promise.resolve();
 let poseChronoConfirmDialogCounter = 0;
+const poseChronoUndoTimers = new Map();
+
+function isElementActuallyVisible(el) {
+  if (!el) return false;
+  if (el.classList && el.classList.contains("hidden")) return false;
+  const style = window.getComputedStyle(el);
+  return style.display !== "none" && style.visibility !== "hidden";
+}
+
+function getFocusableElementsIn(container) {
+  if (!container) return [];
+  return Array.from(
+    container.querySelectorAll(
+      'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
+    ),
+  ).filter((el) => isElementActuallyVisible(el));
+}
+
+function getTopOpenModal() {
+  const candidates = Array.from(
+    document.querySelectorAll(
+      ".hotkey-capture-overlay, .hotkeys-warning-overlay, .timeline-day-modal, .modal-overlay, .modal",
+    ),
+  ).filter((el) => isElementActuallyVisible(el));
+
+  if (candidates.length === 0) return null;
+
+  const withZ = candidates.map((el) => {
+    const z = Number.parseInt(window.getComputedStyle(el).zIndex, 10);
+    return { el, z: Number.isFinite(z) ? z : 0 };
+  });
+  withZ.sort((a, b) => a.z - b.z);
+  return withZ[withZ.length - 1].el;
+}
+
+function getModalFocusRoot(modal) {
+  if (!modal) return null;
+  return (
+    modal.querySelector(
+      ".hotkey-capture-dialog, .hotkeys-warning-dialog, .timeline-day-modal-content, .modal-container, .modal-content",
+    ) || modal
+  );
+}
+
+let modalKeyboardSupportInitialized = false;
+function initGlobalModalKeyboardSupport() {
+  if (modalKeyboardSupportInitialized || typeof document === "undefined") return;
+  modalKeyboardSupportInitialized = true;
+
+  document.addEventListener(
+    "keydown",
+    (e) => {
+      const modal = getTopOpenModal();
+      if (!modal) return;
+
+      const focusRoot = getModalFocusRoot(modal);
+      const focusables = getFocusableElementsIn(focusRoot);
+
+      if (e.key === "Tab") {
+        if (focusables.length === 0) {
+          e.preventDefault();
+          return;
+        }
+
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        const active = document.activeElement;
+        const activeInside = focusRoot && focusRoot.contains(active);
+
+        if (!activeInside) {
+          e.preventDefault();
+          first.focus();
+          return;
+        }
+
+        if (e.shiftKey && active === first) {
+          e.preventDefault();
+          last.focus();
+          return;
+        }
+
+        if (!e.shiftKey && active === last) {
+          e.preventDefault();
+          first.focus();
+          return;
+        }
+
+        return;
+      }
+
+      if (e.key === "Escape") {
+        const closeBtn = modal.querySelector(
+          '[data-modal-close="true"], .modal-close-btn, #close-hotkeys-btn, #close-tags-modal, #close-plans-modal, [data-action="close"], #cancel-export',
+        );
+        if (closeBtn && typeof closeBtn.click === "function") {
+          e.preventDefault();
+          e.stopPropagation();
+          closeBtn.click();
+        }
+        return;
+      }
+
+      if (e.key === "Enter" && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        const target = e.target;
+        if (
+          target instanceof HTMLInputElement ||
+          target instanceof HTMLTextAreaElement ||
+          target instanceof HTMLSelectElement ||
+          target instanceof HTMLButtonElement ||
+          (target && target.isContentEditable)
+        ) {
+          return;
+        }
+
+        const primaryBtn = modal.querySelector(
+          '[data-modal-primary="true"], .hotkeys-warning-btn-confirm, .ok, #save-plan-btn, #create-tag-btn',
+        );
+        if (primaryBtn && !primaryBtn.disabled && typeof primaryBtn.click === "function") {
+          e.preventDefault();
+          e.stopPropagation();
+          primaryBtn.click();
+        }
+      }
+    },
+    true,
+  );
+}
+
+/**
+ * Toast unifié (info/success/error) avec action optionnelle.
+ * @param {Object} options
+ * @param {"info"|"success"|"error"} [options.type]
+ * @param {string} options.message
+ * @param {string} [options.actionLabel]
+ * @param {Function} [options.onAction]
+ * @param {number} [options.duration]
+ */
+function showPoseChronoToast(options = {}) {
+  const {
+    type = "info",
+    message = "",
+    actionLabel = "",
+    onAction = null,
+    duration = 3000,
+  } = options;
+
+  let container = document.getElementById("posechrono-toast-container");
+  if (!container) {
+    container = document.createElement("div");
+    container.id = "posechrono-toast-container";
+    container.className = "pc-toast-container";
+    document.body.appendChild(container);
+  }
+
+  const toast = document.createElement("div");
+  toast.className = `pc-toast pc-toast-${type}`;
+
+  const messageEl = document.createElement("span");
+  messageEl.className = "pc-toast-message";
+  messageEl.textContent = message;
+  toast.appendChild(messageEl);
+
+  if (actionLabel && typeof onAction === "function") {
+    const actionBtn = document.createElement("button");
+    actionBtn.type = "button";
+    actionBtn.className = "pc-toast-action";
+    actionBtn.textContent = actionLabel;
+    actionBtn.addEventListener("click", () => {
+      try {
+        onAction();
+      } catch (e) {
+        console.error("[Toast] action error:", e);
+      }
+      toast.classList.remove("visible");
+      setTimeout(() => toast.remove(), 180);
+    });
+    toast.appendChild(actionBtn);
+  }
+
+  container.appendChild(toast);
+  requestAnimationFrame(() => toast.classList.add("visible"));
+
+  setTimeout(() => {
+    toast.classList.remove("visible");
+    setTimeout(() => toast.remove(), 180);
+  }, duration);
+}
+
+/**
+ * Planifie une action supprimée avec fenêtre d'annulation.
+ * @param {Object} options
+ * @param {string} options.id
+ * @param {number} [options.timeoutMs]
+ * @param {Function} options.onUndo
+ * @param {Function} [options.onCommit]
+ * @param {string} options.message
+ * @param {string} options.undoLabel
+ */
+function schedulePoseChronoUndoAction(options = {}) {
+  const {
+    id,
+    timeoutMs = 10000,
+    onUndo,
+    onCommit = null,
+    message,
+    undoLabel,
+  } = options;
+
+  if (!id || typeof onUndo !== "function") return;
+
+  if (poseChronoUndoTimers.has(id)) {
+    clearTimeout(poseChronoUndoTimers.get(id));
+    poseChronoUndoTimers.delete(id);
+  }
+
+  const timer = setTimeout(() => {
+    poseChronoUndoTimers.delete(id);
+    if (typeof onCommit === "function") {
+      try {
+        onCommit();
+      } catch (e) {
+        console.error("[Undo] commit error:", e);
+      }
+    }
+  }, timeoutMs);
+  poseChronoUndoTimers.set(id, timer);
+
+  showPoseChronoToast({
+    type: "info",
+    message,
+    actionLabel: undoLabel,
+    duration: timeoutMs,
+    onAction: () => {
+      const activeTimer = poseChronoUndoTimers.get(id);
+      if (activeTimer) {
+        clearTimeout(activeTimer);
+        poseChronoUndoTimers.delete(id);
+      }
+      onUndo();
+    },
+  });
+}
 
 function showPoseChronoConfirmDialog(options = {}) {
   const i18nDefault = (key, fallback) => {
@@ -6501,6 +6793,8 @@ function showPoseChronoConfirmDialog(options = {}) {
 
 if (typeof window !== "undefined") {
   window.showPoseChronoConfirmDialog = showPoseChronoConfirmDialog;
+  window.showPoseChronoToast = showPoseChronoToast;
+  window.schedulePoseChronoUndoAction = schedulePoseChronoUndoAction;
 }
 
 /**
@@ -6555,9 +6849,12 @@ function showHotkeysModal() {
     }).join("");
 
     return `
-      <div class="hotkey-category">
-        <h4 class="hotkey-category-title">${categoryTitle}</h4>
-        <div class="hotkey-list">${items}</div>
+      <div class="hotkey-category" data-category="${categoryKey}">
+        <button type="button" class="hotkey-category-toggle" aria-expanded="true">
+          <span class="hotkey-category-title">${categoryTitle}</span>
+          <span class="hotkey-category-chevron" aria-hidden="true">▾</span>
+        </button>
+        <div class="hotkey-list" data-category-list="${categoryKey}">${items}</div>
       </div>
     `;
   };
@@ -6568,7 +6865,7 @@ function showHotkeysModal() {
     .join("");
 
   modal.innerHTML = `
-    <div class="modal-container" style="max-width: 600px; max-height: 80vh;">
+    <div class="modal-container" role="dialog" aria-modal="true" aria-label="${t("hotkeys.title", "Keyboard Shortcuts")}" tabindex="-1" style="max-width: 600px; max-height: 80vh;">
       <div class="modal-header">
         <h3 class="modal-title">
           <svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="currentColor">
@@ -6576,7 +6873,7 @@ function showHotkeysModal() {
           </svg>
           ${t("hotkeys.title", "Keyboard Shortcuts")}
         </h3>
-        <button type="button" class="modal-close-btn" id="close-hotkeys-modal" aria-label="${t('notifications.deleteCancel', 'Close')}">
+        <button type="button" class="modal-close-btn" id="close-hotkeys-modal" data-modal-close="true" aria-label="${t('notifications.deleteCancel', 'Close')}">
           <svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="currentColor">
             <path d="m256-200-56-56 224-224-224-224 56-56 224 224 224-224 56 56-224 224 224 224-56 56-224-224-224 224Z"/>
           </svg>
@@ -6605,7 +6902,7 @@ function showHotkeysModal() {
           </svg>
           ${t("hotkeys.reset", "Reset")}
         </button>
-        <button type="button" class="hotkeys-footer-btn" id="close-hotkeys-btn">
+        <button type="button" class="hotkeys-footer-btn" id="close-hotkeys-btn" data-modal-close="true">
           ${t("notifications.deleteCancel", "Close")}
         </button>
       </div>
@@ -6724,7 +7021,36 @@ function showHotkeysModal() {
   // Barre de recherche avec toggle button group
   const searchInput = modal.querySelector("#hotkeys-search-input");
   const toggleBtns = modal.querySelectorAll(".search-toggle-btn");
+  const categoryToggles = modal.querySelectorAll(".hotkey-category-toggle");
   let searchMode = "name";
+  const collapsedCategories = new Set();
+
+  const setCategoryCollapsed = (categoryEl, collapsed, persist = true) => {
+    if (!categoryEl) return;
+    const key = categoryEl.dataset.category;
+    const listEl = categoryEl.querySelector(".hotkey-list");
+    const toggleEl = categoryEl.querySelector(".hotkey-category-toggle");
+    if (!key || !listEl || !toggleEl) return;
+
+    categoryEl.classList.toggle("collapsed", !!collapsed);
+    toggleEl.setAttribute("aria-expanded", collapsed ? "false" : "true");
+
+    if (persist) {
+      if (collapsed) {
+        collapsedCategories.add(key);
+      } else {
+        collapsedCategories.delete(key);
+      }
+    }
+  };
+
+  categoryToggles.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const categoryEl = btn.closest(".hotkey-category");
+      const willCollapse = !categoryEl.classList.contains("collapsed");
+      setCategoryCollapsed(categoryEl, willCollapse, true);
+    });
+  });
 
   // Autofocus sur la recherche à l'ouverture du modal
   requestAnimationFrame(() => {
@@ -6761,6 +7087,12 @@ function showHotkeysModal() {
       ).length;
       totalVisible += visibleCount;
       cat.style.display = visibleCount > 0 ? "" : "none";
+
+      if (query && visibleCount > 0) {
+        setCategoryCollapsed(cat, false, false);
+      } else if (!query) {
+        setCategoryCollapsed(cat, collapsedCategories.has(cat.dataset.category), false);
+      }
     });
 
     // Afficher le message "aucun résultat"
@@ -6802,6 +7134,9 @@ function saveHotkeysToStorage() {
   try {
     const hotkeysToSave = {};
     Object.keys(DEFAULT_HOTKEYS).forEach(key => {
+      if (NON_CUSTOMIZABLE_HOTKEYS.has(key)) {
+        return;
+      }
       if (CONFIG.HOTKEYS[key] !== DEFAULT_HOTKEYS[key]) {
         hotkeysToSave[key] = CONFIG.HOTKEYS[key];
       }
@@ -6822,10 +7157,20 @@ function saveHotkeysToStorage() {
  */
 function loadHotkeysFromStorage() {
   try {
+    // Hotkeys internes non customisables: toujours forcés à leur valeur par défaut.
+    NON_CUSTOMIZABLE_HOTKEYS.forEach((key) => {
+      if (DEFAULT_HOTKEYS[key]) {
+        CONFIG.HOTKEYS[key] = DEFAULT_HOTKEYS[key];
+      }
+    });
+
     const saved = localStorage.getItem(HOTKEYS_STORAGE_KEY);
     if (saved) {
       const hotkeys = JSON.parse(saved);
       Object.keys(hotkeys).forEach(key => {
+        if (NON_CUSTOMIZABLE_HOTKEYS.has(key)) {
+          return;
+        }
         if (CONFIG.HOTKEYS.hasOwnProperty(key)) {
           CONFIG.HOTKEYS[key] = hotkeys[key];
         }

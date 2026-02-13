@@ -230,7 +230,6 @@
       "VIDEO_CONFIG": "Video-Konfiguration öffnen",
       "DRAWING_EXPORT": "Zeichnung exportieren",
       "DRAWING_LIGHTBOX": "Leuchttisch umschalten",
-      "DRAWING_CLOSE": "Zeichenmodus schließen",
       "DRAWING_TOOL_PENCIL": "Bleistift-Werkzeug",
       "DRAWING_TOOL_ERASER": "Radiergummi-Werkzeug",
       "DRAWING_TOOL_RECTANGLE": "Rechteck-Werkzeug",
@@ -276,7 +275,10 @@
     "planSaved": "✓ Gespeichert!",
     "sessionFinished": "Alles erledigt!",
     "lastSeries": "Das war die letzte Serie!",
-    "readError": "Lesefehler"
+    "readError": "Lesefehler",
+    "undo": "Rueckgaengig",
+    "undoApplied": "Aktion rueckgaengig gemacht.",
+    "deleteQueued": "Geloescht. Rueckgaengig in den naechsten 10 Sekunden."
   },
   "errors": {
     "loadError": "Ladefehler",
@@ -376,7 +378,13 @@
       "measureSettings": "Messeinstellungen",
       "configureMeasure": "Messung konfigurieren",
       "configureUnit": "Einheit konfigurieren",
-      "compassSettings": "Zirkel-Einstellungen"
+      "compassSettings": "Zirkel-Einstellungen",
+      "exportTitle": "Zeichnung exportieren",
+      "exportQuestion": "Was möchten Sie exportieren?",
+      "exportFull": "Zeichnung und Foto zusammengeführt",
+      "exportTransparent": "Zeichnung auf transparentem Hintergrund",
+      "exportWhite": "Zeichnung auf weißem Hintergrund",
+      "dockHorizontal": "Horizontal andocken"
     },
     "help": {
       "duplicateMeasure": "Messung ziehen, um zu duplizieren",
@@ -389,7 +397,10 @@
       "stabilizer": "Stabilisator",
       "brushSize": "Pinselgröße",
       "strokeStabilizer": "Strich-Stabilisator",
-      "enableStabilizer": "Stabilisator aktivieren"
+      "enableStabilizer": "Stabilisator aktivieren",
+      "rectangle": "Rechteck",
+      "rectangleEditMode": "Rechteckbearbeitung aktivieren",
+      "shapeEditMode": "Formbearbeitung aktivieren"
     },
     "sliders": {
       "size": "Größe",

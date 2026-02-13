@@ -250,7 +250,6 @@
       "VIDEO_CONFIG": "Ouvrir la configuration vidéo",
       "DRAWING_EXPORT": "Exporter le dessin",
       "DRAWING_LIGHTBOX": "Basculer la table lumineuse",
-      "DRAWING_CLOSE": "Fermer le mode dessin",
       "DRAWING_TOOL_PENCIL": "Outil crayon",
       "DRAWING_TOOL_ERASER": "Outil gomme",
       "DRAWING_TOOL_RECTANGLE": "Outil rectangle",
@@ -258,9 +257,9 @@
       "DRAWING_TOOL_LINE": "Outil ligne",
       "DRAWING_TOOL_ARROW": "Outil flèche",
       "DRAWING_TOOL_MEASURE": "Outil de mesure",
-      "DRAWING_TOOL_CALIBRATE": "Calibrer l'unité",
-      "DRAWING_TOOL_LASER": "Pointeur laser",
-      "DRAWING_TOOL_PROTRACTOR": "Outil rapporteur",
+      "DRAWING_TOOL_CALIBRATE": "Outil pour définir l'unité",
+      "DRAWING_TOOL_LASER": "Outil pointeur laser",
+      "DRAWING_TOOL_PROTRACTOR": "Outil compas",
       "DRAWING_SIZE_DECREASE": "Diminuer la taille du pinceau",
       "DRAWING_SIZE_INCREASE": "Augmenter la taille du pinceau",
       "TAGS": "Ouvrir le modal des tags"
@@ -293,10 +292,13 @@
   "notifications": {
     "imageCopied": "Image copiée",
     "imageCopiedToClipboard": "Image copiée dans le presse-papiers",
-    "planSaved": "✓ Enregistré!",
-    "sessionFinished": "Tout est terminé!",
-    "lastSeries": "C'était la dernière série!",
-    "readError": "Erreur de lecture"
+    "planSaved": "✓ Enregistré !",
+    "sessionFinished": "Tout est terminé !",
+    "lastSeries": "C'était la dernière série !",
+    "readError": "Erreur de lecture",
+    "undo": "Annuler",
+    "undoApplied": "Action annulée.",
+    "deleteQueued": "Supprimé. Annulation possible pendant 10 secondes."
   },
   "errors": {
     "loadError": "Erreur de chargement",
@@ -376,7 +378,13 @@
       "measureSettings": "Réglages des mesures",
       "configureMeasure": "Configurer la mesure",
       "configureUnit": "Configurer l'unité",
-      "compassSettings": "Réglages du compas"
+      "compassSettings": "Réglages du compas",
+      "exportTitle": "Exporter le dessin",
+      "exportQuestion": "Qu'est-ce qu'on exporte ?",
+      "exportFull": "Dessin et photo fusionnées",
+      "exportTransparent": "Dessin sur fond transparent",
+      "exportWhite": "Dessin sur fond blanc",
+      "dockHorizontal": "Dock horizontal"
     },
     "help": {
       "duplicateMeasure": "glisser une mesure pour la dupliquer",
@@ -389,7 +397,10 @@
       "stabilizer": "Stabilisateur",
       "brushSize": "Taille du pinceau",
       "strokeStabilizer": "Stabilisateur de tracé",
-      "enableStabilizer": "Activer le stabilisateur"
+      "enableStabilizer": "Activer le stabilisateur",
+      "rectangle": "Rectangle",
+      "rectangleEditMode": "Activer l'edition des rectangles",
+      "shapeEditMode": "Activer l'edition des formes"
     },
     "sliders": {
       "size": "Taille",

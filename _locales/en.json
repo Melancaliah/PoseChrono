@@ -230,7 +230,6 @@
       "VIDEO_CONFIG": "Open video configuration",
       "DRAWING_EXPORT": "Export drawing",
       "DRAWING_LIGHTBOX": "Toggle lightbox",
-      "DRAWING_CLOSE": "Close drawing mode",
       "DRAWING_TOOL_PENCIL": "Pencil tool",
       "DRAWING_TOOL_ERASER": "Eraser tool",
       "DRAWING_TOOL_RECTANGLE": "Rectangle tool",
@@ -276,7 +275,10 @@
     "planSaved": "✓ Saved!",
     "sessionFinished": "Session complete!",
     "lastSeries": "That was the last series!",
-    "readError": "Read error"
+    "readError": "Read error",
+    "undo": "Undo",
+    "undoApplied": "Action undone.",
+    "deleteQueued": "Deleted. Undo available for 10 seconds."
   },
   "errors": {
     "loadError": "Error loading",
@@ -376,7 +378,13 @@
       "measureSettings": "Measurement settings",
       "configureMeasure": "Configure measurement",
       "configureUnit": "Configure unit",
-      "compassSettings": "Compass settings"
+      "compassSettings": "Compass settings",
+      "exportTitle": "Export drawing",
+      "exportQuestion": "What do you want to export?",
+      "exportFull": "Drawing and photo merged",
+      "exportTransparent": "Drawing on transparent background",
+      "exportWhite": "Drawing on white background",
+      "dockHorizontal": "Dock horizontal"
     },
     "help": {
       "duplicateMeasure": "drag a measurement to duplicate it",
@@ -389,7 +397,10 @@
       "stabilizer": "Stabilizer",
       "brushSize": "Brush size",
       "strokeStabilizer": "Stroke stabilizer",
-      "enableStabilizer": "Enable stabilizer"
+      "enableStabilizer": "Enable stabilizer",
+      "rectangle": "Rectangle",
+      "rectangleEditMode": "Enable rectangle editing",
+      "shapeEditMode": "Enable shape editing"
     },
     "sliders": {
       "size": "Size",

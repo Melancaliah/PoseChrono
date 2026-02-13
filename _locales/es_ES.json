@@ -230,7 +230,6 @@
       "VIDEO_CONFIG": "Abrir configuración de video",
       "DRAWING_EXPORT": "Exportar dibujo",
       "DRAWING_LIGHTBOX": "Alternar mesa de luz",
-      "DRAWING_CLOSE": "Cerrar modo dibujo",
       "DRAWING_TOOL_PENCIL": "Herramienta lápiz",
       "DRAWING_TOOL_ERASER": "Herramienta borrador",
       "DRAWING_TOOL_RECTANGLE": "Herramienta rectángulo",
@@ -276,7 +275,10 @@
     "planSaved": "✓ ¡Guardado!",
     "sessionFinished": "¡Todo terminado!",
     "lastSeries": "¡Esta fue la última serie!",
-    "readError": "Error de lectura"
+    "readError": "Error de lectura",
+    "undo": "Deshacer",
+    "undoApplied": "Accion deshecha.",
+    "deleteQueued": "Eliminado. Deshacer disponible durante 10 segundos."
   },
   "errors": {
     "loadError": "Error de carga",
@@ -376,7 +378,13 @@
       "measureSettings": "Ajustes de medidas",
       "configureMeasure": "Configurar medida",
       "configureUnit": "Configurar unidad",
-      "compassSettings": "Ajustes del compás"
+      "compassSettings": "Ajustes del compás",
+      "exportTitle": "Exportar dibujo",
+      "exportQuestion": "¿Qué quieres exportar?",
+      "exportFull": "Dibujo y foto fusionados",
+      "exportTransparent": "Dibujo sobre fondo transparente",
+      "exportWhite": "Dibujo sobre fondo blanco",
+      "dockHorizontal": "Anclar horizontal"
     },
     "help": {
       "duplicateMeasure": "arrastra una medida para duplicarla",
@@ -389,7 +397,10 @@
       "stabilizer": "Estabilizador",
       "brushSize": "Tamaño del pincel",
       "strokeStabilizer": "Estabilizador de trazo",
-      "enableStabilizer": "Activar estabilizador"
+      "enableStabilizer": "Activar estabilizador",
+      "rectangle": "Rectangulo",
+      "rectangleEditMode": "Activar edicion de rectangulos",
+      "shapeEditMode": "Activar edicion de formas"
     },
     "sliders": {
       "size": "Tamaño",

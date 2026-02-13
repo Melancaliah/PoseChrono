@@ -1294,10 +1294,10 @@
       <!-- MODAL GESTION DES TAGS                                      -->
       <!-- ============================================================ -->
       <div id="tags-modal" class="modal hidden">
-        <div class="modal-content">
+        <div class="modal-content" role="dialog" aria-modal="true" tabindex="-1">
           <div id="tags-modal-header" class="modal-header">
             <h2 data-i18n="tags.manage">Gérer les tags</h2>
-            <button type="button" id="close-tags-modal" class="modal-close-btn">
+            <button type="button" id="close-tags-modal" class="modal-close-btn" data-modal-close="true">
               <svg
                 xmlns="http://www.w3.org/2000/svg"
                 height="24px"
@@ -1329,7 +1329,7 @@
                     class="tag-autocomplete hidden"
                   ></div>
                 </div>
-                <button type="button" id="create-tag-btn" class="modal-btn">
+                <button type="button" id="create-tag-btn" class="modal-btn" data-modal-primary="true">
                   <svg
                     xmlns="http://www.w3.org/2000/svg"
                     height="18px"
@@ -1390,10 +1390,10 @@
     <!-- POPUP GESTION DES PLANS DE SESSION                           -->
     <!-- ============================================================ -->
     <div id="session-plans-modal" class="modal hidden">
-      <div class="modal-content">
+      <div class="modal-content" role="dialog" aria-modal="true" tabindex="-1">
         <div class="modal-header">
           <h2 data-i18n="modes.custom.managePlans">Plans de Session</h2>
-          <button type="button" id="close-plans-modal" class="modal-close-btn">
+          <button type="button" id="close-plans-modal" class="modal-close-btn" data-modal-close="true">
             &times;
           </button>
         </div>
@@ -1410,7 +1410,7 @@
                 data-i18n-placeholder="modes.custom.planName"
                 maxlength="50"
               />
-              <button type="button" id="save-plan-btn" class="plan-action-btn">
+              <button type="button" id="save-plan-btn" class="plan-action-btn" data-modal-primary="true">
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
                   height="18px"

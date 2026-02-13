@@ -230,7 +230,6 @@
       "VIDEO_CONFIG": "動画設定を開く",
       "DRAWING_EXPORT": "描画をエクスポート",
       "DRAWING_LIGHTBOX": "トレース台の切り替え",
-      "DRAWING_CLOSE": "描画モードを閉じる",
       "DRAWING_TOOL_PENCIL": "鉛筆ツール",
       "DRAWING_TOOL_ERASER": "消しゴムツール",
       "DRAWING_TOOL_RECTANGLE": "矩形ツール",
@@ -276,7 +275,10 @@
     "planSaved": "✓ 保存しました！",
     "sessionFinished": "すべて完了！",
     "lastSeries": "これが最後のシリーズでした！",
-    "readError": "読み込みエラー"
+    "readError": "読み込みエラー",
+    "undo": "元に戻す",
+    "undoApplied": "操作を元に戻しました。",
+    "deleteQueued": "削除しました。10秒以内なら元に戻せます。"
   },
   "errors": {
     "loadError": "読み込みエラー",
@@ -376,7 +378,13 @@
       "measureSettings": "測定設定",
       "configureMeasure": "測定を設定",
       "configureUnit": "単位を設定",
-      "compassSettings": "コンパス設定"
+      "compassSettings": "コンパス設定",
+      "exportTitle": "描画をエクスポート",
+      "exportQuestion": "何をエクスポートしますか？",
+      "exportFull": "描画と写真を統合",
+      "exportTransparent": "透明背景の描画",
+      "exportWhite": "白背景の描画",
+      "dockHorizontal": "水平ドック"
     },
     "help": {
       "duplicateMeasure": "測定をドラッグして複製",
@@ -389,7 +397,10 @@
       "stabilizer": "スタビライザー",
       "brushSize": "ブラシサイズ",
       "strokeStabilizer": "線スタビライザー",
-      "enableStabilizer": "スタビライザーを有効化"
+      "enableStabilizer": "スタビライザーを有効化",
+      "rectangle": "長方形",
+      "rectangleEditMode": "長方形編集を有効化",
+      "shapeEditMode": "図形編集を有効化"
     },
     "sliders": {
       "size": "サイズ",

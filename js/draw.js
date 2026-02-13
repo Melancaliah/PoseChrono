@@ -182,6 +182,82 @@ function applyLineConstraint(start, end) {
   return { x: start.x, y: end.y }; // Vertical
 }
 
+function applyLine45Constraint(start, end) {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const length = Math.hypot(dx, dy);
+  if (length === 0) return { ...end };
+  const angle = Math.atan2(dy, dx);
+  const snapStep = Math.PI / 4; // 45 deg
+  const snapped = Math.round(angle / snapStep) * snapStep;
+  return {
+    x: start.x + Math.cos(snapped) * length,
+    y: start.y + Math.sin(snapped) * length,
+  };
+}
+
+function findNearbyEndpointSnap(
+  point,
+  threshold = 14,
+  excludeLineId = null,
+  excludeEndpointKey = null,
+) {
+  let best = null;
+  let bestDist = threshold;
+  for (const line of measurementLines) {
+    if (!line || !line.start || !line.end) continue;
+    if (excludeLineId && line.id === excludeLineId) {
+      if (excludeEndpointKey !== "start") {
+        const ds = getDistance(point, line.start);
+        if (ds < bestDist) {
+          bestDist = ds;
+          best = { ...line.start };
+        }
+      }
+      if (excludeEndpointKey !== "end") {
+        const de = getDistance(point, line.end);
+        if (de < bestDist) {
+          bestDist = de;
+          best = { ...line.end };
+        }
+      }
+      continue;
+    }
+    const ds = getDistance(point, line.start);
+    if (ds < bestDist) {
+      bestDist = ds;
+      best = { ...line.start };
+    }
+    const de = getDistance(point, line.end);
+    if (de < bestDist) {
+      bestDist = de;
+      best = { ...line.end };
+    }
+  }
+  return best;
+}
+
+function getSmartLineEndpoint(start, rawEnd, isShift, isCtrl) {
+  let next = { ...rawEnd };
+  if (isCtrl) {
+    const snap = findNearbyEndpointSnap(next, 14);
+    if (snap) return snap;
+  }
+  if (isShift) {
+    next = applyLine45Constraint(start, next);
+  }
+  return next;
+}
+
+function getLineMetrics(start, end) {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const length = Math.hypot(dx, dy);
+  let angle = (Math.atan2(dy, dx) * 180) / Math.PI;
+  if (angle < 0) angle += 360;
+  return { length, angle };
+}
+
 /**
  * Applique les contraintes Shift et Alt aux formes
  * @param {Object} start - Point de départ {x, y}
@@ -205,7 +281,9 @@ function applyShapeConstraints(
 
   // Shift : contraindre les proportions
   if (isShift) {
-    if (tool === "line" || tool === "arrow") {
+    if (tool === "line") {
+      drawEnd = applyLine45Constraint(start, end);
+    } else if (tool === "arrow") {
       drawEnd = applyLineConstraint(start, end);
     } else if (tool === "rectangle" || tool === "circle") {
       // Carré ou cercle parfait
@@ -575,6 +653,49 @@ const keysState = {
   alt: false,
   space: false,
 };
+
+const RECTANGLE_EDIT_STORAGE_KEY = "posechrono_rectangle_edit_mode";
+function loadRectangleEditMode() {
+  try {
+    const raw = localStorage.getItem(RECTANGLE_EDIT_STORAGE_KEY);
+    if (raw === null) return true;
+    return raw === "1";
+  } catch (_) {
+    return true;
+  }
+}
+
+function getPointToQuadraticDistance(point, start, control, end, steps = 24) {
+  if (!start || !control || !end) return Infinity;
+  let minDist = Infinity;
+  let prev = start;
+
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps;
+    const mt = 1 - t;
+    const x =
+      mt * mt * start.x + 2 * mt * t * control.x + t * t * end.x;
+    const y =
+      mt * mt * start.y + 2 * mt * t * control.y + t * t * end.y;
+    const curr = { x, y };
+    const d = getPointToSegmentDistance(point, prev, curr);
+    if (d < minDist) minDist = d;
+    prev = curr;
+  }
+
+  return minDist;
+}
+let rectangleEditMode = loadRectangleEditMode();
+function saveRectangleEditMode() {
+  try {
+    localStorage.setItem(RECTANGLE_EDIT_STORAGE_KEY, rectangleEditMode ? "1" : "0");
+  } catch (_) {}
+}
+
+// updateStylusStateFromEvent et resetStylusStrokeState supprimées (no-op)
+function getActivePencilStrokeSize() {
+  return annotationStyle.size;
+}
 
 // ================================================================
 // VARIABLES DE DÉPLACEMENT AVEC ESPACE
@@ -1344,10 +1465,203 @@ const MAX_HISTORY = DRAWING_CONSTANTS.MAX_HISTORY;
 // Variables actives pour le déplacement avec espace
 let originalStartPoint = null;
 let measureLockedLength = null; // Longueur verrouillée avec Shift pendant la création
+let isDraggingShapeControl = false;
+let dragShapeControlLine = null;
+let selectedShapeLineId = null;
+let selectedShapeGroupId = null;
+let drawingEditHud = null;
+
+function clearEditableShapeSelection() {
+  selectedShapeLineId = null;
+  selectedShapeGroupId = null;
+}
+
+function isShapeLineSelected(line) {
+  return !!line && line.type === "shape-line" && selectedShapeLineId === line.id;
+}
+
+function isShapeEdgeSelected(line) {
+  return (
+    !!line &&
+    line.type === "shape-edge" &&
+    !!line.shapeGroup &&
+    selectedShapeGroupId === line.shapeGroup
+  );
+}
+
+function selectEditableShape(line) {
+  if (!line) return false;
+  if (line.type === "shape-line") {
+    selectedShapeLineId = line.id;
+    selectedShapeGroupId = null;
+    redrawDrawingMeasurements();
+    return true;
+  }
+  if (line.type === "shape-edge" && line.shapeGroup) {
+    selectedShapeGroupId = line.shapeGroup;
+    selectedShapeLineId = null;
+    redrawDrawingMeasurements();
+    return true;
+  }
+  return false;
+}
+
+function syncEditableShapeSelection() {
+  if (
+    selectedShapeLineId &&
+    !measurementLines.some((line) => line.type === "shape-line" && line.id === selectedShapeLineId)
+  ) {
+    selectedShapeLineId = null;
+  }
+  if (
+    selectedShapeGroupId &&
+    !measurementLines.some(
+      (line) => line.type === "shape-edge" && line.shapeGroup === selectedShapeGroupId,
+    )
+  ) {
+    selectedShapeGroupId = null;
+  }
+}
+
+function ensureDrawingEditHud() {
+  if (drawingEditHud && document.body.contains(drawingEditHud)) return drawingEditHud;
+  drawingEditHud = document.createElement("div");
+  drawingEditHud.id = "drawing-edit-hud";
+  drawingEditHud.style.position = "fixed";
+  drawingEditHud.style.zIndex = "11050";
+  drawingEditHud.style.pointerEvents = "none";
+  drawingEditHud.style.padding = "6px 9px";
+  drawingEditHud.style.borderRadius = "8px";
+  drawingEditHud.style.background = "rgba(12, 16, 22, 0.92)";
+  drawingEditHud.style.border = "1px solid rgba(255,255,255,0.14)";
+  drawingEditHud.style.color = "#e9efff";
+  drawingEditHud.style.fontSize = "12px";
+  drawingEditHud.style.fontWeight = "600";
+  drawingEditHud.style.letterSpacing = "0.2px";
+  drawingEditHud.style.display = "none";
+  document.body.appendChild(drawingEditHud);
+  return drawingEditHud;
+}
+
+function updateDrawingEditHudFromLine(line, clientX = null, clientY = null) {
+  if (!line || !line.start || !line.end) return;
+  const hud = ensureDrawingEditHud();
+  const { length, angle } = getLineMetrics(line.start, line.end);
+  hud.textContent = `${Math.round(length)} px | ${Math.round(angle)} deg`;
+  if (Number.isFinite(clientX) && Number.isFinite(clientY)) {
+    hud.style.left = `${Math.round(clientX + 14)}px`;
+    hud.style.top = `${Math.round(clientY + 14)}px`;
+  }
+  hud.style.display = "block";
+}
+
+function updateDrawingEditHudFromPoints(start, end, clientX = null, clientY = null) {
+  if (!start || !end) return;
+  updateDrawingEditHudFromLine({ start, end }, clientX, clientY);
+}
+
+function hideDrawingEditHud() {
+  if (drawingEditHud) drawingEditHud.style.display = "none";
+}
 
 // ================================================================
 // HELPERS PARTAGÉS DRAWING/ZOOM MODE (Phase 6.4)
 // ================================================================
+
+function cloneMeasurementLines(lines) {
+  return structuredClone(Array.isArray(lines) ? lines : []);
+}
+
+function normalizeHistorySnapshot(entry) {
+  if (typeof entry === "string") {
+    return {
+      canvasDataURL: entry,
+      measurementLines: [],
+      calibrationUnit: null,
+    };
+  }
+
+  if (!entry || typeof entry !== "object") {
+    return {
+      canvasDataURL: null,
+      measurementLines: [],
+      calibrationUnit: null,
+    };
+  }
+
+  return {
+    canvasDataURL: entry.canvasDataURL || null,
+    measurementLines: cloneMeasurementLines(entry.measurementLines),
+    calibrationUnit: Number.isFinite(Number(entry.calibrationUnit))
+      ? Number(entry.calibrationUnit)
+      : null,
+  };
+}
+
+function cloneHistorySnapshot(entry) {
+  const normalized = normalizeHistorySnapshot(entry);
+  return {
+    canvasDataURL: normalized.canvasDataURL,
+    measurementLines: cloneMeasurementLines(normalized.measurementLines),
+    calibrationUnit: normalized.calibrationUnit,
+  };
+}
+
+function cloneDrawingHistory(history) {
+  if (!Array.isArray(history)) return [];
+  return history.map((entry) => cloneHistorySnapshot(entry));
+}
+
+function buildCurrentHistorySnapshot() {
+  const hasCanvas = drawingCanvas && !isCanvasBlank(drawingCanvas);
+  return {
+    canvasDataURL: hasCanvas ? drawingCanvas.toDataURL() : null,
+    measurementLines: cloneMeasurementLines(measurementLines),
+    calibrationUnit: Number.isFinite(Number(calibrationUnit))
+      ? Number(calibrationUnit)
+      : null,
+  };
+}
+
+function applyHistorySnapshot(snapshot) {
+  const normalized = normalizeHistorySnapshot(snapshot);
+  measurementLines = cloneMeasurementLines(normalized.measurementLines);
+  calibrationUnit = normalized.calibrationUnit;
+
+  const finalizeState = () => {
+    redrawDrawingMeasurements();
+    updateDrawingUnitInfo();
+    updateDrawingTotalDistance();
+    updateDrawingButtonStates("main");
+    updateDrawingButtonStates("zoom");
+  };
+
+  if (!drawingCtx || !drawingCanvas) {
+    finalizeState();
+    return;
+  }
+
+  if (!normalized.canvasDataURL) {
+    clearCanvas(drawingCtx, drawingCanvas);
+    finalizeState();
+    return;
+  }
+
+  const img = new Image();
+  img.onload = () => {
+    // Swap atomique: on efface seulement quand la nouvelle image est prête,
+    // pour éviter le scintillement visuel pendant undo/redo.
+    clearCanvas(drawingCtx, drawingCanvas);
+    drawingCtx.drawImage(img, 0, 0);
+    finalizeState();
+  };
+  img.onerror = () => {
+    console.warn("undo/redo: failed to load snapshot image");
+    clearCanvas(drawingCtx, drawingCanvas);
+    finalizeState();
+  };
+  img.src = normalized.canvasDataURL;
+}
 
 /**
  * Restaure l'état de dessin depuis un cache
@@ -1369,10 +1683,18 @@ async function restoreDrawingState(savedState, mainCtx, measuresCtx) {
   });
 
   // Restaurer les données non-image immédiatement
-  measurementLines = JSON.parse(JSON.stringify(savedState.measurementLines));
-  calibrationUnit = savedState.calibrationUnit;
-  drawingHistory = [...savedState.history];
-  drawingHistoryIndex = savedState.historyIndex;
+  measurementLines = cloneMeasurementLines(savedState.measurementLines);
+  calibrationUnit = Number.isFinite(Number(savedState.calibrationUnit))
+    ? Number(savedState.calibrationUnit)
+    : null;
+  drawingHistory = cloneDrawingHistory(savedState.history);
+  const restoredIndex = Number.isInteger(savedState.historyIndex)
+    ? savedState.historyIndex
+    : drawingHistory.length - 1;
+  drawingHistoryIndex = Math.max(
+    -1,
+    Math.min(restoredIndex, drawingHistory.length - 1),
+  );
 
   // Restaurer le canvas principal depuis l'URL base64
   if (savedState.canvasDataURL) {
@@ -1397,6 +1719,10 @@ async function restoreDrawingState(savedState, mainCtx, measuresCtx) {
 
   // Les mesures sont redessinées dynamiquement, pas besoin de restaurer le canvas
   redrawDrawingMeasurements();
+  updateDrawingUnitInfo();
+  updateDrawingTotalDistance();
+  updateDrawingButtonStates("main");
+  updateDrawingButtonStates("zoom");
 
   return true;
 }
@@ -1453,9 +1779,9 @@ function saveDrawingState(
       // Sauvegarder en base64 pour pouvoir redimensionner à la restauration
       canvasDataURL: hasDrawingContent ? mainCanvas.toDataURL() : null,
       // Les mesures sont stockées en coordonnées et redessinées dynamiquement
-      measurementLines: JSON.parse(JSON.stringify(measurementLines)),
+      measurementLines: structuredClone(measurementLines),
       calibrationUnit: calibrationUnit,
-      history: [...drawingHistory],
+      history: cloneDrawingHistory(drawingHistory),
       historyIndex: drawingHistoryIndex,
     });
 
@@ -1782,6 +2108,9 @@ function closeDrawingMode() {
     canvasResizeObserver = null;
   }
 
+  // Nettoyer l'événement resize de la fenêtre
+  window.removeEventListener("resize", handleDrawingWindowResize);
+
   // Nettoyer les événements
   cleanupDrawingModeEvents();
 
@@ -2002,47 +2331,28 @@ function clearAllDrawingCanvases(context = null) {
   });
 }
 
+// Curseurs SVG mis en cache (constantes, le SVG ne change jamais)
+const CACHED_CURSORS = (() => {
+  const deleteSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="rgba(239, 68, 68, 0.9)" stroke="white" stroke-width="1.5"/><line x1="8" y1="8" x2="16" y2="16" stroke="white" stroke-width="2.5" stroke-linecap="round"/><line x1="16" y1="8" x2="8" y2="16" stroke="white" stroke-width="2.5" stroke-linecap="round"/></svg>`;
+  const cycleSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 -960 960 960"><circle cx="480" cy="-480" r="420" fill="rgba(94, 234, 212, 0.9)" stroke="white" stroke-width="40"/><path d="m482-200 114-113-114-113-42 42 43 43q-28 1-54.5-9T381-381q-20-20-30.5-46T340-479q0-17 4.5-34t12.5-33l-44-44q-17 25-25 53t-8 57q0 38 15 75t44 66q29 29 65 43.5t74 15.5l-38 38 42 42Zm165-170q17-25 25-53t8-57q0-38-14.5-75.5T622-622q-29-29-65.5-43T482-679l38-39-42-42-114 113 114 113 42-42-44-44q27 0 55 10.5t48 30.5q20 20 30.5 46t10.5 52q0 17-4.5 34T603-414l44 44Z" fill="white"/></svg>`;
+  const duplicateSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="rgba(34, 197, 94, 0.9)" stroke="white" stroke-width="1.5"/><line x1="12" y1="7" x2="12" y2="17" stroke="white" stroke-width="2.5" stroke-linecap="round"/><line x1="7" y1="12" x2="17" y2="12" stroke="white" stroke-width="2.5" stroke-linecap="round"/></svg>`;
+  return {
+    delete: `url("data:image/svg+xml,${encodeURIComponent(deleteSvg)}") 12 12, pointer`,
+    cycle: `url("data:image/svg+xml,${encodeURIComponent(cycleSvg)}") 12 12, pointer`,
+    duplicate: `url("data:image/svg+xml,${encodeURIComponent(duplicateSvg)}") 12 12, copy`,
+  };
+})();
+
 function getDeleteCursor() {
-  const svg = `
-    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
-      <circle cx="12" cy="12" r="10" fill="rgba(239, 68, 68, 0.9)" stroke="white" stroke-width="1.5"/>
-      <line x1="8" y1="8" x2="16" y2="16" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
-      <line x1="16" y1="8" x2="8" y2="16" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
-    </svg>
-  `;
-  const encoded = encodeURIComponent(svg.trim());
-  return `url("data:image/svg+xml,${encoded}") 12 12, pointer`;
+  return CACHED_CURSORS.delete;
 }
 
-/**
- * Retourne un curseur personnalisé avec icône de cycle (pour changer le type de graduation)
- */
 function getCycleCursor() {
-  // Curseur SVG avec flèches de cycle (cyan/primary)
-  const svg = `
-    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 -960 960 960">
-      <circle cx="480" cy="-480" r="420" fill="rgba(94, 234, 212, 0.9)" stroke="white" stroke-width="40"/>
-      <path d="m482-200 114-113-114-113-42 42 43 43q-28 1-54.5-9T381-381q-20-20-30.5-46T340-479q0-17 4.5-34t12.5-33l-44-44q-17 25-25 53t-8 57q0 38 15 75t44 66q29 29 65 43.5t74 15.5l-38 38 42 42Zm165-170q17-25 25-53t8-57q0-38-14.5-75.5T622-622q-29-29-65.5-43T482-679l38-39-42-42-114 113 114 113 42-42-44-44q27 0 55 10.5t48 30.5q20 20 30.5 46t10.5 52q0 17-4.5 34T603-414l44 44Z" fill="white"/>
-    </svg>
-  `;
-  const encoded = encodeURIComponent(svg.trim());
-  return `url("data:image/svg+xml,${encoded}") 12 12, pointer`;
+  return CACHED_CURSORS.cycle;
 }
 
-/**
- * Retourne un curseur personnalisé avec icône de duplication (pour Alt+glisser)
- */
 function getDuplicateCursor() {
-  // Curseur SVG avec icône + (vert)
-  const svg = `
-    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
-      <circle cx="12" cy="12" r="10" fill="rgba(34, 197, 94, 0.9)" stroke="white" stroke-width="1.5"/>
-      <line x1="12" y1="7" x2="12" y2="17" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
-      <line x1="7" y1="12" x2="17" y2="12" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
-    </svg>
-  `;
-  const encoded = encodeURIComponent(svg.trim());
-  return `url("data:image/svg+xml,${encoded}") 12 12, copy`;
+  return CACHED_CURSORS.duplicate;
 }
 
 /**
@@ -2184,10 +2494,13 @@ function handleSpacePanStart(e) {
 }
 
 function handleGlobalMouseUp(e) {
+
   // Si on était en train de dessiner, arrêter le dessin
   if (isDrawing && e.button === 0) {
     handleDrawingMouseUp(e);
+    return;
   }
+
 }
 
 function resetDrawingStateOnEnter() {
@@ -2248,9 +2561,23 @@ const TOOL_DEFINITIONS = {
   pencil: { icon: "PENCIL", tooltip: () => i18next.t("draw.tools.pencil", { hotkey: CONFIG.HOTKEYS.DRAWING_TOOL_PENCIL.toUpperCase() }), hasStabilizerMenu: true },
   eraser: { icon: "ERASER", tooltip: () => i18next.t("draw.tools.eraser", { hotkey: CONFIG.HOTKEYS.DRAWING_TOOL_ERASER.toUpperCase() }) },
   laser: { icon: "LASER_POINTER", tooltip: () => i18next.t("draw.tools.laser", { hotkey: CONFIG.HOTKEYS.DRAWING_TOOL_LASER }) },
-  line: { icon: "LINE", tooltip: () => i18next.t("draw.tools.line", { hotkey: CONFIG.HOTKEYS.DRAWING_TOOL_LINE.toUpperCase() }) },
+  line: {
+    icon: "LINE",
+    tooltip: () =>
+      i18next.t("draw.tools.line", {
+        hotkey: CONFIG.HOTKEYS.DRAWING_TOOL_LINE.toUpperCase(),
+      }),
+    hasRectangleMenu: true,
+  },
   arrow: { icon: "ARROW", tooltip: () => i18next.t("draw.tools.arrow", { hotkey: CONFIG.HOTKEYS.DRAWING_TOOL_ARROW.toUpperCase() }) },
-  rectangle: { icon: "RECTANGLE", tooltip: () => i18next.t("draw.tools.rectangle", { hotkey: CONFIG.HOTKEYS.DRAWING_TOOL_RECTANGLE.toUpperCase() }) },
+  rectangle: {
+    icon: "RECTANGLE",
+    tooltip: () =>
+      i18next.t("draw.tools.rectangle", {
+        hotkey: CONFIG.HOTKEYS.DRAWING_TOOL_RECTANGLE.toUpperCase(),
+      }),
+    hasRectangleMenu: true,
+  },
   circle: { icon: "CIRCLE", tooltip: () => i18next.t("draw.tools.circle", { hotkey: CONFIG.HOTKEYS.DRAWING_TOOL_CIRCLE.toUpperCase() }) },
   measure: {
     icon: "MEASURE",
@@ -2319,7 +2646,12 @@ function createToolButton(toolId, options) {
       }
     };
   }
-
+  if (def.hasRectangleMenu) {
+    btn.oncontextmenu = (e) => {
+      e.preventDefault();
+      showRectangleToolMenu(e.clientX, e.clientY);
+    };
+  }
   return btn;
 }
 
@@ -2341,6 +2673,11 @@ function createAllToolButtons(options) {
       .forEach((b) => b.classList.remove("active"));
     btn.classList.add("active");
     currentTool = toolId;
+    if (!["line", "rectangle"].includes(toolId)) {
+      clearEditableShapeSelection();
+      redrawDrawingMeasurements();
+    }
+    hideDrawingEditHud();
     updateDrawingCursor();
   };
 
@@ -2626,6 +2963,100 @@ function populateDrawingToolbar() {
 }
 
 /**
+ * Configure les événements pointer/mouse/wheel sur un canvas preview.
+ * Factorise le code commun entre setupDrawingModeTools et setupZoomDrawingEvents.
+ * @param {HTMLCanvasElement} previewCanvas - Le canvas preview (drawingPreview ou zoomDrawingPreview)
+ * @param {HTMLCanvasElement} mainCanvas - Le canvas principal (drawingCanvas ou zoomDrawingCanvas)
+ * @param {CanvasRenderingContext2D} mainCtx - Le contexte du canvas principal
+ * @param {string} contextName - "drawing" ou "zoom"
+ */
+function setupCanvasInputEvents(previewCanvas, mainCanvas, mainCtx, contextName) {
+  if (!previewCanvas) return;
+
+  const contextMenuHandler = (e) => {
+    e.preventDefault();
+    const coords = getDrawingCoordinates(e);
+    const hitLine = findMeasurementLineAt(coords, 20);
+    if (hitLine) {
+      if (hitLine.type === "compass") {
+        showCompassIndividualConfig(hitLine, e.clientX, e.clientY);
+      } else if (hitLine.type === "calibrate") {
+        showCalibrateIndividualConfig(hitLine, e.clientX, e.clientY);
+      } else if (hitLine.type === "shape-edge" || hitLine.type === "shape-line") {
+        showCanvasContextMenu(e.clientX, e.clientY, contextName);
+      } else {
+        showMeasureIndividualConfig(hitLine, e.clientX, e.clientY);
+      }
+    } else {
+      showCanvasContextMenu(e.clientX, e.clientY, contextName);
+    }
+  };
+
+  if (typeof window !== "undefined" && "PointerEvent" in window) {
+    previewCanvas.style.touchAction = "none";
+
+    previewCanvas.onpointerdown = (e) => {
+      if (previewCanvas.setPointerCapture && typeof e.pointerId === "number") {
+        try { previewCanvas.setPointerCapture(e.pointerId); } catch (_) {}
+      }
+      if (e.button === 1) { handleCanvasPanStart(e); return; }
+      if (e.button === 0 && keysState.space && !isDrawing) { handleSpacePanStart(e); return; }
+      handleDrawingMouseDown(e);
+    };
+
+    previewCanvas.onpointermove = (e) => {
+      if (ZoomManager.isPanning) { handleCanvasPanMove(e); return; }
+      handleDrawingMouseMove(e);
+    };
+
+    previewCanvas.onpointerup = (e) => {
+      if (previewCanvas.releasePointerCapture && typeof e.pointerId === "number") {
+        try { previewCanvas.releasePointerCapture(e.pointerId); } catch (_) {}
+      }
+      if (ZoomManager.isPanning && (e.button === 1 || (e.button === 0 && keysState.space))) {
+        handleCanvasPanEnd(); return;
+      }
+      handleDrawingMouseUp(e);
+    };
+
+    previewCanvas.onpointercancel = (e) => {
+      if (previewCanvas.releasePointerCapture && typeof e.pointerId === "number") {
+        try { previewCanvas.releasePointerCapture(e.pointerId); } catch (_) {}
+      }
+      if (ZoomManager.isPanning) { handleCanvasPanEnd(); }
+      handleDrawingMouseUp(e);
+    };
+  } else {
+    previewCanvas.onmousedown = (e) => {
+      if (e.button === 1) { handleCanvasPanStart(e); return; }
+      if (e.button === 0 && keysState.space && !isDrawing) { handleSpacePanStart(e); return; }
+      handleDrawingMouseDown(e);
+    };
+    previewCanvas.onmousemove = (e) => {
+      if (ZoomManager.isPanning) { handleCanvasPanMove(e); return; }
+      handleDrawingMouseMove(e);
+    };
+    previewCanvas.onmouseup = (e) => {
+      if (ZoomManager.isPanning && (e.button === 1 || (e.button === 0 && keysState.space))) {
+        handleCanvasPanEnd(); return;
+      }
+      handleDrawingMouseUp(e);
+    };
+  }
+
+  previewCanvas.onmouseleave = (e) => {
+    handleDrawingMouseLeave(e, previewCanvas, mainCanvas, mainCtx);
+  };
+  previewCanvas.onmouseenter = () => {
+    resetDrawingStateOnEnter();
+  };
+  if (CONFIG.enableZoomInDrawingMode) {
+    previewCanvas.addEventListener("wheel", handleCanvasZoom);
+  }
+  previewCanvas.oncontextmenu = contextMenuHandler;
+}
+
+/**
  * Configure les outils et événements pour le mode overlay
  * Note: Les événements des boutons sont déjà configurés par populateDrawingToolbar()
  * via les helpers partagés. Cette fonction configure uniquement les éléments additionnels.
@@ -2645,7 +3076,7 @@ function setupDrawingModeTools() {
   if (exportBtn && hk.DRAWING_EXPORT) {
     exportBtn.setAttribute(
       "data-tooltip",
-      `Exporter [Ctrl+${hk.DRAWING_EXPORT.toUpperCase()}]`,
+      i18next.t("draw.buttons.export", { hotkey: `Ctrl+${hk.DRAWING_EXPORT.toUpperCase()}` }),
     );
   }
 
@@ -2655,7 +3086,7 @@ function setupDrawingModeTools() {
     if (hk.DRAWING_LIGHTBOX) {
       lightboxBtn.setAttribute(
         "data-tooltip",
-        `Table lumineuse [${hk.DRAWING_LIGHTBOX}]`,
+        i18next.t("draw.buttons.lightboxWithKey", { hotkey: hk.DRAWING_LIGHTBOX }),
       );
     }
   }
@@ -2699,64 +3130,7 @@ function setupDrawingModeTools() {
   setupDrawingInfosContainerDrag();
 
   // Événements de dessin sur le canvas preview
-  if (drawingPreview) {
-    drawingPreview.onmousedown = (e) => {
-      // Clic molette = pan
-      if (e.button === 1) {
-        handleCanvasPanStart(e);
-        return;
-      }
-      // Space + clic gauche = pan (seulement si pas en train de dessiner)
-      if (e.button === 0 && keysState.space && !isDrawing) {
-        handleSpacePanStart(e);
-        return;
-      }
-      handleDrawingMouseDown(e);
-    };
-    drawingPreview.onmousemove = (e) => {
-      if (ZoomManager.isPanning) {
-        handleCanvasPanMove(e);
-        return;
-      }
-      handleDrawingMouseMove(e);
-    };
-    drawingPreview.onmouseup = (e) => {
-      if (ZoomManager.isPanning && (e.button === 1 || (e.button === 0 && keysState.space))) {
-        handleCanvasPanEnd();
-        return;
-      }
-      handleDrawingMouseUp(e);
-    };
-    drawingPreview.onmouseleave = (e) => {
-      handleDrawingMouseLeave(e, drawingPreview, drawingCanvas, drawingCtx);
-    };
-    drawingPreview.onmouseenter = (e) => {
-      // Réinitialiser l'état quand on rentre dans le canvas pendant le dessin
-      resetDrawingStateOnEnter();
-    };
-    // Zoom avec la molette (si activé dans la config)
-    if (CONFIG.enableZoomInDrawingMode) {
-      drawingPreview.addEventListener('wheel', handleCanvasZoom);
-    }
-    drawingPreview.oncontextmenu = (e) => {
-      e.preventDefault();
-      const coords = getDrawingCoordinates(e);
-      const hitLine = findMeasurementLineAt(coords, 20);
-      if (hitLine) {
-        // Menu spécifique pour les mesures
-        if (hitLine.type === "compass") {
-          showCompassIndividualConfig(hitLine, e.clientX, e.clientY);
-        } else if (hitLine.type === "calibrate") {
-          showCalibrateIndividualConfig(hitLine, e.clientX, e.clientY);
-        } else {
-          showMeasureIndividualConfig(hitLine, e.clientX, e.clientY);
-        }
-      } else {
-        // Menu contextuel général du canvas
-        showCanvasContextMenu(e.clientX, e.clientY, "drawing");
-      }
-    };
-  }
+  setupCanvasInputEvents(drawingPreview, drawingCanvas, drawingCtx, "drawing");
 
   // Événements clavier
   document.addEventListener("keydown", handleDrawingModeKeydown);
@@ -2764,6 +3138,7 @@ function setupDrawingModeTools() {
 
   // Écouteur global pour mouseup (pour arrêter le dessin même hors du canvas)
   document.addEventListener("mouseup", handleGlobalMouseUp);
+  document.addEventListener("pointerup", handleGlobalMouseUp);
 
   // Réinitialiser l'état des touches
   keysState.shift = false;
@@ -2790,6 +3165,7 @@ function cleanupDrawingModeEvents() {
   keysState.alt = false;
   keysState.space = false;
 
+
   if (drawingPreview) {
     drawingPreview.onmousedown = null;
     drawingPreview.onmousemove = null;
@@ -2797,12 +3173,18 @@ function cleanupDrawingModeEvents() {
     drawingPreview.onmouseleave = null;
     drawingPreview.onmouseenter = null;
     drawingPreview.removeEventListener('wheel', handleCanvasZoom);
+    drawingPreview.onpointerdown = null;
+    drawingPreview.onpointermove = null;
+    drawingPreview.onpointerup = null;
+    drawingPreview.onpointercancel = null;
+    drawingPreview.onpointerrawupdate = null;
     drawingPreview.ontouchstart = null;
     drawingPreview.ontouchmove = null;
     drawingPreview.ontouchend = null;
   }
   // Retirer l'écouteur global mouseup
   document.removeEventListener("mouseup", handleGlobalMouseUp);
+  document.removeEventListener("pointerup", handleGlobalMouseUp);
   // Réinitialiser le zoom/pan à la fermeture
   resetCanvasZoomPan();
 }
@@ -2833,6 +3215,19 @@ function getToolKeyMap() {
  * @returns {boolean} true si l'événement a été traité
  */
 function handleModifierKeyDown(e) {
+  // Windows/Electron: Alt+Space (ou Shift+Alt+Space) ouvre le menu systeme de fenetre.
+  // On bloque explicitement cette combinaison en mode dessin.
+  if ((e.code === "Space" || e.key === " ") && e.altKey) {
+    keysState.alt = true;
+    keysState.space = true;
+    e.preventDefault();
+    e.stopPropagation();
+    if (typeof e.stopImmediatePropagation === "function") {
+      e.stopImmediatePropagation();
+    }
+    return true;
+  }
+
   if (e.key === "Shift") {
     keysState.shift = true;
     return false;
@@ -2845,6 +3240,7 @@ function handleModifierKeyDown(e) {
   if (e.key === " ") {
     keysState.space = true;
     e.preventDefault();
+    e.stopPropagation();
     if (!isDrawing) {
       // Mode pan avec Space : curseur grab
       const preview = zoomDrawingPreview || drawingPreview;
@@ -3061,7 +3457,7 @@ function handleDrawingModeKeydown(e) {
   // Delete/Backspace pour effacer
   if (e.key === "Delete" || e.key === "Backspace") {
     e.preventDefault();
-    clearAllDrawingCanvases();
+    clearDrawingCanvas();
     return;
   }
 }
@@ -3426,6 +3822,57 @@ function createHelpSection() {
     <div class="config-help-item"><kbd>Ctrl</kbd> + ${i18next.t("draw.help.changeGraduation")}</div>
   `;
   return section;
+}
+
+/**
+ * Crée le container compact de sliders standard (lineWidth, graduationSize, labelSize)
+ * Utilisé par les modals de config individuelle (measure, calibrate, compass)
+ * @param {Object} line - La ligne à configurer (line.config sera muté)
+ * @param {string} prefix - Préfixe pour les IDs des sliders
+ * @param {Object} values - {lineWidth, graduationSize, labelSize}
+ * @returns {HTMLElement}
+ */
+function createStandardSliders(line, prefix, values) {
+  const container = document.createElement("div");
+  container.className = "config-sliders-compact";
+
+  container.appendChild(
+    createSliderSection(
+      i18next.t("draw.config.lineWidth"),
+      `${prefix}-line-width`,
+      { min: 1, max: 10, step: 1, value: values.lineWidth, unit: "px" },
+      (val) => {
+        line.config.lineWidth = val;
+        redrawDrawingMeasurements();
+      },
+    ),
+  );
+
+  container.appendChild(
+    createSliderSection(
+      i18next.t("draw.config.graduationSize"),
+      `${prefix}-graduation-size`,
+      { min: 0.5, max: 2.5, step: 0.1, value: values.graduationSize, unit: "x" },
+      (val) => {
+        line.config.graduationSize = val;
+        redrawDrawingMeasurements();
+      },
+    ),
+  );
+
+  container.appendChild(
+    createSliderSection(
+      i18next.t("draw.config.labelSize"),
+      `${prefix}-label-size`,
+      { min: 0.5, max: 3.0, step: 0.1, value: values.labelSize, unit: "x" },
+      (val) => {
+        line.config.labelSize = val;
+        redrawDrawingMeasurements();
+      },
+    ),
+  );
+
+  return container;
 }
 
 // ================================================================
@@ -3808,50 +4255,11 @@ function showCalibrateIndividualConfig(line, x, y) {
   );
   body.appendChild(section2);
 
-  // Container pour les sliders (sans classe config-section pour espacement réduit)
-  const slidersContainer = document.createElement("div");
-  slidersContainer.className = "config-sliders-compact";
-
-  // Épaisseur du trait
-  slidersContainer.appendChild(
-    createSliderSection(
-      i18next.t("draw.config.lineWidth"),
-      "calib-line-width",
-      { min: 1, max: 10, step: 1, value: currentLineWidth, unit: "px" },
-      (val) => {
-        line.config.lineWidth = val;
-        redrawDrawingMeasurements();
-      },
-    ),
-  );
-
-  // Taille des graduations
-  slidersContainer.appendChild(
-    createSliderSection(
-      i18next.t("draw.config.graduationSize"),
-      "calib-graduation-size",
-      { min: 0.5, max: 2.5, step: 0.1, value: currentGradSize, unit: "x" },
-      (val) => {
-        line.config.graduationSize = val;
-        redrawDrawingMeasurements();
-      },
-    ),
-  );
-
-  // Taille du label
-  slidersContainer.appendChild(
-    createSliderSection(
-      i18next.t("draw.config.labelSize"),
-      "calib-label-size",
-      { min: 0.5, max: 3.0, step: 0.1, value: currentLabelSize, unit: "x" },
-      (val) => {
-        line.config.labelSize = val;
-        redrawDrawingMeasurements();
-      },
-    ),
-  );
-
-  body.appendChild(slidersContainer);
+  body.appendChild(createStandardSliders(line, "calib", {
+    lineWidth: currentLineWidth,
+    graduationSize: currentGradSize,
+    labelSize: currentLabelSize,
+  }));
 
   // Section aide
   body.appendChild(createHelpSection());
@@ -3867,10 +4275,9 @@ function showCalibrateIndividualConfig(line, x, y) {
  * @param {number} y - Position Y du clic
  */
 function showCompassIndividualConfig(line, x, y) {
-  // Supprimer un popup existant
-  document.getElementById("measure-config-popup")?.remove();
-  document.getElementById("measure-individual-config-popup")?.remove();
-  document.getElementById("calibrate-individual-config-popup")?.remove();
+  const result = createConfigPopup("compass-individual-config-popup", i18next.t("draw.modals.compassSettings"));
+  if (!result) return;
+  const { popup, body } = result;
 
   // Initialiser la config si absente
   if (!line.config) {
@@ -3892,17 +4299,6 @@ function showCompassIndividualConfig(line, x, y) {
   const currentGradSize = line.config.graduationSize ?? measureGraduationSize;
   const currentLabelSize = line.config.labelSize ?? measureLabelSize;
   const currentLineWidth = line.config.lineWidth ?? 3;
-
-  const popup = document.createElement("div");
-  popup.id = "measure-config-popup";
-
-  // Header
-  const header = createModalHeader(i18next.t("draw.modals.compassSettings"), () => popup.remove());
-  popup.appendChild(header);
-
-  // Body
-  const body = document.createElement("div");
-  body.className = "config-body";
 
   // Section couleur et label
   const section1 = document.createElement("div");
@@ -3942,68 +4338,15 @@ function showCompassIndividualConfig(line, x, y) {
   );
   body.appendChild(section2);
 
-  // Container compact pour les sliders
-  const slidersContainer = document.createElement("div");
-  slidersContainer.className = "config-sliders-compact";
+  body.appendChild(createStandardSliders(line, "compass", {
+    lineWidth: currentLineWidth,
+    graduationSize: currentGradSize,
+    labelSize: currentLabelSize,
+  }));
 
-  // Épaisseur du trait
-  slidersContainer.appendChild(
-    createSliderSection(
-      i18next.t("draw.config.lineWidth"),
-      "compass-line-width",
-      { min: 1, max: 10, step: 1, value: currentLineWidth, unit: "px" },
-      (val) => {
-        line.config.lineWidth = val;
-        redrawDrawingMeasurements();
-      },
-    ),
-  );
+  body.appendChild(createHelpSection());
 
-  // Taille des graduations
-  slidersContainer.appendChild(
-    createSliderSection(
-      i18next.t("draw.config.graduationSize"),
-      "compass-graduation-size",
-      { min: 0.5, max: 2.5, step: 0.1, value: currentGradSize, unit: "x" },
-      (val) => {
-        line.config.graduationSize = val;
-        redrawDrawingMeasurements();
-      },
-    ),
-  );
-
-  // Taille de la valeur
-  slidersContainer.appendChild(
-    createSliderSection(
-      i18next.t("draw.config.labelSize"),
-      "compass-label-size",
-      { min: 0.5, max: 3.0, step: 0.1, value: currentLabelSize, unit: "x" },
-      (val) => {
-        line.config.labelSize = val;
-        redrawDrawingMeasurements();
-      },
-    ),
-  );
-  body.appendChild(slidersContainer);
-
-  popup.appendChild(body);
-  document.body.appendChild(popup);
-
-  const helpSection = document.createElement("div");
-  helpSection.className = "config-help-section";
-  helpSection.innerHTML = `
-    <div class="config-help-item"><kbd>Alt</kbd> + ${i18next.t("draw.help.duplicateMeasure")}</div>
-    <div class="config-help-item"><kbd>Shift</kbd>+<kbd>Alt</kbd> + ${i18next.t("draw.help.deleteMeasure")}</div>
-    <div class="config-help-item"><kbd>Ctrl</kbd> + ${i18next.t("draw.help.changeGraduation")}</div>
-  `;
-  body.appendChild(helpSection);
-
-  popup.appendChild(body);
-  document.body.appendChild(popup);
-
-  // Positionner et configurer
-  positionPopupInScreen(popup, x, y, 320, 400);
-  makeMeasureConfigDraggable(popup);
+  finalizeConfigPopup(popup, body, { x, y, width: 320, height: 400 });
 }
 
 /**
@@ -4564,9 +4907,6 @@ function drawShapePreviewConstrained(start, end, tool, isShift, isAlt) {
 function drawFinalShapeConstrained(start, end, tool, isShift, isAlt) {
   if (!drawingCtx || !start || !end) return;
 
-  const ctx = drawingCtx;
-  applyStrokeStyle(ctx);
-
   const { drawStart, drawEnd } = applyShapeConstraints(
     start,
     end,
@@ -4574,6 +4914,73 @@ function drawFinalShapeConstrained(start, end, tool, isShift, isAlt) {
     isShift,
     isAlt,
   );
+
+  if (tool === "rectangle") {
+    const minX = Math.min(drawStart.x, drawEnd.x);
+    const maxX = Math.max(drawStart.x, drawEnd.x);
+    const minY = Math.min(drawStart.y, drawEnd.y);
+    const maxY = Math.max(drawStart.y, drawEnd.y);
+
+    if (Math.abs(maxX - minX) < 1 || Math.abs(maxY - minY) < 1) return;
+
+    const groupId = `shape-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const baseConfig = {
+      color: annotationStyle.color,
+      lineWidth: annotationStyle.size,
+      showSizeLabels: false,
+      graduationType: "none",
+      graduationSize: 0,
+    };
+    const edge = (start, end, startCorner, endCorner) => ({
+      id: Date.now() + Math.random(),
+      type: "shape-edge",
+      shapeGroup: groupId,
+      startCorner,
+      endCorner,
+      start,
+      end,
+      config: { ...baseConfig },
+    });
+
+    measurementLines.push(
+      edge({ x: minX, y: minY }, { x: maxX, y: minY }, "a", "b"), // top
+      edge({ x: maxX, y: minY }, { x: maxX, y: maxY }, "b", "c"), // right
+      edge({ x: maxX, y: maxY }, { x: minX, y: maxY }, "c", "d"), // bottom
+      edge({ x: minX, y: maxY }, { x: minX, y: minY }, "d", "a"), // left
+    );
+    redrawDrawingMeasurements();
+    updateDrawingTotalDistance();
+    return;
+  }
+
+  if (tool === "line") {
+    const startPt = { x: drawStart.x, y: drawStart.y };
+    const endPt = { x: drawEnd.x, y: drawEnd.y };
+    const control = {
+      x: (startPt.x + endPt.x) / 2,
+      y: (startPt.y + endPt.y) / 2,
+    };
+    measurementLines.push({
+      id: Date.now() + Math.random(),
+      type: "shape-line",
+      start: startPt,
+      end: endPt,
+      control,
+      config: {
+        color: annotationStyle.color,
+        lineWidth: annotationStyle.size,
+        showSizeLabels: false,
+        graduationType: "none",
+        graduationSize: 0,
+      },
+    });
+    redrawDrawingMeasurements();
+    updateDrawingTotalDistance();
+    return;
+  }
+
+  const ctx = drawingCtx;
+  applyStrokeStyle(ctx);
   drawShapeOnCanvas(ctx, drawStart, drawEnd, tool);
 }
 
@@ -4589,6 +4996,17 @@ function drawFinalShapeConstrained(start, end, tool, isShift, isAlt) {
 function handleShiftClickDelete(coords) {
   const hit = findMeasurementLineAt(coords, 20);
   if (!hit) return false;
+
+  if (hit.type === "shape-edge" && hit.shapeGroup) {
+    measurementLines = measurementLines.filter(
+      (line) => !(line.type === "shape-edge" && line.shapeGroup === hit.shapeGroup),
+    );
+    redrawDrawingMeasurements();
+    updateDrawingTotalDistance();
+    updateDrawingButtonStates("main");
+    updateDrawingButtonStates("zoom");
+    return true;
+  }
 
   const index = measurementLines.findIndex((line) => line.id === hit.id);
   if (index === -1) return false;
@@ -4619,13 +5037,13 @@ function handleAltClickDuplicate(coords) {
   const hit = findMeasurementLineAt(coords, 20);
   if (!hit) return null;
 
-  // Ne pas dupliquer les calibrations (il ne peut y en avoir qu'une)
-  if (hit.type === "calibrate") {
+  // Ne pas dupliquer les calibrations et formes éditables
+  if (hit.type === "calibrate" || hit.type === "shape-edge") {
     return null; // Pas de toast, juste ignorer silencieusement
   }
 
   // Créer une copie de la mesure (sans décalage, le drag positionnera)
-  const duplicate = JSON.parse(JSON.stringify(hit));
+  const duplicate = structuredClone(hit);
   duplicate.id = Date.now() + Math.random(); // Nouvel ID unique
 
   // Ajouter à la liste
@@ -4644,6 +5062,8 @@ function handleAltClickDuplicate(coords) {
 function handleCtrlClickCycle(coords) {
   const hit = findMeasurementLineAt(coords, 20);
   if (!hit) return false;
+
+  if (hit.type === "shape-edge") return false;
 
   if (!hit.config) hit.config = {};
 
@@ -4687,6 +5107,18 @@ function handleCtrlClickCycle(coords) {
 function handleEndpointClick(coords) {
   const hit = findEndpointAt(coords, 15);
   if (!hit) return false;
+  if (
+    (hit.line.type === "shape-line" || hit.line.type === "shape-edge") &&
+    !rectangleEditMode
+  ) {
+    return false;
+  }
+  if (
+    (hit.line.type === "shape-line" && !isShapeLineSelected(hit.line)) ||
+    (hit.line.type === "shape-edge" && !isShapeEdgeSelected(hit.line))
+  ) {
+    return selectEditableShape(hit.line);
+  }
 
   isDraggingEndpoint = true;
   selectedMeasurement = hit.line;
@@ -4726,6 +5158,15 @@ function handleLabelClick(coords) {
 function handleMeasurementClick(coords) {
   const lineHit = findMeasurementLineAt(coords, 15);
   if (!lineHit) return false;
+  if ((lineHit.type === "shape-line" || lineHit.type === "shape-edge") && !rectangleEditMode) {
+    return false;
+  }
+  if (
+    (lineHit.type === "shape-line" && !isShapeLineSelected(lineHit)) ||
+    (lineHit.type === "shape-edge" && !isShapeEdgeSelected(lineHit))
+  ) {
+    return selectEditableShape(lineHit);
+  }
 
   // Calculer le centre de la mesure
   let centerX, centerY;
@@ -4761,7 +5202,7 @@ function initPencilDrawing(coords) {
   drawingCtx.beginPath();
   drawingCtx.moveTo(coords.x, coords.y);
   drawingCtx.strokeStyle = annotationStyle.color;
-  drawingCtx.lineWidth = annotationStyle.size;
+  drawingCtx.lineWidth = getActivePencilStrokeSize();
   drawingCtx.lineCap = "round";
   drawingCtx.lineJoin = "round";
 }
@@ -4791,6 +5232,8 @@ function initLaserDrawing(coords) {
 function handleDrawingMouseDown(e) {
   // Seulement clic gauche (button 0), ignorer clic droit (button 2) et molette (button 1)
   if (e.button !== 0) return;
+  hideDrawingEditHud();
+
 
   const coords = getDrawingCoordinates(e);
 
@@ -4835,22 +5278,39 @@ function handleDrawingMouseDown(e) {
     }
   }
 
-  // Ctrl+clic sur une mesure = changer le type de graduation
-  if (e.ctrlKey) {
+  // Ctrl+clic sur une mesure = changer le type de graduation (uniquement outils de mesure)
+  if (e.ctrlKey && ["measure", "calibrate", "protractor"].includes(currentTool)) {
     handleCtrlClickCycle(coords);
     return; // Ne pas traiter Ctrl+clic autrement
   }
 
   // Vérifier si on clique sur une borne/label/segment de mesure (pour les outils measure/calibrate/protractor)
-  if (["measure", "calibrate", "protractor"].includes(currentTool)) {
+  const rectangleEditingActive = currentTool === "rectangle" && rectangleEditMode;
+  const lineEditingActive = currentTool === "line" && rectangleEditMode;
+  if (
+    ["measure", "calibrate", "protractor"].includes(currentTool) ||
+    rectangleEditingActive ||
+    lineEditingActive
+  ) {
+    // Point de flexion (shape-line)
+    if (lineEditingActive && handleShapeControlClick(coords)) return;
+
     // Borne de mesure
     if (handleEndpointClick(coords)) return;
 
-    // Label de mesure (pas pour protractor)
-    if (currentTool !== "protractor" && handleLabelClick(coords)) return;
+    // Label de mesure (pas pour protractor ni rectangle)
+    if (currentTool !== "protractor" && currentTool !== "rectangle" && handleLabelClick(coords)) return;
 
     // Segment de mesure entier
     if (handleMeasurementClick(coords)) return;
+  }
+
+  if (
+    (currentTool === "line" || (currentTool === "rectangle" && rectangleEditMode)) &&
+    (selectedShapeLineId || selectedShapeGroupId)
+  ) {
+    clearEditableShapeSelection();
+    redrawDrawingMeasurements();
   }
 
   // Gestion spéciale pour l'outil protractor (compas)
@@ -5024,6 +5484,8 @@ function getEdgeIntersection(from, to, width, height) {
  * Gère le mouvement du pencil (dessin libre ou ligne droite avec Shift)
  */
 function handlePencilMove(coords, ctx, previewCtx, previewCanvas) {
+  const strokeSize = getActivePencilStrokeSize();
+
   if (keysState.shift) {
     // Mode Shift : ligne droite depuis le dernier point
     // Si lastDrawnPoint est null (on vient de rentrer dans le canvas),
@@ -5038,7 +5500,7 @@ function handlePencilMove(coords, ctx, previewCtx, previewCanvas) {
     previewCtx.moveTo(lastDrawnPoint.x, lastDrawnPoint.y);
     previewCtx.lineTo(coords.x, coords.y);
     previewCtx.strokeStyle = annotationStyle.color;
-    previewCtx.lineWidth = annotationStyle.size;
+    previewCtx.lineWidth = strokeSize;
     previewCtx.lineCap = "round";
     previewCtx.stroke();
     stabilizerBuffer = [coords];
@@ -5052,7 +5514,7 @@ function handlePencilMove(coords, ctx, previewCtx, previewCanvas) {
     ctx.moveTo(lastDrawnPoint.x, lastDrawnPoint.y);
     ctx.lineTo(coords.x, coords.y);
     ctx.strokeStyle = annotationStyle.color;
-    ctx.lineWidth = annotationStyle.size;
+    ctx.lineWidth = strokeSize;
     ctx.lineCap = "round";
     ctx.stroke();
     ctx.beginPath();
@@ -5080,7 +5542,7 @@ function handlePencilMove(coords, ctx, previewCtx, previewCanvas) {
 
     if (smoothed) {
       // Le point a assez bougé, on dessine avec courbe lissée
-      ctx.lineWidth = annotationStyle.size;
+      ctx.lineWidth = strokeSize;
       const midX = (lastDrawnPoint.x + smoothed.x) / 2;
       const midY = (lastDrawnPoint.y + smoothed.y) / 2;
       ctx.quadraticCurveTo(lastDrawnPoint.x, lastDrawnPoint.y, midX, midY);
@@ -5128,7 +5590,7 @@ function handlePencilMove(coords, ctx, previewCtx, previewCanvas) {
     }
   } else {
     // Pas de stabilisation, dessin avec lissage par courbes de Bézier (midpoint smoothing)
-    ctx.lineWidth = annotationStyle.size;
+    ctx.lineWidth = strokeSize;
 
     if (lastDrawnPoint) {
       // Courbe quadratique : control = lastDrawnPoint, end = midpoint
@@ -5230,6 +5692,16 @@ function handleLaserMove(coords) {
  * Gère le mouvement pour les formes (rectangle, circle, line, arrow)
  */
 function handleShapeMove(coords) {
+  const previewCoords =
+    currentTool === "line"
+      ? getSmartLineEndpoint(
+          startPoint,
+          coords,
+          !!keysState.shift,
+          !!keysState.ctrl,
+        )
+      : coords;
+
   if (keysState.space && originalStartPoint) {
     // Déplacement avec Espace
     if (!spacePressStartPos) {
@@ -5261,15 +5733,31 @@ function handleShapeMove(coords) {
       keysState.shift,
       keysState.alt,
     );
+    if (currentTool === "line") {
+      updateDrawingEditHudFromPoints(
+        movedStart,
+        movedEnd,
+        lastMousePosition?.x ?? null,
+        lastMousePosition?.y ?? null,
+      );
+    }
   } else {
     // Prévisualisation normale
     drawShapePreviewConstrained(
       startPoint,
-      coords,
+      previewCoords,
       currentTool,
       keysState.shift,
       keysState.alt,
     );
+    if (currentTool === "line") {
+      updateDrawingEditHudFromPoints(
+        startPoint,
+        previewCoords,
+        lastMousePosition?.x ?? null,
+        lastMousePosition?.y ?? null,
+      );
+    }
   }
 }
 
@@ -5396,8 +5884,47 @@ function handleEndpointDrag(coords, e) {
     return false;
   }
 
-  // Compass : maintenir la longueur fixe
-  if (selectedMeasurement.type === "compass" && calibrationUnit > 0) {
+  if (selectedMeasurement.type === "shape-line") {
+    const anchorPoint =
+      draggedEndpoint === "start"
+        ? selectedMeasurement.end
+        : selectedMeasurement.start;
+    let nextPoint = { x: coords.x, y: coords.y };
+    if (e.ctrlKey) {
+      const snap = findNearbyEndpointSnap(
+        nextPoint,
+        14,
+        selectedMeasurement.id,
+        draggedEndpoint,
+      );
+      if (snap) {
+        nextPoint = snap;
+      } else if (e.shiftKey) {
+        nextPoint = applyLine45Constraint(anchorPoint, nextPoint);
+      }
+    } else if (e.shiftKey) {
+      nextPoint = applyLine45Constraint(anchorPoint, nextPoint);
+    }
+    const beforePoint = {
+      x: selectedMeasurement[draggedEndpoint].x,
+      y: selectedMeasurement[draggedEndpoint].y,
+    };
+    selectedMeasurement[draggedEndpoint] = nextPoint;
+    if (selectedMeasurement.control) {
+      const dx = nextPoint.x - beforePoint.x;
+      const dy = nextPoint.y - beforePoint.y;
+      selectedMeasurement.control = {
+        x: selectedMeasurement.control.x + dx * 0.5,
+        y: selectedMeasurement.control.y + dy * 0.5,
+      };
+    }
+    updateDrawingEditHudFromLine(
+      selectedMeasurement,
+      lastMousePosition?.x ?? null,
+      lastMousePosition?.y ?? null,
+    );
+  } else if (selectedMeasurement.type === "compass" && calibrationUnit > 0) {
+    // Compass : maintenir la longueur fixe
     const anchorPoint =
       draggedEndpoint === "start"
         ? selectedMeasurement.end
@@ -5417,6 +5944,8 @@ function handleEndpointDrag(coords, e) {
     }
   } else if (selectedMeasurement.type === "calibrate") {
     handleCalibrateDrag(coords, e);
+  } else if (selectedMeasurement.type === "shape-edge") {
+    handleShapeEdgeCornerDrag(coords);
   } else {
     handleMeasureDrag(coords, e);
   }
@@ -5478,6 +6007,14 @@ function handleCalibrateDrag(coords, e) {
  * Gère le drag spécifique pour measure
  */
 function handleMeasureDrag(coords, e) {
+  const beforePoint =
+    selectedMeasurement && draggedEndpoint
+      ? {
+          x: selectedMeasurement[draggedEndpoint].x,
+          y: selectedMeasurement[draggedEndpoint].y,
+        }
+      : null;
+
   if (keysState.shift || e.shiftKey) {
     // Shift : verrouiller la taille
     const anchorPoint =
@@ -5504,6 +6041,86 @@ function handleMeasureDrag(coords, e) {
   } else {
     selectedMeasurement[draggedEndpoint] = { x: coords.x, y: coords.y };
   }
+
+  if (
+    selectedMeasurement &&
+    selectedMeasurement.type === "shape-line" &&
+    selectedMeasurement.control &&
+    beforePoint
+  ) {
+    const afterPoint = selectedMeasurement[draggedEndpoint];
+    const dx = afterPoint.x - beforePoint.x;
+    const dy = afterPoint.y - beforePoint.y;
+    selectedMeasurement.control = {
+      x: selectedMeasurement.control.x + dx * 0.5,
+      y: selectedMeasurement.control.y + dy * 0.5,
+    };
+  }
+}
+
+function handleShapeEdgeCornerDrag(coords) {
+  if (!selectedMeasurement || selectedMeasurement.type !== "shape-edge") {
+    return;
+  }
+
+  const cornerKey =
+    draggedEndpoint === "start"
+      ? selectedMeasurement.startCorner
+      : selectedMeasurement.endCorner;
+  if (!cornerKey) {
+    selectedMeasurement[draggedEndpoint] = { x: coords.x, y: coords.y };
+    return;
+  }
+
+  const groupId = selectedMeasurement.shapeGroup;
+  if (!groupId) {
+    selectedMeasurement[draggedEndpoint] = { x: coords.x, y: coords.y };
+    return;
+  }
+
+  measurementLines.forEach((line) => {
+    if (line.type !== "shape-edge" || line.shapeGroup !== groupId) return;
+    if (line.startCorner === cornerKey) {
+      line.start = { x: coords.x, y: coords.y };
+    }
+    if (line.endCorner === cornerKey) {
+      line.end = { x: coords.x, y: coords.y };
+    }
+  });
+}
+
+function findShapeControlAt(coords, threshold = 14) {
+  for (const line of measurementLines) {
+    if (!line || line.type !== "shape-line" || !line.control) continue;
+    if (!isShapeLineSelected(line)) continue;
+    if (getDistance(coords, line.control) < threshold) {
+      return line;
+    }
+  }
+  return null;
+}
+
+function handleShapeControlClick(coords) {
+  if (!rectangleEditMode) return false;
+  const hit = findShapeControlAt(coords);
+  if (!hit) return false;
+  isDraggingShapeControl = true;
+  dragShapeControlLine = hit;
+  isDrawing = true;
+  startPoint = coords;
+  return true;
+}
+
+function handleShapeControlDrag(coords) {
+  if (!isDraggingShapeControl || !dragShapeControlLine) return false;
+  dragShapeControlLine.control = { x: coords.x, y: coords.y };
+  redrawDrawingMeasurements();
+  updateDrawingEditHudFromLine(
+    dragShapeControlLine,
+    lastMousePosition?.x ?? null,
+    lastMousePosition?.y ?? null,
+  );
+  return true;
 }
 
 /**
@@ -5534,6 +6151,38 @@ function handleMeasurementDrag(coords) {
 
   const deltaX = newCenterX - oldCenterX;
   const deltaY = newCenterY - oldCenterY;
+
+  if (selectedMeasurement.type === "shape-edge" && selectedMeasurement.shapeGroup) {
+    measurementLines.forEach((line) => {
+      if (
+        line.type === "shape-edge" &&
+        line.shapeGroup === selectedMeasurement.shapeGroup
+      ) {
+        line.start.x += deltaX;
+        line.start.y += deltaY;
+        line.end.x += deltaX;
+        line.end.y += deltaY;
+      }
+    });
+    redrawDrawingMeasurements();
+    return true;
+  }
+
+  if (selectedMeasurement.type === "shape-line" && selectedMeasurement.control) {
+    selectedMeasurement.start.x += deltaX;
+    selectedMeasurement.start.y += deltaY;
+    selectedMeasurement.end.x += deltaX;
+    selectedMeasurement.end.y += deltaY;
+    selectedMeasurement.control.x += deltaX;
+    selectedMeasurement.control.y += deltaY;
+    redrawDrawingMeasurements();
+    updateDrawingEditHudFromLine(
+      selectedMeasurement,
+      lastMousePosition?.x ?? null,
+      lastMousePosition?.y ?? null,
+    );
+    return true;
+  }
 
   selectedMeasurement.start.x += deltaX;
   selectedMeasurement.start.y += deltaY;
@@ -5639,8 +6288,19 @@ function handleIdleHover(coords, e) {
   if (
     currentTool === "measure" ||
     currentTool === "calibrate" ||
-    currentTool === "protractor"
+    currentTool === "protractor" ||
+    (currentTool === "rectangle" && rectangleEditMode) ||
+    (currentTool === "line" && rectangleEditMode)
   ) {
+    if (currentTool === "line") {
+      const controlHit = findShapeControlAt(coords, 16);
+      if (controlHit) {
+        if (drawingPreview) drawingPreview.style.cursor = "grab";
+        redrawDrawingMeasurements();
+        return true;
+      }
+    }
+
     // Protractor en attente du second clic
     if (
       currentTool === "protractor" &&
@@ -5656,12 +6316,22 @@ function handleIdleHover(coords, e) {
       redrawDrawingMeasurements(coords, 15);
     } else {
       const labelHit =
-        currentTool !== "protractor" ? findLabelAt(coords) : null;
+        currentTool !== "protractor" && currentTool !== "rectangle"
+          ? findLabelAt(coords)
+          : null;
       if (labelHit) {
         if (drawingPreview) drawingPreview.style.cursor = "grab";
       } else {
         const lineHit = findMeasurementLineAt(coords, 15);
         if (lineHit) {
+          if (
+            (lineHit.type === "shape-line" && !isShapeLineSelected(lineHit)) ||
+            (lineHit.type === "shape-edge" && !isShapeEdgeSelected(lineHit))
+          ) {
+            if (drawingPreview) drawingPreview.style.cursor = "pointer";
+            redrawDrawingMeasurements(coords, 15);
+            return true;
+          }
           if (drawingPreview) drawingPreview.style.cursor = "move";
         } else {
           if (drawingPreview) drawingPreview.style.cursor = "";
@@ -5680,6 +6350,8 @@ function handleIdleHover(coords, e) {
  * Utilise les helpers Phase 6.1 pour la logique par outil
  */
 function handleDrawingMouseMove(e) {
+
+
   // Mettre à jour la position pour updateAltDuplicateCursor
   lastMousePosition = { x: e.clientX, y: e.clientY };
 
@@ -5715,7 +6387,14 @@ function handleDrawingMouseMove(e) {
 
   // Quand on ne dessine pas : gestion du survol
   if (!isDrawing) {
+    hideDrawingEditHud();
     handleIdleHover(coords, e);
+    return;
+  }
+
+  // Mode déplacement de borne
+  if (isDraggingShapeControl && dragShapeControlLine) {
+    handleShapeControlDrag(coords);
     return;
   }
 
@@ -5791,10 +6470,21 @@ function handleDrawingMouseMove(e) {
 /**
  * Gère le mouseup pour le dessin
  */
-function handleDrawingMouseUp() {
+function handleDrawingMouseUp(e = null) {
   if (!isDrawing) return;
 
   isDrawing = false;
+
+  if (isDraggingShapeControl) {
+    isDraggingShapeControl = false;
+    dragShapeControlLine = null;
+    redrawDrawingMeasurements();
+    saveDrawingHistory();
+    startPoint = null;
+    hideDrawingEditHud();
+
+    return;
+  }
 
   // Si on était en mode déplacement de borne
   if (isDraggingEndpoint) {
@@ -5804,6 +6494,8 @@ function handleDrawingMouseUp() {
     redrawDrawingMeasurements();
     saveDrawingHistory();
     startPoint = null;
+    hideDrawingEditHud();
+
     return;
   }
 
@@ -5815,6 +6507,8 @@ function handleDrawingMouseUp() {
     redrawDrawingMeasurements();
     saveDrawingHistory();
     startPoint = null;
+    hideDrawingEditHud();
+
     return;
   }
 
@@ -5829,6 +6523,8 @@ function handleDrawingMouseUp() {
     redrawDrawingMeasurements();
     saveDrawingHistory();
     startPoint = null;
+    hideDrawingEditHud();
+
     return;
   }
 
@@ -5845,7 +6541,7 @@ function handleDrawingMouseUp() {
       drawingCtx.moveTo(lineOrigin.x, lineOrigin.y);
       drawingCtx.lineTo(endPoint.x, endPoint.y);
       drawingCtx.strokeStyle = annotationStyle.color;
-      drawingCtx.lineWidth = annotationStyle.size;
+      drawingCtx.lineWidth = getActivePencilStrokeSize();
       drawingCtx.lineCap = "round";
       drawingCtx.stroke();
       // Mettre à jour lastDrawnPoint pour une éventuelle continuation
@@ -5889,10 +6585,14 @@ function handleDrawingMouseUp() {
     ["rectangle", "circle", "line", "arrow"].includes(currentTool) &&
     startPoint
   ) {
+    const finalShapeEnd =
+      currentTool === "line"
+        ? getSmartLineEndpoint(startPoint, endPoint, !!keysState.shift, !!keysState.ctrl)
+        : endPoint;
     // Dessiner la forme finale avec les contraintes
     drawFinalShapeConstrained(
       startPoint,
-      endPoint,
+      finalShapeEnd,
       currentTool,
       keysState.shift,
       keysState.alt,
@@ -5937,6 +6637,7 @@ function handleDrawingMouseUp() {
         clearCanvas(drawingPreviewCtx, drawingPreview);
       }
       saveDrawingHistory();
+  
       return;
     }
     // Si on est en attente du second clic (mode deux clics) ou pas de mouvement, rester en attente
@@ -5965,6 +6666,7 @@ function handleDrawingMouseUp() {
 
   // Sauvegarder l'état pour undo
   saveDrawingHistory();
+  hideDrawingEditHud();
 
   // Mettre à jour l'état des boutons (notamment le bouton clear)
   updateDrawingButtonStates("main");
@@ -5979,6 +6681,7 @@ function handleDrawingMouseUp() {
   spacePressStartPos = null;
   shapeEndAtSpacePress = null;
   measureLockedLength = null; // Réinitialiser le lock de taille
+
 }
 
 /**
@@ -6443,6 +7146,13 @@ function renderCompassLabel(ctx, line, scaleFactor, color, labelSize) {
  * Dessine une ligne de type measure ou calibrate
  */
 function renderMeasureLine(ctx, line, scaleFactor, hoverPoint, hoverThreshold) {
+  const isShapeEdge = line.type === "shape-edge";
+  const isShapeLine = line.type === "shape-line";
+  const shapeSelected = isShapeLine
+    ? isShapeLineSelected(line)
+    : isShapeEdge
+      ? isShapeEdgeSelected(line)
+      : false;
   const color =
     line.type === "calibrate"
       ? (line.config?.color ?? "#10b981")
@@ -6452,7 +7162,22 @@ function renderMeasureLine(ctx, line, scaleFactor, hoverPoint, hoverThreshold) {
       ? (line.config?.lineWidth ?? 3)
       : (line.config?.lineWidth ?? measureState.lineWidth);
 
-  drawSmoothLine(ctx, line.start, line.end, color, lineWidth, "butt");
+  if (isShapeLine && line.control) {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = lineWidth;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(line.start.x, line.start.y);
+    ctx.quadraticCurveTo(
+      line.control.x,
+      line.control.y,
+      line.end.x,
+      line.end.y,
+    );
+    ctx.stroke();
+  } else {
+    drawSmoothLine(ctx, line.start, line.end, color, lineWidth, "butt");
+  }
 
   // Subdivisions calibrate
   if (line.type === "calibrate") {
@@ -6509,16 +7234,58 @@ function renderMeasureLine(ctx, line, scaleFactor, hoverPoint, hoverThreshold) {
     else if (distEnd < scaledThreshold) hoveredEndpoint = "end";
   }
 
-  if (hoveredEndpoint === "start") {
-    drawEndpoint(ctx, line.start.x, line.start.y, color, scaleFactor);
-  } else {
-    drawEndpointTick(ctx, line.start, line.end, color, lineWidth, scaleFactor);
-  }
+  if (isShapeEdge || isShapeLine) {
+    // Pas de ticks pour les rectangles éditables: évite les dépassements/croisements visuels.
+    // Rectangle: bornes visibles uniquement au survol quand l'edition de forme est active.
+    if (isShapeEdge) {
+      if (rectangleEditMode && currentTool === "rectangle") {
+        if (hoveredEndpoint === "start") {
+          drawEndpoint(ctx, line.start.x, line.start.y, color, scaleFactor);
+        }
+        if (hoveredEndpoint === "end") {
+          drawEndpoint(ctx, line.end.x, line.end.y, color, scaleFactor);
+        }
+      }
+    } else {
+      // Ligne: bornes visibles si selectionnee, ou au survol.
+      if (hoveredEndpoint === "start" || shapeSelected) {
+        drawEndpoint(ctx, line.start.x, line.start.y, color, scaleFactor);
+      }
+      if (hoveredEndpoint === "end" || shapeSelected) {
+        drawEndpoint(ctx, line.end.x, line.end.y, color, scaleFactor);
+      }
+    }
 
-  if (hoveredEndpoint === "end") {
-    drawEndpoint(ctx, line.end.x, line.end.y, color, scaleFactor);
+    if (
+      isShapeLine &&
+      line.control &&
+      currentTool === "line" &&
+      rectangleEditMode &&
+      shapeSelected
+    ) {
+      const controlHover = hoverPoint
+        ? getDistance(hoverPoint, line.control) < scaledThreshold
+        : false;
+      drawEndpoint(
+        ctx,
+        line.control.x,
+        line.control.y,
+        controlHover ? "#6ea8ff" : color,
+        controlHover ? scaleFactor * 1.05 : scaleFactor * 0.9,
+      );
+    }
   } else {
-    drawEndpointTick(ctx, line.end, line.start, color, lineWidth, scaleFactor);
+    if (hoveredEndpoint === "start") {
+      drawEndpoint(ctx, line.start.x, line.start.y, color, scaleFactor);
+    } else {
+      drawEndpointTick(ctx, line.start, line.end, color, lineWidth, scaleFactor);
+    }
+
+    if (hoveredEndpoint === "end") {
+      drawEndpoint(ctx, line.end.x, line.end.y, color, scaleFactor);
+    } else {
+      drawEndpointTick(ctx, line.end, line.start, color, lineWidth, scaleFactor);
+    }
   }
 
   // Label measure
@@ -6563,6 +7330,7 @@ function renderCalibrateLabel(ctx, line, scaleFactor) {
  */
 function redrawDrawingMeasurements(hoverPoint = null, hoverThreshold = 15) {
   if (!drawingMeasuresCtx || !drawingMeasures) return;
+  syncEditableShapeSelection();
 
   const scaleFactor = getMeasureScaleFactor(drawingMeasures);
 
@@ -6964,8 +7732,13 @@ function updateDrawingButtonStates(context = "main") {
 
   // État
   const hasValidCalibration = calibrationUnit && calibrationUnit > 0;
-  const hasMeasurements = measurementLines.length > 0;
+  const hasMeasurements = measurementLines.some(
+    (line) => line.type !== "shape-edge" && line.type !== "shape-line",
+  );
   const hasDrawingContent = !isCanvasBlank(drawingCanvas);
+  const hasShapeEdges = measurementLines.some(
+    (line) => line.type === "shape-edge" || line.type === "shape-line",
+  );
 
   // Protractor : nécessite une calibration valide (> 0px)
   const protractorBtn = document.querySelector(protractorSelector);
@@ -6987,12 +7760,13 @@ function updateDrawingButtonStates(context = "main") {
       : "none";
   }
 
-  // Clear : nécessite du contenu dessin (pas les mesures, elles ont leur propre bouton)
+  // Clear : contenu raster OU rectangles vectoriels
   const clearBtn = document.querySelector(clearSelector);
   if (clearBtn) {
-    clearBtn.classList.toggle("disabled", !hasDrawingContent);
-    clearBtn.style.opacity = hasDrawingContent ? "1" : "0.3";
-    clearBtn.style.pointerEvents = hasDrawingContent ? "auto" : "none";
+    const canClear = hasDrawingContent || hasShapeEdges;
+    clearBtn.classList.toggle("disabled", !canClear);
+    clearBtn.style.opacity = canClear ? "1" : "0.3";
+    clearBtn.style.pointerEvents = canClear ? "auto" : "none";
   }
 
   // Masquer unit-info si calibration invalide (0px) - uniquement pour le contexte main
@@ -7131,8 +7905,27 @@ function hideDrawingCursor() {
  * Efface le canvas de dessin
  */
 function clearDrawingCanvas() {
+  let changed = false;
+  clearEditableShapeSelection();
+  hideDrawingEditHud();
+
   if (drawingCtx && drawingCanvas) {
     clearCanvas(drawingCtx, drawingCanvas);
+    changed = true;
+  }
+
+  // Le bouton clear supprime aussi les formes vectorielles (rectangle + ligne editable)
+  const before = measurementLines.length;
+  measurementLines = measurementLines.filter(
+    (line) => line.type !== "shape-edge" && line.type !== "shape-line",
+  );
+  if (measurementLines.length !== before) {
+    changed = true;
+    redrawDrawingMeasurements();
+    updateDrawingTotalDistance();
+  }
+
+  if (changed) {
     saveDrawingHistory();
     updateDrawingButtonStates("main");
     updateDrawingButtonStates("zoom");
@@ -7144,8 +7937,13 @@ function clearDrawingCanvas() {
  */
 function clearDrawingMeasurements() {
   if (drawingMeasuresCtx && drawingMeasures) {
+    hideDrawingEditHud();
     clearCanvas(drawingMeasuresCtx, drawingMeasures);
-    measurementLines = [];
+    // Conserver les formes vectorielles editables pour que seul "clear" les efface.
+    measurementLines = measurementLines.filter(
+      (line) => line.type === "shape-edge" || line.type === "shape-line",
+    );
+    redrawDrawingMeasurements();
     calibrationUnit = null;
 
     // Cacher les infos
@@ -7175,7 +7973,7 @@ function saveDrawingHistory() {
     drawingHistory = drawingHistory.slice(0, drawingHistoryIndex + 1);
   }
 
-  drawingHistory.push(drawingCanvas.toDataURL());
+  drawingHistory.push(buildCurrentHistorySnapshot());
   drawingHistoryIndex++;
 
   // Limiter la taille de l'historique
@@ -7192,17 +7990,8 @@ function undoDrawing() {
   if (drawingHistoryIndex <= 0) return;
 
   drawingHistoryIndex--;
-  const state = drawingHistory[drawingHistoryIndex];
-
-  const img = new Image();
-  img.onload = () => {
-    clearCanvas(drawingCtx, drawingCanvas);
-    drawingCtx.drawImage(img, 0, 0);
-    // Mettre à jour l'état des boutons après undo
-    updateDrawingButtonStates("main");
-    updateDrawingButtonStates("zoom");
-  };
-  img.src = state;
+  const snapshot = drawingHistory[drawingHistoryIndex];
+  applyHistorySnapshot(snapshot);
 }
 
 /**
@@ -7212,17 +8001,8 @@ function redoDrawing() {
   if (drawingHistoryIndex >= drawingHistory.length - 1) return;
 
   drawingHistoryIndex++;
-  const state = drawingHistory[drawingHistoryIndex];
-
-  const img = new Image();
-  img.onload = () => {
-    clearCanvas(drawingCtx, drawingCanvas);
-    drawingCtx.drawImage(img, 0, 0);
-    // Mettre à jour l'état des boutons après redo
-    updateDrawingButtonStates("main");
-    updateDrawingButtonStates("zoom");
-  };
-  img.src = state;
+  const snapshot = drawingHistory[drawingHistoryIndex];
+  applyHistorySnapshot(snapshot);
 }
 
 /**
@@ -7274,6 +8054,34 @@ function updateDrawingLightbox() {
 }
 
 /**
+ * Met à jour l'icône et l'état du bouton lightbox selon le contexte
+ * @param {string} context - "drawing" ou "zoom"
+ */
+function updateLightboxButtonState(context) {
+  if (context === "drawing") {
+    updateDrawingLightboxIcon();
+    const btn = document.getElementById("drawing-lightbox-btn");
+    if (btn) btn.classList.toggle("active", lightboxEnabled);
+  } else {
+    const zoomToolbar = document.getElementById("zoom-drawing-toolbar");
+    if (zoomToolbar) {
+      const btns = zoomToolbar.querySelectorAll(".control-btn-small");
+      btns.forEach((btn) => {
+        if (
+          btn.innerHTML.includes("lightTable") ||
+          btn.getAttribute("data-action") === "lightbox"
+        ) {
+          btn.innerHTML = lightboxEnabled
+            ? ICONS.LIGHT_TABLE_OFF
+            : ICONS.LIGHT_TABLE_ON;
+          btn.classList.toggle("active", lightboxEnabled);
+        }
+      });
+    }
+  }
+}
+
+/**
  * Affiche le menu de la table lumineuse pour le mode overlay
  */
 function showLightboxMenu(x, y, context = "drawing") {
@@ -7284,33 +8092,6 @@ function showLightboxMenu(x, y, context = "drawing") {
   const updateLightbox =
     context === "zoom" ? updateZoomDrawingLightbox : updateDrawingLightbox;
 
-  // Fonction pour mettre à jour l'icône et l'état du bouton
-  const updateLightboxButton = () => {
-    if (context === "drawing") {
-      updateDrawingLightboxIcon();
-      const btn = document.getElementById("drawing-lightbox-btn");
-      if (btn) btn.classList.toggle("active", lightboxEnabled);
-    } else {
-      // Pour le mode zoom, trouver le bouton dans la toolbar
-      const zoomToolbar = document.getElementById("zoom-drawing-toolbar");
-      if (zoomToolbar) {
-        const btns = zoomToolbar.querySelectorAll(".control-btn-small");
-        btns.forEach((btn) => {
-          if (
-            btn.innerHTML.includes("lightTable") ||
-            btn.innerHTML.includes("lightTable") ||
-            btn.getAttribute("data-action") === "lightbox"
-          ) {
-            btn.innerHTML = lightboxEnabled
-              ? ICONS.LIGHT_TABLE_OFF
-              : ICONS.LIGHT_TABLE_ON;
-            btn.classList.toggle("active", lightboxEnabled);
-          }
-        });
-      }
-    }
-  };
-
   addMenuToggleOption(menu, {
     id: "lightbox-enable-cb",
     label: i18next.t("draw.menus.enable"),
@@ -7318,7 +8099,7 @@ function showLightboxMenu(x, y, context = "drawing") {
     onChange: (checked) => {
       lightboxEnabled = checked;
       updateLightbox();
-      updateLightboxButton();
+      updateLightboxButtonState(context);
       menu.remove();
     },
   });
@@ -7360,21 +8141,21 @@ function showExportModal(context = "drawing") {
   modal.innerHTML = `
     <div class="modal-content export-modal-content">
       <div class="modal-header">
-        <h3 class="modal-title">${ICONS.EXPORT} Exporter le dessin</h3>
+        <h3 class="modal-title">${ICONS.EXPORT} ${i18next.t("draw.modals.exportTitle")}</h3>
         <button type="button" class="modal-close-btn" id="cancel-export">×</button>
       </div>
-      <div id="export-instructions" class="export-instructions"> Qu'est-ce qu'on exporte ?</div>
+      <div id="export-instructions" class="export-instructions"> ${i18next.t("draw.modals.exportQuestion")}</div>
       <div class="export-options-list">
         <button class="export-option" data-mode="full">
-          <span class="export-option-title">Dessin et photo fusionnées</span>
+          <span class="export-option-title">${i18next.t("draw.modals.exportFull")}</span>
         </button>
 
         <button class="export-option" data-mode="transparent">
-          <span class="export-option-title">Dessin sur fond transparent</span>
+          <span class="export-option-title">${i18next.t("draw.modals.exportTransparent")}</span>
         </button>
 
         <button class="export-option" data-mode="white">
-          <span class="export-option-title">Dessin sur fond blanc</span>
+          <span class="export-option-title">${i18next.t("draw.modals.exportWhite")}</span>
         </button>
       </div>
     </div>
@@ -7517,7 +8298,7 @@ function initDrawingToolbarDrag() {
     dockZone = document.createElement("div");
     dockZone.className = "toolbar-dock-zone";
     dockZone.innerHTML =
-      '<span class="toolbar-dock-zone-label">Dock horizontal</span>';
+      `<span class="toolbar-dock-zone-label">${i18next.t("draw.modals.dockHorizontal")}</span>`;
     document.body.appendChild(dockZone);
 
     return dockZone;
@@ -7941,6 +8722,7 @@ async function openZoomDrawingMode(overlay, image) {
 
   // Écouteur global pour mouseup (pour arrêter le dessin même hors du canvas)
   document.addEventListener("mouseup", handleGlobalMouseUp);
+  document.addEventListener("pointerup", handleGlobalMouseUp);
 
   // Créer le curseur personnalisé pour prévisualiser la taille du pinceau
   createDrawingCursor();
@@ -8011,6 +8793,7 @@ function closeZoomDrawingMode() {
 
   // Supprimer l'écouteur global mouseup
   document.removeEventListener("mouseup", handleGlobalMouseUp);
+  document.removeEventListener("pointerup", handleGlobalMouseUp);
 
   // Supprimer l'écouteur de curseur
   if (zoomDrawingOverlay && zoomDrawingCursorHideHandler) {
@@ -8137,12 +8920,7 @@ function createZoomDrawingToolbar(overlay) {
   clearBtn.setAttribute("data-tooltip", i18next.t("draw.buttons.clearDrawing"));
   clearBtn.innerHTML = ICONS.CLEAR;
   clearBtn.onclick = () => {
-    clearAllDrawingCanvases();
-    drawingHistory = [];
-    drawingHistoryIndex = -1;
-    measurementLines = [];
-    // Mettre à jour l'état des boutons après suppression
-    updateDrawingButtonStates("zoom");
+    clearDrawingCanvas();
   };
 
   // Bouton clear-measurements pour le zoom
@@ -8215,74 +8993,10 @@ function updateZoomDrawingLightbox() {
 function setupZoomDrawingEvents() {
   if (!zoomDrawingPreview) return;
 
-  zoomDrawingPreview.onmousedown = (e) => {
-    // Clic molette = pan
-    if (e.button === 1) {
-      handleCanvasPanStart(e);
-      return;
-    }
-    // Space + clic gauche = pan (seulement si pas en train de dessiner)
-    if (e.button === 0 && keysState.space && !isDrawing) {
-      handleSpacePanStart(e);
-      return;
-    }
-    handleDrawingMouseDown(e);
-  };
-  zoomDrawingPreview.onmousemove = (e) => {
-    if (ZoomManager.isPanning) {
-      handleCanvasPanMove(e);
-      return;
-    }
-    handleDrawingMouseMove(e);
-  };
-  zoomDrawingPreview.onmouseup = (e) => {
-    if (ZoomManager.isPanning && (e.button === 1 || (e.button === 0 && keysState.space))) {
-      handleCanvasPanEnd();
-      return;
-    }
-    handleDrawingMouseUp(e);
-  };
-  zoomDrawingPreview.onmouseleave = (e) => {
-    handleDrawingMouseLeave(
-      e,
-      zoomDrawingPreview,
-      zoomDrawingCanvas,
-      zoomDrawingCtx,
-    );
-  };
-  zoomDrawingPreview.onmouseenter = (e) => {
-    // Réinitialiser l'état quand on rentre dans le canvas pendant le dessin
-    resetDrawingStateOnEnter();
-  };
-  // Zoom avec la molette (si activé dans la config)
-  if (CONFIG.enableZoomInDrawingMode) {
-    zoomDrawingPreview.addEventListener('wheel', handleCanvasZoom);
-  }
-  zoomDrawingPreview.oncontextmenu = (e) => {
-    e.preventDefault();
-    const coords = getDrawingCoordinates(e);
-    const hitLine = findMeasurementLineAt(coords, 20);
-    if (hitLine) {
-      // Modal différent selon le type de mesure
-      if (hitLine.type === "compass") {
-        showCompassIndividualConfig(hitLine, e.clientX, e.clientY);
-      } else if (hitLine.type === "calibrate") {
-        showCalibrateIndividualConfig(hitLine, e.clientX, e.clientY);
-      } else {
-        showMeasureIndividualConfig(hitLine, e.clientX, e.clientY);
-      }
-    } else {
-      // Menu contextuel général du canvas
-      showCanvasContextMenu(e.clientX, e.clientY, "zoom");
-    }
-  };
-
-  // Gestion du curseur : quitter la zone de dessin = curseur normal
-  // mouseleave et mouseenter sont déjà définis plus haut (lignes ~7779 et ~7801)
-  // Le mouseenter gère à la fois la réinitialisation de l'état et le curseur
+  // Utiliser le helper partagé pour les événements pointer/mouse/wheel/contextmenu
+  setupCanvasInputEvents(zoomDrawingPreview, zoomDrawingCanvas, zoomDrawingCtx, "zoom");
 
   // Détecter quand la souris quitte complètement l'overlay pour cacher le curseur
-  // Utiliser mouseout sur l'overlay qui se propage depuis le canvas
   const cursorHideHandler = (e) => {
     // Si on quitte le canvas preview pour aller ailleurs (pas vers un enfant)
     if (
@@ -8331,7 +9045,7 @@ function handleZoomDrawingKeydown(e) {
   // Delete/Backspace pour effacer tous les canvas
   if (e.key === "Delete" || e.key === "Backspace") {
     e.preventDefault();
-    clearAllDrawingCanvases();
+    clearDrawingCanvas();
     return;
   }
 
@@ -8490,31 +9204,6 @@ function addLightboxControls(menu, context = "drawing", showTitle = true) {
   const updateLightbox =
     context === "zoom" ? updateZoomDrawingLightbox : updateDrawingLightbox;
 
-  const updateLightboxButton = () => {
-    if (context === "drawing") {
-      updateDrawingLightboxIcon();
-      const btn = document.getElementById("drawing-lightbox-btn");
-      if (btn) btn.classList.toggle("active", lightboxEnabled);
-    } else {
-      const zoomToolbar = document.getElementById("zoom-drawing-toolbar");
-      if (zoomToolbar) {
-        const btns = zoomToolbar.querySelectorAll(".control-btn-small");
-        btns.forEach((btn) => {
-          if (
-            btn.innerHTML.includes("lightTable") ||
-            btn.innerHTML.includes("lightTable") ||
-            btn.getAttribute("data-action") === "lightbox"
-          ) {
-            btn.innerHTML = lightboxEnabled
-              ? ICONS.LIGHT_TABLE_OFF
-              : ICONS.LIGHT_TABLE_ON;
-            btn.classList.toggle("active", lightboxEnabled);
-          }
-        });
-      }
-    }
-  };
-
   addMenuToggleOption(menu, {
     id: "lightbox-enable-" + Date.now(),
     label: i18next.t("draw.menus.enable"),
@@ -8522,7 +9211,7 @@ function addLightboxControls(menu, context = "drawing", showTitle = true) {
     onChange: (checked) => {
       lightboxEnabled = checked;
       updateLightbox();
-      updateLightboxButton();
+      updateLightboxButtonState(context);
     },
   });
 
@@ -8585,6 +9274,33 @@ function showCanvasContextMenu(x, y, context = "drawing") {
 
   // Section Table lumineuse
   addLightboxControls(menu, context, true);
+
+  document.body.appendChild(menu);
+  setupMenuCloseOnClickOutside(menu);
+}
+
+function showRectangleToolMenu(x, y) {
+  const existing = document.getElementById("rectangle-tool-menu");
+  if (existing) {
+    existing.remove();
+    return;
+  }
+
+  const menu = createContextMenu("rectangle-tool-menu", x, y);
+  menu.classList.add("menu-md");
+
+  addMenuToggleOption(menu, {
+    id: "rectangle-edit-mode-" + Date.now(),
+    label: i18next.t("draw.menus.shapeEditMode", {
+      defaultValue: "Enable shape editing",
+    }),
+    labelClass: "context-menu-label-normal",
+    checked: rectangleEditMode,
+    onChange: (checked) => {
+      rectangleEditMode = !!checked;
+      saveRectangleEditMode();
+    },
+  });
 
   document.body.appendChild(menu);
   setupMenuCloseOnClickOutside(menu);
@@ -8682,7 +9398,10 @@ function findMeasurementLineAt(
   for (const line of measurementLines) {
     if (!line || !line.start || !line.end) continue;
 
-    const dist = getPointToSegmentDistance(coords, line.start, line.end);
+    const dist =
+      line.type === "shape-line" && line.control
+        ? getPointToQuadraticDistance(coords, line.start, line.control, line.end)
+        : getPointToSegmentDistance(coords, line.start, line.end);
     if (dist < threshold) return line;
   }
   return null;
@@ -8875,13 +9594,13 @@ function addMenuTitle(menu, title, icon) {
  * Ajoute une option toggle au menu
  */
 function addMenuToggleOption(menu, options) {
-  const { id, label, checked, onChange } = options;
+  const { id, label, checked, onChange, labelClass = "" } = options;
 
   const row = document.createElement("div");
   row.className = "context-menu-row";
 
   const labelEl = document.createElement("span");
-  labelEl.className = "context-menu-label";
+  labelEl.className = `context-menu-label ${labelClass}`.trim();
   labelEl.textContent = label;
 
   const toggle = document.createElement("label");

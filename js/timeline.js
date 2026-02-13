@@ -119,6 +119,90 @@ async function openTimelineConfirmDialog(options = {}) {
   }
 }
 
+function showTimelineToast(type, message, duration = 2500) {
+  if (
+    typeof window !== "undefined" &&
+    typeof window.showPoseChronoToast === "function"
+  ) {
+    window.showPoseChronoToast({ type, message, duration });
+    return;
+  }
+
+  if (
+    typeof eagle !== "undefined" &&
+    eagle.notification &&
+    eagle.notification.show
+  ) {
+    eagle.notification.show({
+      title: message,
+      body: "",
+      mute: false,
+      duration,
+    });
+  }
+}
+
+function scheduleTimelineUndoAction(options = {}) {
+  if (
+    typeof window !== "undefined" &&
+    typeof window.schedulePoseChronoUndoAction === "function"
+  ) {
+    window.schedulePoseChronoUndoAction(options);
+    return true;
+  }
+
+  const {
+    id = `timeline-undo-${Date.now()}`,
+    timeoutMs = 10000,
+    onUndo,
+    message = "Deleted. Undo available for 10 seconds.",
+    undoLabel = "Undo",
+  } = options;
+  if (typeof onUndo !== "function") return false;
+
+  let container = document.getElementById("posechrono-toast-container");
+  if (!container) {
+    container = document.createElement("div");
+    container.id = "posechrono-toast-container";
+    container.className = "pc-toast-container";
+    document.body.appendChild(container);
+  }
+
+  const toast = document.createElement("div");
+  toast.className = "pc-toast pc-toast-info";
+
+  const msg = document.createElement("span");
+  msg.className = "pc-toast-message";
+  msg.textContent = message;
+  toast.appendChild(msg);
+
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "pc-toast-action";
+  btn.textContent = undoLabel;
+  btn.addEventListener("click", () => {
+    clearTimeout(timer);
+    try {
+      onUndo();
+    } catch (e) {
+      console.error("[Timeline] undo fallback error:", e);
+    }
+    toast.classList.remove("visible");
+    setTimeout(() => toast.remove(), 180);
+  });
+  toast.appendChild(btn);
+
+  container.appendChild(toast);
+  requestAnimationFrame(() => toast.classList.add("visible"));
+
+  const timer = setTimeout(() => {
+    toast.classList.remove("visible");
+    setTimeout(() => toast.remove(), 180);
+  }, timeoutMs);
+
+  return true;
+}
+
 /**
  * Récupère les labels des jours (abrégés)
  * @returns {string[]}
@@ -1692,6 +1776,8 @@ class TimelineRenderer {
       }
     }
 
+    const snapshotBeforeDelete = TimelineData.exportJSON();
+
     // Supprimer la session
     const result = TimelineData.deleteSession(dateKey, sessionIndex);
 
@@ -1705,22 +1791,36 @@ class TimelineRenderer {
         this._refreshDayDetail(dateKey);
       }
 
-      // Notification
+      const deletedMsg = tl(
+        "notifications.deleteQueued",
+        {},
+        "Deleted. Undo available for 10 seconds.",
+      );
+      const undoLabel = tl("notifications.undo", {}, "Undo");
+
       if (
-        typeof eagle !== "undefined" &&
-        eagle.notification &&
-        eagle.notification.show
+        !scheduleTimelineUndoAction({
+          id: `timeline-session-delete-${Date.now()}-${dateKey}-${sessionIndex}`,
+          timeoutMs: 10000,
+          message: deletedMsg,
+          undoLabel,
+          onUndo: () => {
+            TimelineData.importJSON(snapshotBeforeDelete);
+            this.render();
+            this._showDayDetail(dateKey);
+            showTimelineToast(
+              "success",
+              tl("notifications.undoApplied", {}, "Action undone."),
+              2000,
+            );
+          },
+        })
       ) {
-        eagle.notification.show({
-          title: tl("timeline.sessionDeleted", {}, "Session supprimée"),
-          body: tl(
-            "timeline.sessionDeletedBody",
-            {},
-            "La session a été supprimée",
-          ),
-          mute: false,
-          duration: 2000,
-        });
+        showTimelineToast(
+          "info",
+          tl("timeline.sessionDeleted", {}, "Session supprimée"),
+          2000,
+        );
       }
     }
   }
@@ -2306,28 +2406,44 @@ class TimelineRenderer {
       confirmText: tl("timeline.resetConfirmBtn", {}, "Réinitialiser"),
     });
 
-    if (confirmed) {
-      TimelineData.reset();
-      this.render();
+    if (!confirmed) return;
 
-      // Notification de confirmation
-      if (
-        typeof eagle !== "undefined" &&
-        eagle.notification &&
-        eagle.notification.show
-      ) {
-        eagle.notification.show({
-          title: tl("timeline.resetNotifTitle", {}, "Historique effacé"),
-          body: tl(
-            "timeline.resetNotifBody",
-            {},
-            "Tout l'historique a été effacé",
-          ),
-          mute: false,
-          duration: 3000,
-        });
-      }
+    const snapshotBeforeReset = TimelineData.exportJSON();
+    TimelineData.reset();
+    this.render();
+
+    const deletedMsg = tl(
+      "notifications.deleteQueued",
+      {},
+      "Deleted. Undo available for 10 seconds.",
+    );
+    const undoLabel = tl("notifications.undo", {}, "Undo");
+
+    if (
+      scheduleTimelineUndoAction({
+        id: `timeline-reset-${Date.now()}`,
+        timeoutMs: 10000,
+        message: deletedMsg,
+        undoLabel,
+        onUndo: () => {
+          TimelineData.importJSON(snapshotBeforeReset);
+          this.render();
+          showTimelineToast(
+            "success",
+            tl("notifications.undoApplied", {}, "Action undone."),
+            2000,
+          );
+        },
+      })
+    ) {
+      return;
     }
+
+    showTimelineToast(
+      "success",
+      tl("timeline.resetNotifBody", {}, "Tout l'historique a ete efface"),
+      3000,
+    );
   }
 
   /**
@@ -2366,29 +2482,46 @@ class TimelineRenderer {
       confirmText: tl("timeline.deleteConfirmBtn", {}, "Supprimer"),
     });
 
-    if (confirmed) {
-      TimelineData.deleteDay(dateKey);
-      this._closeDayDetail();
-      this.render();
+    if (!confirmed) return;
 
-      // Notification de confirmation
-      if (
-        typeof eagle !== "undefined" &&
-        eagle.notification &&
-        eagle.notification.show
-      ) {
-        eagle.notification.show({
-          title: tl("timeline.deleteNotifTitle", {}, "Journée supprimée"),
-          body: tl(
-            "timeline.deleteNotifBody",
-            {},
-            "L'historique de la journée a bien été effacé",
-          ),
-          mute: false,
-          duration: 3000,
-        });
-      }
+    const snapshotBeforeDelete = TimelineData.exportJSON();
+    TimelineData.deleteDay(dateKey);
+    this._closeDayDetail();
+    this.render();
+
+    const deletedMsg = tl(
+      "notifications.deleteQueued",
+      {},
+      "Deleted. Undo available for 10 seconds.",
+    );
+    const undoLabel = tl("notifications.undo", {}, "Undo");
+
+    if (
+      scheduleTimelineUndoAction({
+        id: `timeline-day-delete-${Date.now()}-${dateKey}`,
+        timeoutMs: 10000,
+        message: deletedMsg,
+        undoLabel,
+        onUndo: () => {
+          TimelineData.importJSON(snapshotBeforeDelete);
+          this.render();
+          this._showDayDetail(dateKey);
+          showTimelineToast(
+            "success",
+            tl("notifications.undoApplied", {}, "Action undone."),
+            2000,
+          );
+        },
+      })
+    ) {
+      return;
     }
+
+    showTimelineToast(
+      "success",
+      tl("timeline.deleteNotifBody", {}, "Day history deleted"),
+      3000,
+    );
   }
 
   /**

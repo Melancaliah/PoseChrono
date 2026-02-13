@@ -234,7 +234,6 @@
       "VIDEO_CONFIG": "Открыть настройки видео",
       "DRAWING_EXPORT": "Экспортировать рисунок",
       "DRAWING_LIGHTBOX": "Переключить подсветку",
-      "DRAWING_CLOSE": "Закрыть режим рисования",
       "DRAWING_TOOL_PENCIL": "Инструмент карандаш",
       "DRAWING_TOOL_ERASER": "Инструмент ластик",
       "DRAWING_TOOL_RECTANGLE": "Инструмент прямоугольник",
@@ -280,7 +279,10 @@
     "planSaved": "✓ Сохранено!",
     "sessionFinished": "Все готово!",
     "lastSeries": "Это была последняя серия!",
-    "readError": "Ошибка чтения"
+    "readError": "Ошибка чтения",
+    "undo": "Отменить",
+    "undoApplied": "Действие отменено.",
+    "deleteQueued": "Удалено. Отмена доступна в течение 10 секунд."
   },
   "errors": {
     "loadError": "Ошибка загрузки",
@@ -380,7 +382,13 @@
       "measureSettings": "Настройки измерения",
       "configureMeasure": "Настроить измерение",
       "configureUnit": "Настроить единицу",
-      "compassSettings": "Настройки циркуля"
+      "compassSettings": "Настройки циркуля",
+      "exportTitle": "Экспорт рисунка",
+      "exportQuestion": "Что вы хотите экспортировать?",
+      "exportFull": "Рисунок и фото объединённые",
+      "exportTransparent": "Рисунок на прозрачном фоне",
+      "exportWhite": "Рисунок на белом фоне",
+      "dockHorizontal": "Горизонтальная стыковка"
     },
     "help": {
       "duplicateMeasure": "перетащите измерение для дублирования",
@@ -393,7 +401,10 @@
       "stabilizer": "Стабилизатор",
       "brushSize": "Размер кисти",
       "strokeStabilizer": "Стабилизатор штриха",
-      "enableStabilizer": "Включить стабилизатор"
+      "enableStabilizer": "Включить стабилизатор",
+      "rectangle": "Прямоугольник",
+      "rectangleEditMode": "Включить редактирование прямоугольников",
+      "shapeEditMode": "Включить редактирование фигур"
     },
     "sliders": {
       "size": "Размер",

@@ -230,7 +230,6 @@
       "VIDEO_CONFIG": "打开视频配置",
       "DRAWING_EXPORT": "导出绘画",
       "DRAWING_LIGHTBOX": "切换灯箱",
-      "DRAWING_CLOSE": "关闭绘画模式",
       "DRAWING_TOOL_PENCIL": "铅笔工具",
       "DRAWING_TOOL_ERASER": "橡皮擦工具",
       "DRAWING_TOOL_RECTANGLE": "矩形工具",
@@ -276,7 +275,10 @@
     "planSaved": "✓ 已保存！",
     "sessionFinished": "全部完成！",
     "lastSeries": "这是最后一组！",
-    "readError": "读取错误"
+    "readError": "读取错误",
+    "undo": "撤销",
+    "undoApplied": "操作已撤销。",
+    "deleteQueued": "已删除。10 秒内可撤销。"
   },
   "errors": {
     "loadError": "加载错误",
@@ -376,7 +378,13 @@
       "measureSettings": "测量设置",
       "configureMeasure": "配置测量",
       "configureUnit": "配置单位",
-      "compassSettings": "圆规设置"
+      "compassSettings": "圆规设置",
+      "exportTitle": "导出绘图",
+      "exportQuestion": "您想导出什么？",
+      "exportFull": "绘图与照片合并",
+      "exportTransparent": "透明背景绘图",
+      "exportWhite": "白色背景绘图",
+      "dockHorizontal": "水平停靠"
     },
     "help": {
       "duplicateMeasure": "拖拽测量以复制",
@@ -389,7 +397,10 @@
       "stabilizer": "防抖",
       "brushSize": "画笔大小",
       "strokeStabilizer": "线条防抖",
-      "enableStabilizer": "启用防抖"
+      "enableStabilizer": "启用防抖",
+      "rectangle": "矩形",
+      "rectangleEditMode": "启用矩形编辑",
+      "shapeEditMode": "启用图形编辑"
     },
     "sliders": {
       "size": "大小",
