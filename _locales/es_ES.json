@@ -120,13 +120,20 @@
     "copyImage": "Copiar imagen",
     "sessionStats": "Has dibujado {{count}} {{poseWord}} en {{timeStr}}.",
     "noDrawnPoses": "Has dibujado 0 poses",
+    "showDurations": "Mostrar duraciones",
+    "hideDurations": "Ocultar duraciones",
     "pause": "PAUSA",
     "nextSeriesIn": "Siguiente serie en",
     "drawingBadge": "DIBUJANDO",
     "unitLabel": "Unidad:",
     "resetUnit": "Restablecer unidad",
     "totalLabel": "Total:",
-    "previousImage": "Imagen anterior"
+    "previousImage": "Imagen anterior",
+    "hints": {
+      "ignoreOtherShapes": "Ignorar otras formas (Ctrl)",
+      "snapMode": "Ajuste (Ctrl)",
+      "rotateShape": "Rotar forma (Q)"
+    }
   },
   "timer": {
     "showHide": "Mostrar/ocultar cronómetro",
@@ -240,6 +247,7 @@
       "DRAWING_TOOL_CALIBRATE": "Calibrar unidad",
       "DRAWING_TOOL_LASER": "Puntero láser",
       "DRAWING_TOOL_PROTRACTOR": "Herramienta transportador",
+      "DRAWING_ROTATE_SHAPE": "Rotar la forma seleccionada (mantener + arrastrar)",
       "DRAWING_SIZE_DECREASE": "Disminuir tamaño del pincel",
       "DRAWING_SIZE_INCREASE": "Aumentar tamaño del pincel",
       "TAGS": "Abrir modal de etiquetas"
@@ -350,6 +358,8 @@
       "useGlobalValues": "(usar valores globales)"
     },
     "config": {
+      "appearance": "Trazo",
+      "fill": "Relleno",
       "color": "Color",
       "none": "Ninguno",
       "proportions": "Proporciones",
@@ -372,12 +382,16 @@
       "showLabel": "Mostrar etiqueta",
       "showUnit": "Mostrar unidad",
       "subdivisions": "Subdivisiones",
-      "labelSize": "Tamaño de etiqueta"
+      "labelSize": "Tamaño de etiqueta",
+      "fillEnabled": "Activar relleno",
+      "fillColor": "Color de relleno",
+      "fillOpacity": "Opacidad de relleno"
     },
     "modals": {
       "measureSettings": "Ajustes de medidas",
       "configureMeasure": "Configurar medida",
       "configureUnit": "Configurar unidad",
+      "configureShape": "Configurar forma",
       "compassSettings": "Ajustes del compás",
       "exportTitle": "Exportar dibujo",
       "exportQuestion": "¿Qué quieres exportar?",
@@ -400,7 +414,11 @@
       "enableStabilizer": "Activar estabilizador",
       "rectangle": "Rectangulo",
       "rectangleEditMode": "Activar edicion de rectangulos",
-      "shapeEditMode": "Activar edicion de formas"
+      "shapeEditMode": "Activar edicion de formas",
+      "shapeSafeSelectMode": "Haz clic para seleccionar primero",
+      "eraserShapeModeTitle": "Comportamiento del borrador en formas",
+      "eraserShapeModeVector": "Borra las formas de una vez",
+      "eraserShapeModeClassic": "Clasico (si una forma se borra ya no se puede editar como vector)"
     },
     "sliders": {
       "size": "Tamaño",
@@ -482,3 +500,9 @@
     "history": "Historial de sesiones"
   }
 }
+
+
+
+
+
+

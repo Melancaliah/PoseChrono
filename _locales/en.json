@@ -120,13 +120,20 @@
     "copyImage": "Copy image",
     "sessionStats": "You drew {{count}} {{poseWord}} in {{timeStr}}.",
     "noDrawnPoses": "You drew 0 poses",
+    "showDurations": "Show durations",
+    "hideDurations": "Hide durations",
     "pause": "PAUSE",
     "nextSeriesIn": "Next series in",
     "drawingBadge": "DRAWING",
     "unitLabel": "Unit:",
     "resetUnit": "Reset unit",
     "totalLabel": "Total:",
-    "previousImage": "Previous image"
+    "previousImage": "Previous image",
+    "hints": {
+      "ignoreOtherShapes": "Ignore other shapes (Ctrl)",
+      "snapMode": "Snap (Ctrl)",
+      "rotateShape": "Rotate shape (Q)"
+    }
   },
   "timer": {
     "showHide": "Show/hide timer",
@@ -240,6 +247,7 @@
       "DRAWING_TOOL_CALIBRATE": "Calibrate unit",
       "DRAWING_TOOL_LASER": "Laser pointer",
       "DRAWING_TOOL_PROTRACTOR": "Protractor tool",
+      "DRAWING_ROTATE_SHAPE": "Rotate selected shape (hold + drag)",
       "DRAWING_SIZE_DECREASE": "Decrease brush size",
       "DRAWING_SIZE_INCREASE": "Increase brush size",
       "TAGS": "Open tags modal"
@@ -350,6 +358,8 @@
       "useGlobalValues": "(use global values)"
     },
     "config": {
+      "appearance": "Stroke",
+      "fill": "Fill",
       "color": "Color",
       "none": "None",
       "proportions": "Proportions",
@@ -372,12 +382,16 @@
       "showLabel": "Show label",
       "showUnit": "Show unit",
       "subdivisions": "Subdivisions",
-      "labelSize": "Label size"
+      "labelSize": "Label size",
+      "fillEnabled": "Enable fill",
+      "fillColor": "Fill color",
+      "fillOpacity": "Fill opacity"
     },
     "modals": {
       "measureSettings": "Measurement settings",
       "configureMeasure": "Configure measurement",
       "configureUnit": "Configure unit",
+      "configureShape": "Configure shape",
       "compassSettings": "Compass settings",
       "exportTitle": "Export drawing",
       "exportQuestion": "What do you want to export?",
@@ -400,7 +414,11 @@
       "enableStabilizer": "Enable stabilizer",
       "rectangle": "Rectangle",
       "rectangleEditMode": "Enable rectangle editing",
-      "shapeEditMode": "Enable shape editing"
+      "shapeEditMode": "Enable shape editing",
+      "shapeSafeSelectMode": "Click to select first",
+      "eraserShapeModeTitle": "Eraser behavior on shapes",
+      "eraserShapeModeVector": "Erase shapes at once",
+      "eraserShapeModeClassic": "Classic (if a shape is erased it is no longer editable as vector)"
     },
     "sliders": {
       "size": "Size",
@@ -482,3 +500,9 @@
     "history": "Session history"
   }
 }
+
+
+
+
+
+

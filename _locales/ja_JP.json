@@ -120,13 +120,20 @@
     "copyImage": "画像をコピー",
     "sessionStats": "{{count}} {{poseWord}}を{{timeStr}}で描きました。",
     "noDrawnPoses": "0ポーズ描きました",
+    "showDurations": "時間を表示",
+    "hideDurations": "時間を非表示",
     "pause": "休憩",
     "nextSeriesIn": "次のシリーズまで",
     "drawingBadge": "作画中",
     "unitLabel": "単位：",
     "resetUnit": "単位をリセット",
     "totalLabel": "合計：",
-    "previousImage": "前の画像"
+    "previousImage": "前の画像",
+    "hints": {
+      "ignoreOtherShapes": "他の図形を無視 (Ctrl)",
+      "snapMode": "スナップ (Ctrl)",
+      "rotateShape": "図形を回転 (Q)"
+    }
   },
   "timer": {
     "showHide": "タイマー表示/非表示",
@@ -240,6 +247,7 @@
       "DRAWING_TOOL_CALIBRATE": "単位をキャリブレーション",
       "DRAWING_TOOL_LASER": "レーザーポインター",
       "DRAWING_TOOL_PROTRACTOR": "分度器ツール",
+      "DRAWING_ROTATE_SHAPE": "選択した図形を回転（押しながらドラッグ）",
       "DRAWING_SIZE_DECREASE": "ブラシサイズを縮小",
       "DRAWING_SIZE_INCREASE": "ブラシサイズを拡大",
       "TAGS": "タグモーダルを開く"
@@ -350,6 +358,8 @@
       "useGlobalValues": "(グローバル値を使用)"
     },
     "config": {
+      "appearance": "ストローク",
+      "fill": "塗りつぶし",
       "color": "色",
       "none": "なし",
       "proportions": "比率",
@@ -372,12 +382,16 @@
       "showLabel": "ラベルを表示",
       "showUnit": "単位を表示",
       "subdivisions": "細分",
-      "labelSize": "ラベルサイズ"
+      "labelSize": "ラベルサイズ",
+      "fillEnabled": "塗りつぶしを有効化",
+      "fillColor": "塗りつぶし色",
+      "fillOpacity": "塗りつぶし不透明度"
     },
     "modals": {
       "measureSettings": "測定設定",
       "configureMeasure": "測定を設定",
       "configureUnit": "単位を設定",
+      "configureShape": "図形を設定",
       "compassSettings": "コンパス設定",
       "exportTitle": "描画をエクスポート",
       "exportQuestion": "何をエクスポートしますか？",
@@ -400,7 +414,11 @@
       "enableStabilizer": "スタビライザーを有効化",
       "rectangle": "長方形",
       "rectangleEditMode": "長方形編集を有効化",
-      "shapeEditMode": "図形編集を有効化"
+      "shapeEditMode": "図形編集を有効化",
+      "shapeSafeSelectMode": "先にクリックして選択",
+      "eraserShapeModeTitle": "図形に対する消しゴム動作",
+      "eraserShapeModeVector": "図形を一括で消去",
+      "eraserShapeModeClassic": "クラシック（図形を消すとベクター編集できなくなります）"
     },
     "sliders": {
       "size": "サイズ",
@@ -482,3 +500,9 @@
     "history": "練習履歴"
   }
 }
+
+
+
+
+
+

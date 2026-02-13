@@ -163,7 +163,9 @@
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
   opacity: 0;
   transform: translateY(8px);
-  transition: opacity 0.18s ease, transform 0.18s ease;
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s ease;
   pointer-events: auto;
 }
 
@@ -1912,7 +1914,8 @@
 
 #measure-config-popup,
 #measure-individual-config-popup,
-#calibrate-individual-config-popup {
+#calibrate-individual-config-popup,
+#shape-individual-config-popup {
   position: fixed;
   top: 50%;
   left: 50%;
@@ -1929,30 +1932,35 @@
 }
 
 #measure-individual-config-popup .config-body,
-#calibrate-individual-config-popup .config-body {
+#calibrate-individual-config-popup .config-body,
+#shape-individual-config-popup .config-body {
   padding: 16px 20px;
   max-height: 70vh;
   overflow-y: auto;
 }
 
 #measure-individual-config-popup .config-section,
-#calibrate-individual-config-popup .config-section {
+#calibrate-individual-config-popup .config-section,
+#shape-individual-config-popup .config-section {
   margin-bottom: 16px;
   padding-bottom: 16px;
 }
 
 #measure-individual-config-popup .config-section:first-child,
-#calibrate-individual-config-popup .config-section:first-child {
+#calibrate-individual-config-popup .config-section:first-child,
+#shape-individual-config-popup .config-section:first-child {
   padding-top: 0;
 }
 
 #measure-individual-config-popup .config-section:last-child,
-#calibrate-individual-config-popup .config-section:last-child {
+#calibrate-individual-config-popup .config-section:last-child,
+#shape-individual-config-popup .config-section:last-child {
   margin-bottom: 0;
 }
 
 #measure-individual-config-popup .config-section-label,
-#calibrate-individual-config-popup .config-section-label {
+#calibrate-individual-config-popup .config-section-label,
+#shape-individual-config-popup .config-section-label {
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
@@ -1962,7 +1970,8 @@
 }
 
 #measure-individual-config-popup .config-row-inline,
-#calibrate-individual-config-popup .config-row-inline {
+#calibrate-individual-config-popup .config-row-inline,
+#shape-individual-config-popup .config-row-inline {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -1970,7 +1979,8 @@
 }
 
 #measure-individual-config-popup .control-btn,
-#calibrate-individual-config-popup .control-btn {
+#calibrate-individual-config-popup .control-btn,
+#shape-individual-config-popup .control-btn {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1988,13 +1998,15 @@
 }
 
 #measure-individual-config-popup .control-btn:hover,
-#calibrate-individual-config-popup .control-btn:hover {
+#calibrate-individual-config-popup .control-btn:hover,
+#shape-individual-config-popup .control-btn:hover {
   background: #a2a2a226;
   border-color: #9292924d;
 }
 
 #measure-individual-config-popup .control-btn svg,
-#calibrate-individual-config-popup .control-btn svg {
+#calibrate-individual-config-popup .control-btn svg,
+#shape-individual-config-popup .control-btn svg {
   width: 18px;
   height: 18px;
   fill: currentColor;
@@ -2002,7 +2014,8 @@
 }
 
 #measure-individual-config-popup .control-btn .btn-main-line,
-#calibrate-individual-config-popup .control-btn .btn-main-line {
+#calibrate-individual-config-popup .control-btn .btn-main-line,
+#shape-individual-config-popup .control-btn .btn-main-line {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -2010,7 +2023,8 @@
 }
 
 #measure-individual-config-popup .control-btn .btn-subtext,
-#calibrate-individual-config-popup .control-btn .btn-subtext {
+#calibrate-individual-config-popup .control-btn .btn-subtext,
+#shape-individual-config-popup .control-btn .btn-subtext {
   font-size: 11px;
   color: #636363;
   font-weight: 400;
@@ -2019,7 +2033,8 @@
 
 /* Styles pour le bouton fermer du popup individuel */
 #measure-individual-config-popup .modal-close-btn,
-#calibrate-individual-config-popup .modal-close-btn {
+#calibrate-individual-config-popup .modal-close-btn,
+#shape-individual-config-popup .modal-close-btn {
   width: 24px;
   height: 24px;
   background: none;
@@ -2037,14 +2052,16 @@
 }
 
 #measure-individual-config-popup .modal-close-btn:hover,
-#calibrate-individual-config-popup .modal-close-btn:hover {
+#calibrate-individual-config-popup .modal-close-btn:hover,
+#shape-individual-config-popup .modal-close-btn:hover {
   background: rgba(255, 255, 255, 0.1);
   color: rgba(255, 255, 255, 0.8);
 }
 
 /* Container compact pour sliders (espacement réduit) */
 #measure-individual-config-popup .config-sliders-compact,
-#calibrate-individual-config-popup .config-sliders-compact {
+#calibrate-individual-config-popup .config-sliders-compact,
+#shape-individual-config-popup .config-sliders-compact {
   display: flex;
   flex-direction: column;
   gap: 11px;
@@ -2052,16 +2069,79 @@
 }
 
 #measure-individual-config-popup .config-sliders-compact .config-section,
-#calibrate-individual-config-popup .config-sliders-compact .config-section {
+#calibrate-individual-config-popup .config-sliders-compact .config-section,
+#shape-individual-config-popup .config-sliders-compact .config-section {
   margin-bottom: 0;
   padding-bottom: 0;
 }
 
 /* Gestion des sections disabled */
 #measure-individual-config-popup .config-section.disabled,
-#calibrate-individual-config-popup .config-section.disabled {
+#calibrate-individual-config-popup .config-section.disabled,
+#shape-individual-config-popup .config-section.disabled {
   opacity: 0.4;
   pointer-events: none;
+}
+
+#shape-individual-config-popup .shape-config-section {
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+}
+
+#shape-individual-config-popup .shape-config-section .config-section-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 12px;
+}
+
+
+
+#shape-individual-config-popup .config-row-inline {
+  margin: 0 0 10px 0;
+}
+
+#shape-individual-config-popup .shape-config-section-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#shape-individual-config-popup .shape-config-slider-row {
+  display: flex;
+  flex-direction: row;
+  margin: 0;
+  gap: 7px;
+}
+
+#measure-individual-config-popup .config-section:last-child,
+#calibrate-individual-config-popup .config-section:last-child,
+#shape-individual-config-popup .config-section:last-child {
+  margin-top: 0;
+}
+
+#shape-individual-config-popup .graduation-size-control {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 2px 0 0 0;
+}
+
+#shape-individual-config-popup .shape-config-slider-row .config-label {
+  font-size: 13px;
+  color: #ccc;
+}
+
+#shape-individual-config-popup .shape-fill-controls {
+  margin-top: 8px;
+  margin-bottom: 0;
+  gap: 10px;
+}
+
+#shape-individual-config-popup .shape-config-separator {
+  height: 1px;
+  margin: 3px 0 7px;
+  background: rgba(255, 255, 255, 0.08);
 }
 
 #measure-config-header {
@@ -2490,6 +2570,20 @@
   padding: 6px 0;
 }
 
+/* Evite que les labels longs collent/chevauchent les toggles */
+.context-menu-row .context-menu-label.context-menu-label-normal {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: normal;
+  line-height: 1.35;
+  padding-right: 12px;
+}
+
+.context-menu-row .proportion-checkbox {
+  flex: 0 0 auto;
+  margin-left: 8px;
+}
+
 /* Valeur affichée pour un slider */
 .context-menu-value {
   font-size: 12px;
@@ -2703,10 +2797,11 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-}
-
-.hotkey-category.collapsed .hotkey-list {
-  display: none;
+  transform-origin: top center;
+  transition:
+    max-height 0.24s cubic-bezier(0.32, 0.72, 0, 1),
+    opacity 0.2s ease,
+    transform 0.24s cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 .hotkey-item {
@@ -2807,11 +2902,17 @@
 
 .hotkeys-warning-dialog {
   width: min(430px, calc(100vw - 40px));
-  background: linear-gradient(180deg, rgba(19, 23, 31, 0.98) 0%, rgba(14, 18, 24, 0.98) 100%);
+  background: linear-gradient(
+    180deg,
+    rgba(19, 23, 31, 0.98) 0%,
+    rgba(14, 18, 24, 0.98) 100%
+  );
   border: 1px solid rgba(255, 255, 255, 0.13);
   border-radius: 12px;
   padding: 20px 22px;
-  box-shadow: 0 20px 54px rgba(0, 0, 0, 0.58), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  box-shadow:
+    0 20px 54px rgba(0, 0, 0, 0.58),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
 .hotkeys-warning-dialog .dialog-container {
@@ -3029,6 +3130,12 @@
   border-color: var(--color-primary, #8b5cf6);
 }
 
+/* Eviter le double anneau focus (regle globale + focus local). */
+#hotkeys-search-input:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
 .hotkeys-search-bar input::placeholder {
   color: rgba(255, 255, 255, 0.3);
 }
@@ -3036,13 +3143,17 @@
 /* Toggle button group (Name / Key) */
 .hotkeys-search-toggle {
   display: flex;
+  align-items: stretch;
   border-radius: 6px;
   overflow: hidden;
   flex-shrink: 0;
+  background: #2e2e2e;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  isolation: isolate;
 }
 
 .search-toggle-btn {
-  background: #2e2e2e;
+  background: transparent;
   border: none;
   color: rgb(255 255 255 / 50%);
   font-size: 11px;
@@ -3051,10 +3162,19 @@
   cursor: pointer;
   transition: all 0.15s ease;
   white-space: nowrap;
+  border-radius: 0;
 }
 
 .search-toggle-btn:not(:last-child) {
   border-right: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.search-toggle-btn:first-child {
+  border-radius: 6px 0 0 6px;
+}
+
+.search-toggle-btn:last-child {
+  border-radius: 0 6px 6px 0;
 }
 
 .search-toggle-btn:hover:not(.active) {
@@ -3065,6 +3185,11 @@
 .search-toggle-btn.active {
   background: var(--color-primary, #8b5cf6);
   color: white;
+}
+
+#hotkeys-modal .search-toggle-btn:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
 }
 
 /* Message de conflit */
@@ -3110,8 +3235,12 @@
 
 /* Flash animation après modification */
 @keyframes hotkey-flash {
-  0% { background: rgba(139, 92, 246, 0.25); }
-  100% { background: transparent; }
+  0% {
+    background: rgba(139, 92, 246, 0.25);
+  }
+  100% {
+    background: transparent;
+  }
 }
 
 .hotkey-item.hotkey-flash {

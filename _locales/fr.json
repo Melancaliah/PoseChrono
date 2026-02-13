@@ -120,13 +120,20 @@
     "copyImage": "Copier l'image",
     "sessionStats": "Tu as dessiné {{count}} {{poseWord}} pendant {{timeStr}}.",
     "noDrawnPoses": "Tu as dessiné 0 poses",
+    "showDurations": "Afficher les durées",
+    "hideDurations": "Masquer les durées",
     "pause": "PAUSE",
     "nextSeriesIn": "Prochaine série dans",
     "drawingBadge": "DESSIN",
     "unitLabel": "Unité:",
     "resetUnit": "Réinitialiser l'unité",
     "totalLabel": "Total:",
-    "previousImage": "Image précédente"
+    "previousImage": "Image précédente",
+    "hints": {
+      "ignoreOtherShapes": "Ignorer les autres formes (Ctrl)",
+      "snapMode": "Aimantation (Ctrl)",
+      "rotateShape": "Rotation de forme (Q)"
+    }
   },
   "timer": {
     "showHide": "Afficher/masquer le chrono",
@@ -260,6 +267,7 @@
       "DRAWING_TOOL_CALIBRATE": "Outil pour définir l'unité",
       "DRAWING_TOOL_LASER": "Outil pointeur laser",
       "DRAWING_TOOL_PROTRACTOR": "Outil compas",
+      "DRAWING_ROTATE_SHAPE": "Pivoter la forme selectionnee (maintenir + glisser)",
       "DRAWING_SIZE_DECREASE": "Diminuer la taille du pinceau",
       "DRAWING_SIZE_INCREASE": "Augmenter la taille du pinceau",
       "TAGS": "Ouvrir le modal des tags"
@@ -350,6 +358,8 @@
       "useGlobalValues": "(utiliser les valeurs globales)"
     },
     "config": {
+      "appearance": "Trait",
+      "fill": "Remplissage",
       "color": "Couleur",
       "none": "Sans",
       "proportions": "Proportions",
@@ -372,12 +382,16 @@
       "showLabel": "Afficher le label",
       "showUnit": "Afficher l'unité",
       "subdivisions": "Subdivisions",
-      "labelSize": "Taille du label"
+      "labelSize": "Taille du label",
+      "fillEnabled": "Activer le remplissage",
+      "fillColor": "Couleur du remplissage",
+      "fillOpacity": "Opacité du remplissage"
     },
     "modals": {
       "measureSettings": "Réglages des mesures",
       "configureMeasure": "Configurer la mesure",
       "configureUnit": "Configurer l'unité",
+      "configureShape": "Configurer la forme",
       "compassSettings": "Réglages du compas",
       "exportTitle": "Exporter le dessin",
       "exportQuestion": "Qu'est-ce qu'on exporte ?",
@@ -400,7 +414,11 @@
       "enableStabilizer": "Activer le stabilisateur",
       "rectangle": "Rectangle",
       "rectangleEditMode": "Activer l'edition des rectangles",
-      "shapeEditMode": "Activer l'edition des formes"
+      "shapeEditMode": "Activer l'edition des formes",
+      "shapeSafeSelectMode": "Cliquer pour selectionner avant de deplacer",
+      "eraserShapeModeTitle": "Comportement de la gomme sur les formes",
+      "eraserShapeModeVector": "Efface les formes d'un coup",
+      "eraserShapeModeClassic": "Classique (si une forme est gommee elle n'est plus modifiable en vectoriel)"
     },
     "sliders": {
       "size": "Taille",
@@ -482,3 +500,9 @@
     "history": "Historique des sessions"
   }
 }
+
+
+
+
+
+

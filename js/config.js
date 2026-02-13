@@ -69,6 +69,7 @@ const CONFIG = {
     DRAWING_TOOL_CALIBRATE: "u",
     DRAWING_TOOL_LASER: "B", // Pointeur laser (Shift+B) (default : B)
     DRAWING_TOOL_PROTRACTOR: "U", // Rapporteur (Shift+U) (default : U)
+    DRAWING_ROTATE_SHAPE: "q", // Rotation de forme pendant drag (default : q)
     DRAWING_SIZE_DECREASE: "é", // Diminuer la taille (default : é)
     DRAWING_SIZE_INCREASE: '"', // Augmenter la taille (default : ")
   },
@@ -111,6 +112,7 @@ const DEFAULT_HOTKEYS = {
   DRAWING_TOOL_CALIBRATE: "u",
   DRAWING_TOOL_LASER: "B",
   DRAWING_TOOL_PROTRACTOR: "U",
+  DRAWING_ROTATE_SHAPE: "q",
   DRAWING_SIZE_DECREASE: "é",
   DRAWING_SIZE_INCREASE: '"',
 };
@@ -248,4 +250,14 @@ const DRAWING_CONSTANTS = {
   ZOOM_VIEWPORT_CLAMP_FACTOR: 0.5, // Facteur de clampage viewport pour maxOffset
   ZOOM_WHEEL_SENSITIVITY: 0.001, // Sensibilité du zoom molette
   ZOOM_ANIMATION_DURATION_MS: 150, // Durée de l'animation de zoom en ms
+
+  // Rotation
+  ROTATION_SENSITIVITY: 0.4, // Degrés par pixel de mouvement souris
+  ROTATION_SNAP_ANGLE: 15, // Snap angle en degrés quand Ctrl est enfoncé pendant la rotation
+  ROTATION_SNAP_THRESHOLD: 3, // Tolérance en degrés pour le snap à 0°
+
+  // Inertie du pan
+  PAN_INERTIA_FRICTION: 0.92, // Facteur de friction (0 = arrêt immédiat, 1 = pas de friction)
+  PAN_INERTIA_MIN_VELOCITY: 0.5, // Vélocité min en px/frame pour arrêter l'inertie
+  PAN_VELOCITY_SAMPLES: 5, // Nombre d'échantillons pour calculer la vélocité
 };

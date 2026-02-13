@@ -161,6 +161,8 @@ const stateManager = new StateManager({
   originalImages: [], // Ordre original des images (non mélangé)
   currentIndex: 0,
   imagesSeen: [],
+  imagesSeenMetaById: {},
+  reviewDurationsVisible: null,
 
   // Contrôle du lecteur
   isPlaying: false,
@@ -706,6 +708,7 @@ const ICONS = {
   PROGRESSIVE_BLUR:
     '<svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#e3e3e3"><path d="M200-260q26 0 43-17t17-43q0-26-17-43t-43-17q-26 0-43 17t-17 43q0 26 17 43t43 17Zm160-180q17 0 28.5-11.5T400-480q0-17-11.5-28.5T360-520q-17 0-28.5 11.5T320-480q0 17 11.5 28.5T360-440Zm0-160q17 0 28.5-11.5T400-640q0-17-11.5-28.5T360-680q-17 0-28.5 11.5T320-640q0 17 11.5 28.5T360-600ZM120-120v-80h720v80H120Zm80-460q26 0 43-17t17-43q0-26-17-43t-43-17q-26 0-43 17t-17 43q0 26 17 43t43 17Zm0 160q26 0 43-17t17-43q0-26-17-43t-43-17q-26 0-43 17t-17 43q0 26 17 43t43 17Zm160 140q17 0 28.5-11.5T400-320q0-17-11.5-28.5T360-360q-17 0-28.5 11.5T320-320q0 17 11.5 28.5T360-280Zm320-20q9 0 14.5-5.5T700-320q0-9-5.5-14.5T680-340q-9 0-14.5 5.5T660-320q0 9 5.5 14.5T680-300ZM120-760v-80h720v80H120Zm560 140q9 0 14.5-5.5T700-640q0-9-5.5-14.5T680-660q-9 0-14.5 5.5T660-640q0 9 5.5 14.5T680-620Zm0 160q9 0 14.5-5.5T700-480q0-9-5.5-14.5T680-500q-9 0-14.5 5.5T660-480q0 9 5.5 14.5T680-460ZM520-600q17 0 28.5-11.5T560-640q0-17-11.5-28.5T520-680q-17 0-28.5 11.5T480-640q0 17 11.5 28.5T520-600Zm0 160q17 0 28.5-11.5T560-480q0-17-11.5-28.5T520-520q-17 0-28.5 11.5T480-480q0 17 11.5 28.5T520-440Zm0 160q17 0 28.5-11.5T560-320q0-17-11.5-28.5T520-360q-17 0-28.5 11.5T480-320q0 17 11.5 28.5T520-280Zm-400 80v-560 560Z"/></svg>',
   INFO: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>',
+  TAGS: '<svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="currentColor"><path d="M320-240h320v-80H320v80Zm0-160h320v-80H320v80Zm0-160h320v-80H320v80ZM200-120q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h560q33 0 56.5 23.5T840-760v560q0 33-23.5 56.5T760-120H200Zm0-80h560v-560H200v560Zm0-560v560-560Z"/></svg>',
   GRID: '<svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#e3e3e3"><path d="M200-120q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h560q33 0 56.5 23.5T840-760v560q0 33-23.5 56.5T760-120H200Zm0-80h133v-133H200v133Zm213 0h134v-133H413v133Zm214 0h133v-133H627v133ZM200-413h133v-134H200v134Zm213 0h134v-134H413v134Zm214 0h133v-134H627v134ZM200-627h133v-133H200v133Zm213 0h134v-133H413v133Zm214 0h133v-133H627v133Z"/></svg>',
   SILHOUETTE:
     '<svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#e3e3e3"><path d="M760-120H200q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h560q33 0 56.5 23.5T840-760v560q0 33-23.5 56.5T760-120Zm-560-80h280v-320l280 320v-560H480v240L200-200Z"/></svg>',
@@ -3114,6 +3117,7 @@ function setupEventListeners() {
 
   // === RACCOURCIS CLAVIER ===
   document.addEventListener("keydown", handleKeyboardShortcuts);
+  document.addEventListener("keydown", handleSettingsScreenKeyboardShortcuts);
 
   // === KEYUP pour arrêter le frame stepping vidéo ===
   document.addEventListener("keyup", (e) => {
@@ -3477,7 +3481,19 @@ function handleKeyboardShortcuts(e) {
   } else if (keyLow === hk.TAGS.toLowerCase()) {
     e.preventDefault();
     if (typeof openTagsModal === "function") {
-      openTagsModal();
+      const zoomOverlay = document.getElementById("zoom-overlay");
+      const zoomImage = window.zoomOverlayCurrentImage || null;
+      if (zoomOverlay && zoomImage) {
+        openTagsModal(null, zoomImage);
+      } else if (
+        zoomOverlay &&
+        window.currentZoomIndex !== undefined &&
+        window.currentZoomIndex !== null
+      ) {
+        openTagsModal(window.currentZoomIndex);
+      } else {
+        openTagsModal();
+      }
     }
   }
 
@@ -3521,6 +3537,33 @@ function handleKeyboardShortcuts(e) {
       return;
     }
   }
+}
+
+function handleSettingsScreenKeyboardShortcuts(e) {
+  if (!settingsScreen || settingsScreen.classList.contains("hidden")) return;
+
+  // Espace simple uniquement (sans modificateurs)
+  const isSpace =
+    e.key === " " || e.key === "Spacebar" || e.code === "Space";
+  if (!isSpace || e.shiftKey || e.ctrlKey || e.altKey || e.metaKey) return;
+
+  // Ne pas interférer avec la saisie
+  const tag = e.target?.tagName;
+  if (
+    tag === "INPUT" ||
+    tag === "TEXTAREA" ||
+    e.target?.isContentEditable
+  ) {
+    return;
+  }
+
+  // Ne pas lancer si un modal est ouvert
+  if (typeof getTopOpenModal === "function" && getTopOpenModal()) return;
+
+  if (!startBtn || startBtn.disabled) return;
+
+  e.preventDefault();
+  startBtn.click();
 }
 //AJUSTER LE FLOU
 function updateBlurAmount() {
@@ -3778,6 +3821,7 @@ function startSession() {
   if (state.images.length === 0) return;
 
   state.imagesSeen = [];
+  state.imagesSeenMetaById = {};
   state.imagesCount = 0;
   state.totalSessionTime = 0;
   state.currentPoseTime = 0;
@@ -3823,6 +3867,11 @@ function startSession() {
   } else if (state.sessionMode === "memory") {
     // --- LOGIQUE MODE M\u00c9MOIRE ---
     state.memoryHidden = false; // R\u00e9initialiser l'\u00e9tat
+    // Appliquer une limite stricte de poses pour la session mémoire.
+    state.memoryPosesCount = Math.max(
+      1,
+      Math.min(parseInt(state.memoryPosesCount) || 1, state.images.length),
+    );
 
     if (state.memoryType === "flash") {
       // En mode flash, la dur\u00e9e totale est le temps d'affichage
@@ -3920,6 +3969,7 @@ function startTimer() {
 
     if (!isCustomPause) {
       state.totalSessionTime++;
+      state.currentPoseTime++;
     }
 
     // LOGIQUE SPÉCIFIQUE MODE MÉMOIRE FLASH
@@ -4008,6 +4058,107 @@ function stopTimer() {
   }
 }
 
+function ensureSeenMetaForImage(image) {
+  if (!image || image.id === undefined || image.id === null) return;
+  const key = String(image.id);
+  if (!state.imagesSeenMetaById || typeof state.imagesSeenMetaById !== "object") {
+    state.imagesSeenMetaById = {};
+  }
+  if (!state.imagesSeenMetaById[key]) {
+    state.imagesSeenMetaById[key] = { duration: 0 };
+  }
+}
+
+function addCurrentPoseDurationToSeenMeta() {
+  const image = state.images[state.currentIndex];
+  if (!image || image.id === undefined || image.id === null) return;
+
+  const elapsed = Math.max(0, Math.floor(Number(state.currentPoseTime) || 0));
+  if (elapsed <= 0) return;
+
+  ensureSeenMetaForImage(image);
+  const key = String(image.id);
+  state.imagesSeenMetaById[key].duration =
+    (Number(state.imagesSeenMetaById[key].duration) || 0) + elapsed;
+}
+
+function finalizeCurrentPoseForReview() {
+  addCurrentPoseDurationToSeenMeta();
+  state.currentPoseTime = 0;
+}
+
+function getSeenImageDurationSeconds(image) {
+  if (!image || image.id === undefined || image.id === null) return 0;
+  const key = String(image.id);
+  const raw = state.imagesSeenMetaById?.[key]?.duration;
+  return Math.max(0, Math.floor(Number(raw) || 0));
+}
+
+function formatReviewDuration(seconds) {
+  const safe = Math.max(0, Math.floor(Number(seconds) || 0));
+  const h = Math.floor(safe / 3600);
+  const m = Math.floor((safe % 3600) / 60);
+  const s = safe % 60;
+  if (h > 0) {
+    return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  }
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function isReviewImageAnnotated(image) {
+  if (!image || !image.filePath) return false;
+  try {
+    if (typeof window.hasSavedDrawingForImage === "function") {
+      return !!window.hasSavedDrawingForImage(image);
+    }
+  } catch (_) {}
+
+  const imageSrc = `file:///${image.filePath}`;
+  try {
+    if (typeof drawingStateCache !== "undefined" && drawingStateCache?.has?.(imageSrc)) {
+      return true;
+    }
+  } catch (_) {}
+  try {
+    if (
+      typeof zoomDrawingStateCache !== "undefined" &&
+      zoomDrawingStateCache?.has?.(imageSrc)
+    ) {
+      return true;
+    }
+  } catch (_) {}
+
+  return false;
+}
+
+const REVIEW_DURATIONS_VISIBLE_STORAGE_KEY =
+  "posechrono_review_durations_visible";
+
+function loadReviewDurationsVisibility() {
+  try {
+    const raw = localStorage.getItem(REVIEW_DURATIONS_VISIBLE_STORAGE_KEY);
+    if (raw === null) return true;
+    return raw !== "0";
+  } catch (_) {
+    return true;
+  }
+}
+
+function saveReviewDurationsVisibility(isVisible) {
+  try {
+    localStorage.setItem(
+      REVIEW_DURATIONS_VISIBLE_STORAGE_KEY,
+      isVisible ? "1" : "0",
+    );
+  } catch (_) {}
+}
+
+function ensureReviewDurationsVisibilityState() {
+  if (typeof state.reviewDurationsVisible !== "boolean") {
+    state.reviewDurationsVisible = loadReviewDurationsVisibility();
+  }
+}
+
 function nextImage() {
   // Fermer le mode dessin overlay si actif
   if (typeof isDrawingModeActive !== "undefined" && isDrawingModeActive) {
@@ -4028,6 +4179,8 @@ function nextImage() {
       state.timeRemaining = state.memoryDuration;
     }
   }
+
+  finalizeCurrentPoseForReview();
 
   if (state.sessionMode === "custom") {
     handleCustomNext();
@@ -4067,6 +4220,36 @@ function nextImage() {
   }
 
   // 2. Logique pour les autres modes (Classique / Relax)
+  if (state.sessionMode === "memory") {
+    const memorySessionLimit = Math.max(
+      1,
+      Math.min(parseInt(state.memoryPosesCount) || 1, state.images.length),
+    );
+    // L'image courante compte déjà comme une pose: si on atteint la limite, on termine.
+    if (state.currentIndex + 1 >= memorySessionLimit) {
+      showReview();
+      return;
+    }
+
+    state.currentIndex = state.currentIndex + 1;
+    resetTransforms();
+
+    state.timeRemaining = state.selectedDuration;
+
+    updateFlipButtonUI();
+    updateDisplay(false);
+    startTimer();
+
+    if (pauseBadge) pauseBadge.classList.add("hidden");
+    if (timerDisplay) timerDisplay.classList.remove("timer-paused");
+
+    const infoOverlay = document.getElementById("image-info-overlay");
+    if (infoOverlay) {
+      infoOverlay.remove();
+      toggleImageInfo();
+    }
+    return;
+  }
 
   // Vérifier si on a vu toutes les images (pour aller au review screen)
   const nextIndex = (state.currentIndex + 1) % state.images.length;
@@ -4134,6 +4317,7 @@ function nextPoseGroup() {
   }
 
   if (nextGroupIndex !== null) {
+    finalizeCurrentPoseForReview();
     // Aller au groupe de poses suivant
     stopTimer();
     state.currentStepIndex = nextGroupIndex;
@@ -4168,6 +4352,7 @@ function previousPoseGroup() {
   }
 
   if (prevGroupIndex !== null) {
+    finalizeCurrentPoseForReview();
     // Aller au groupe de poses précédent
     stopTimer();
     state.currentStepIndex = prevGroupIndex;
@@ -4345,6 +4530,7 @@ function previousImage() {
   }
 
   if (state.currentIndex <= 0) return;
+  finalizeCurrentPoseForReview();
   state.currentIndex =
     (state.currentIndex - 1 + state.images.length) % state.images.length;
   resetTransforms();
@@ -4922,12 +5108,19 @@ function updateDisplay(shouldAnimateFlip = false) {
     // ========================================
     updateMediaElement(image, shouldAnimateFlip);
 
-    if (!state.imagesSeen.some((img) => img.id === image.id))
+    if (!state.imagesSeen.some((img) => img.id === image.id)) {
       state.imagesSeen.push(image);
+    }
+    ensureSeenMetaForImage(image);
 
-    imageCounter.textContent = `${state.currentIndex + 1} / ${
-      state.images.length
-    }`;
+    const displayTotal =
+      state.sessionMode === "memory"
+        ? Math.max(
+            1,
+            Math.min(parseInt(state.memoryPosesCount) || 1, state.images.length),
+          )
+        : state.images.length;
+    imageCounter.textContent = `${state.currentIndex + 1} / ${displayTotal}`;
 
     if (state.currentIndex <= 0) {
       prevBtn.style.opacity = OPACITY.DISABLED;
@@ -6322,6 +6515,7 @@ const HOTKEY_CATEGORIES = {
   ],
   drawing: [
     "DRAWING_EXPORT", "DRAWING_LIGHTBOX",
+    "DRAWING_ROTATE_SHAPE",
     "DRAWING_SIZE_DECREASE", "DRAWING_SIZE_INCREASE",
     "DRAWING_TOOL_PENCIL", "DRAWING_TOOL_ERASER", "DRAWING_TOOL_RECTANGLE",
     "DRAWING_TOOL_CIRCLE", "DRAWING_TOOL_LINE", "DRAWING_TOOL_ARROW",
@@ -6797,6 +6991,97 @@ if (typeof window !== "undefined") {
   window.schedulePoseChronoUndoAction = schedulePoseChronoUndoAction;
 }
 
+async function confirmImageDeletionDialog(options = {}) {
+  const {
+    image = null,
+    container = document.body,
+  } = options;
+
+  const title = i18next.t("drawing.deleteImage", {
+    defaultValue: "Delete image",
+  });
+  const baseMessage = i18next.t("drawing.deleteImage", {
+    defaultValue: "Delete image",
+  });
+  const message = image?.name ? `${baseMessage}\n${image.name}` : baseMessage;
+
+  const { confirmed } = await showPoseChronoConfirmDialog({
+    title,
+    message,
+    confirmText: i18next.t("notifications.deleteConfirm", {
+      defaultValue: "Delete",
+    }),
+    cancelText: i18next.t("notifications.deleteCancel", {
+      defaultValue: "Cancel",
+    }),
+    container,
+  });
+
+  return confirmed;
+}
+
+function queueImageDeletionWithUndo(options = {}) {
+  const {
+    image = null,
+    removeLocal = null,
+    restoreLocal = null,
+    commitDelete = null,
+    actionId = `image-delete-${Date.now()}`,
+  } = options;
+
+  if (!image || typeof removeLocal !== "function") return false;
+
+  removeLocal();
+
+  const deletedMsg = i18next.t("notifications.deleteQueued", {
+    defaultValue: "Deleted. Undo available for 10 seconds.",
+  });
+  const undoLabel = i18next.t("notifications.undo", { defaultValue: "Undo" });
+
+  const runCommit = () => {
+    if (typeof commitDelete === "function") {
+      try {
+        const maybePromise = commitDelete();
+        if (maybePromise && typeof maybePromise.catch === "function") {
+          maybePromise.catch((e) => {
+            console.error("[DeleteImage] commit error:", e);
+          });
+        }
+      } catch (e) {
+        console.error("[DeleteImage] commit error:", e);
+      }
+    }
+  };
+
+  if (typeof window.schedulePoseChronoUndoAction === "function") {
+    window.schedulePoseChronoUndoAction({
+      id: actionId,
+      timeoutMs: 10000,
+      message: deletedMsg,
+      undoLabel,
+      onUndo: () => {
+        if (typeof restoreLocal === "function") {
+          restoreLocal();
+        }
+        if (typeof window.showPoseChronoToast === "function") {
+          window.showPoseChronoToast({
+            type: "success",
+            message: i18next.t("notifications.undoApplied", {
+              defaultValue: "Action undone.",
+            }),
+            duration: 2000,
+          });
+        }
+      },
+      onCommit: runCommit,
+    });
+    return true;
+  }
+
+  runCommit();
+  return false;
+}
+
 /**
  * Affiche le modal de configuration des raccourcis clavier
  */
@@ -6889,7 +7174,7 @@ function showHotkeysModal() {
           </div>
         </div>
       </div>
-      <div class="modal-body" style="overflow-y: auto; max-height: 55vh;">
+      <div class="modal-body" style="overflow-y: auto; max-height: 55vh; min-height: 240px;">
         <div class="hotkeys-container">
           ${categoriesContent}
         </div>
@@ -7024,31 +7309,135 @@ function showHotkeysModal() {
   const categoryToggles = modal.querySelectorAll(".hotkey-category-toggle");
   let searchMode = "name";
   const collapsedCategories = new Set();
+  const categoryTransitionDurationMs = 240;
+  const categoryTransitionState = new WeakMap();
 
-  const setCategoryCollapsed = (categoryEl, collapsed, persist = true) => {
+  const clearCategoryTransition = (listEl) => {
+    const prev = categoryTransitionState.get(listEl);
+    if (!prev) return;
+    if (typeof prev.onEnd === "function") {
+      listEl.removeEventListener("transitionend", prev.onEnd);
+    }
+    if (prev.timeoutId) {
+      clearTimeout(prev.timeoutId);
+    }
+    categoryTransitionState.delete(listEl);
+  };
+
+  const setCategoryCollapsed = (categoryEl, collapsed, persist = true, animate = true) => {
     if (!categoryEl) return;
     const key = categoryEl.dataset.category;
     const listEl = categoryEl.querySelector(".hotkey-list");
     const toggleEl = categoryEl.querySelector(".hotkey-category-toggle");
     if (!key || !listEl || !toggleEl) return;
 
-    categoryEl.classList.toggle("collapsed", !!collapsed);
-    toggleEl.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    const isCollapsed = categoryEl.classList.contains("collapsed");
+    const wantsCollapsed = !!collapsed;
 
     if (persist) {
-      if (collapsed) {
+      if (wantsCollapsed) {
         collapsedCategories.add(key);
       } else {
         collapsedCategories.delete(key);
       }
     }
+
+    if (isCollapsed === wantsCollapsed) {
+      toggleEl.setAttribute("aria-expanded", wantsCollapsed ? "false" : "true");
+      return;
+    }
+
+    clearCategoryTransition(listEl);
+    categoryEl.classList.toggle("collapsed", !!collapsed);
+    toggleEl.setAttribute("aria-expanded", wantsCollapsed ? "false" : "true");
+
+    if (!animate) {
+      if (wantsCollapsed) {
+        listEl.hidden = true;
+        listEl.style.maxHeight = "0px";
+        listEl.style.opacity = "0";
+        listEl.style.transform = "translateY(-8px)";
+        listEl.style.overflow = "hidden";
+        listEl.style.pointerEvents = "none";
+      } else {
+        listEl.hidden = false;
+        listEl.style.maxHeight = "none";
+        listEl.style.opacity = "1";
+        listEl.style.transform = "translateY(0)";
+        listEl.style.overflow = "visible";
+        listEl.style.pointerEvents = "auto";
+      }
+      return;
+    }
+
+    if (wantsCollapsed) {
+      listEl.hidden = false;
+      const startHeight = Math.max(listEl.scrollHeight, 1);
+      listEl.style.maxHeight = `${startHeight}px`;
+      listEl.style.opacity = "1";
+      listEl.style.transform = "translateY(0)";
+      listEl.style.overflow = "hidden";
+      listEl.style.pointerEvents = "none";
+      // Force reflow before animating to collapsed state.
+      void listEl.offsetHeight;
+      listEl.style.maxHeight = "0px";
+      listEl.style.opacity = "0";
+      listEl.style.transform = "translateY(-8px)";
+
+      const finish = () => {
+        clearCategoryTransition(listEl);
+        listEl.hidden = true;
+        listEl.style.maxHeight = "0px";
+        listEl.style.overflow = "hidden";
+        listEl.style.pointerEvents = "none";
+      };
+
+      const onEnd = (evt) => {
+        if (evt.propertyName !== "max-height") return;
+        finish();
+      };
+      listEl.addEventListener("transitionend", onEnd);
+      const timeoutId = setTimeout(finish, categoryTransitionDurationMs + 80);
+      categoryTransitionState.set(listEl, { onEnd, timeoutId });
+      return;
+    }
+
+    listEl.hidden = false;
+    listEl.style.maxHeight = "0px";
+    listEl.style.opacity = "0";
+    listEl.style.transform = "translateY(-8px)";
+    listEl.style.overflow = "hidden";
+    listEl.style.pointerEvents = "none";
+    // Force reflow before animating to expanded state.
+    void listEl.offsetHeight;
+    const targetHeight = Math.max(listEl.scrollHeight, 1);
+    listEl.style.maxHeight = `${targetHeight}px`;
+    listEl.style.opacity = "1";
+    listEl.style.transform = "translateY(0)";
+
+    const finish = () => {
+      clearCategoryTransition(listEl);
+      if (!categoryEl.classList.contains("collapsed")) {
+        listEl.style.maxHeight = "none";
+        listEl.style.overflow = "visible";
+        listEl.style.pointerEvents = "auto";
+      }
+    };
+
+    const onEnd = (evt) => {
+      if (evt.propertyName !== "max-height") return;
+      finish();
+    };
+    listEl.addEventListener("transitionend", onEnd);
+    const timeoutId = setTimeout(finish, categoryTransitionDurationMs + 80);
+    categoryTransitionState.set(listEl, { onEnd, timeoutId });
   };
 
   categoryToggles.forEach((btn) => {
     btn.addEventListener("click", () => {
       const categoryEl = btn.closest(".hotkey-category");
       const willCollapse = !categoryEl.classList.contains("collapsed");
-      setCategoryCollapsed(categoryEl, willCollapse, true);
+      setCategoryCollapsed(categoryEl, willCollapse, true, true);
     });
   });
 
@@ -7089,9 +7478,9 @@ function showHotkeysModal() {
       cat.style.display = visibleCount > 0 ? "" : "none";
 
       if (query && visibleCount > 0) {
-        setCategoryCollapsed(cat, false, false);
+        setCategoryCollapsed(cat, false, false, false);
       } else if (!query) {
-        setCategoryCollapsed(cat, collapsedCategories.has(cat.dataset.category), false);
+        setCategoryCollapsed(cat, collapsedCategories.has(cat.dataset.category), false, false);
       }
     });
 
@@ -8039,6 +8428,7 @@ function openZoomForImage(image, options = {}) {
   function updateZoomContent() {
     const overlay = document.getElementById("zoom-overlay");
     if (!overlay) return;
+    window.zoomOverlayCurrentImage = image || null;
 
     // Recalculer le chemin normalisé pour l'image courante (important pour la navigation)
     const currentImagePath = image.filePath || image.path || image.file;
@@ -8417,16 +8807,25 @@ function openZoomForImage(image, options = {}) {
       btnDelete.setAttribute("data-tooltip", i18next.t("drawing.deleteImage"));
       btnDelete.innerHTML = ICONS.DELETE;
       btnDelete.onclick = async () => {
+        const confirmed = await confirmImageDeletionDialog({
+          image,
+          container: document.body,
+        });
+        if (!confirmed) return;
         try {
-          const result = await eagle.dialog.showMessageBox({
-            type: "warning",
-            title: i18next.t("drawing.deleteImage"),
-            message: i18next.t("drawing.deleteImage"),
-            buttons: [i18next.t("notifications.deleteConfirm", "Supprimer"), i18next.t("notifications.deleteCancel", "Annuler")],
-          });
-          if (result.response !== 0) return;
-        } catch (e) { return; }
-        await image.moveToTrash();
+          if (typeof image.moveToTrash === "function") {
+            await image.moveToTrash();
+          } else if (
+            eagle?.item?.moveToTrash &&
+            image?.id !== undefined &&
+            image?.id !== null
+          ) {
+            await eagle.item.moveToTrash([image.id]);
+          }
+        } catch (e) {
+          console.error("Erreur suppression:", e);
+          return;
+        }
         onDelete();
       };
     }
@@ -8447,6 +8846,7 @@ function openZoomForImage(image, options = {}) {
     }
     const overlay = document.getElementById("zoom-overlay");
     if (overlay) overlay.remove();
+    window.zoomOverlayCurrentImage = null;
     document.body.style.overflow = "auto";
     document.removeEventListener("keydown", handleZoomKeyboard);
     window.zoomFilters = null;
@@ -8584,6 +8984,11 @@ function openZoomForImage(image, options = {}) {
           openZoomDrawingMode(overlay, image);
         }
       }
+    } else if (keyLow === hk.TAGS.toLowerCase()) {
+      e.preventDefault();
+      if (typeof openTagsModal === "function") {
+        openTagsModal(null, image);
+      }
     }
   }
 
@@ -8601,6 +9006,8 @@ window.openZoomForImage = openZoomForImage;
 
 function showReview() {
   stopTimer();
+  finalizeCurrentPoseForReview();
+  ensureReviewDurationsVisibilityState();
   // Fermer le mode dessin s'il est actif
   if (
     typeof closeDrawingMode === "function" &&
@@ -8696,38 +9103,158 @@ function showReview() {
     });
   }
 
-  reviewGrid.innerHTML = "";
+  let reviewDurationToggle = document.getElementById("review-duration-toggle");
+  if (!reviewDurationToggle && reviewGrid?.parentElement) {
+    reviewDurationToggle = document.createElement("button");
+    reviewDurationToggle.type = "button";
+    reviewDurationToggle.id = "review-duration-toggle";
+    reviewDurationToggle.className = "review-duration-toggle";
+    reviewGrid.parentElement.insertBefore(reviewDurationToggle, reviewGrid);
+  }
 
-  state.imagesSeen.forEach((image, index) => {
-    const div = document.createElement("div");
-    div.className = "review-item";
-    const isVideo = isVideoFile(image);
-    const img = document.createElement("img");
-    // Utiliser le thumbnailURL si disponible, sinon fallback sur filePath
-    // Pour les vidéos, Eagle fournit déjà un thumbnail
-    const thumbnailSrc = image.thumbnailURL || image.thumbnail;
-    if (thumbnailSrc) {
-      img.src = thumbnailSrc;
-    } else {
-      img.src = isVideo
-        ? `file:///${image.filePath}`
-        : `file:///${image.filePath}`;
+  const updateReviewDurationToggleLabel = () => {
+    if (!reviewDurationToggle) return;
+    const label = state.reviewDurationsVisible
+      ? i18next.t("drawing.hideDurations", { defaultValue: "Hide durations" })
+      : i18next.t("drawing.showDurations", { defaultValue: "Show durations" });
+    reviewDurationToggle.innerHTML = `
+      <svg xmlns="http://www.w3.org/2000/svg" height="12" viewBox="0 -960 960 960" width="12" fill="currentColor" aria-hidden="true" focusable="false">
+        <path d="M360-840v-80h240v80H360Zm80 440h80v-240h-80v240Zm40 320q-74 0-139.5-28.5T226-186q-49-49-77.5-114.5T120-440q0-74 28.5-139.5T226-694q49-49 114.5-77.5T480-800q62 0 119 20t107 58l56-56 56 56-56 56q38 50 58 107t20 119q0 74-28.5 139.5T734-186q-49 49-114.5 77.5T480-80Zm0-80q116 0 198-82t82-198q0-116-82-198t-198-82q-116 0-198 82t-82 198q0 116 82 198t198 82Zm0-280Z"/>
+      </svg>
+      <span>${label}</span>
+    `;
+  };
+
+  const REVIEW_DURATION_HIDE_ANIM_MS = 180;
+  let reviewDurationHideTimer = null;
+  const animateHideReviewDurationBadges = (onDone) => {
+    const durationBadges = reviewGrid.querySelectorAll(".review-duration-badge");
+    if (!durationBadges.length) {
+      if (typeof onDone === "function") onDone();
+      return;
     }
 
-    // Ajouter un indicateur vidéo
-    if (isVideo) {
-      div.classList.add("is-video");
-      const videoIndicator = document.createElement("div");
-      videoIndicator.className = "video-indicator";
-      videoIndicator.innerHTML = ICONS.VIDEO_PLAY;
-      div.appendChild(videoIndicator);
+    durationBadges.forEach((badge) => {
+      badge.classList.add("is-zipping-out");
+    });
+
+    if (reviewDurationHideTimer) {
+      clearTimeout(reviewDurationHideTimer);
+      reviewDurationHideTimer = null;
     }
 
-    div.onclick = () => openZoom(index);
+    reviewDurationHideTimer = setTimeout(() => {
+      reviewDurationHideTimer = null;
+      if (typeof onDone === "function") onDone();
+    }, REVIEW_DURATION_HIDE_ANIM_MS);
+  };
 
-    div.appendChild(img);
-    reviewGrid.appendChild(div);
-  });
+  const animateShowReviewDurationBadges = () => {
+    const durationBadges = reviewGrid.querySelectorAll(".review-duration-badge");
+    if (!durationBadges.length) return;
+
+    durationBadges.forEach((badge) => {
+      badge.classList.add("is-zipping-in");
+    });
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        durationBadges.forEach((badge) => {
+          badge.classList.remove("is-zipping-in");
+        });
+      });
+    });
+  };
+
+  function renderReviewGrid() {
+    reviewGrid.innerHTML = "";
+
+    state.imagesSeen.forEach((image, index) => {
+      const div = document.createElement("div");
+      div.className = "review-item";
+      const isVideo = isVideoFile(image);
+      const img = document.createElement("img");
+      // Utiliser le thumbnailURL si disponible, sinon fallback sur filePath
+      // Pour les vidéos, Eagle fournit déjà un thumbnail
+      const thumbnailSrc = image.thumbnailURL || image.thumbnail;
+      if (thumbnailSrc) {
+        img.src = thumbnailSrc;
+      } else {
+        img.src = isVideo
+          ? `file:///${image.filePath}`
+          : `file:///${image.filePath}`;
+      }
+
+      // Ajouter un indicateur vidéo
+      if (isVideo) {
+        div.classList.add("is-video");
+        const videoIndicator = document.createElement("div");
+        videoIndicator.className = "video-indicator";
+        videoIndicator.innerHTML = ICONS.VIDEO_PLAY;
+        div.appendChild(videoIndicator);
+      }
+
+      const metaBadges = document.createElement("div");
+      metaBadges.className = "review-meta-badges";
+      let hasMetaBadge = false;
+
+      if (state.reviewDurationsVisible) {
+        const durationBadge = document.createElement("div");
+        durationBadge.className = "review-duration-badge";
+        durationBadge.textContent = formatReviewDuration(
+          getSeenImageDurationSeconds(image),
+        );
+        metaBadges.appendChild(durationBadge);
+        hasMetaBadge = true;
+      }
+
+      if (isReviewImageAnnotated(image)) {
+        const annotatedBadge = document.createElement("div");
+        annotatedBadge.className = "review-annotated-badge";
+        annotatedBadge.innerHTML = ICONS.PENCIL;
+        metaBadges.appendChild(annotatedBadge);
+        hasMetaBadge = true;
+      }
+
+      if (hasMetaBadge) {
+        div.appendChild(metaBadges);
+      }
+
+      div.onclick = () => openZoom(index);
+
+      div.appendChild(img);
+      reviewGrid.appendChild(div);
+    });
+  }
+
+  if (reviewDurationToggle) {
+    reviewDurationToggle.onclick = () => {
+      if (reviewDurationHideTimer) {
+        clearTimeout(reviewDurationHideTimer);
+        reviewDurationHideTimer = null;
+      }
+
+      if (state.reviewDurationsVisible) {
+        state.reviewDurationsVisible = false;
+        saveReviewDurationsVisibility(state.reviewDurationsVisible);
+        updateReviewDurationToggleLabel();
+        animateHideReviewDurationBadges(() => {
+          if (!state.reviewDurationsVisible) {
+            renderReviewGrid();
+          }
+        });
+      } else {
+        state.reviewDurationsVisible = true;
+        saveReviewDurationsVisibility(state.reviewDurationsVisible);
+        updateReviewDurationToggleLabel();
+        renderReviewGrid();
+        animateShowReviewDurationBadges();
+      }
+    };
+    updateReviewDurationToggleLabel();
+  }
+
+  renderReviewGrid();
 
   // Initialiser/rafraîchir le timeline dans l'écran review
   if (typeof refreshTimelineReview === "function") {
@@ -8781,6 +9308,7 @@ function showReview() {
     if (!overlay || currentZoomIndex === null) return;
 
     const image = state.imagesSeen[currentZoomIndex];
+    window.zoomOverlayCurrentImage = image || null;
     const isVideo = isVideoFile(image);
 
     // Application des styles selon l'état des filtres
@@ -9139,28 +9667,123 @@ function showReview() {
     btnDelete.setAttribute("data-tooltip", i18next.t("drawing.deleteImage"));
     btnDelete.innerHTML = ICONS.DELETE;
     btnDelete.onclick = async () => {
-      try {
-        const result = await eagle.dialog.showMessageBox({
-          type: "warning",
-          title: i18next.t("drawing.deleteImage"),
-          message: i18next.t("drawing.deleteImage"),
-          buttons: [i18next.t("notifications.deleteConfirm", "Supprimer"), i18next.t("notifications.deleteCancel", "Annuler")],
-        });
-        if (result.response !== 0) return;
-      } catch (e) { return; }
-      await image.moveToTrash();
-      state.imagesSeen.splice(currentZoomIndex, 1);
-      renderReviewGrid();
+      const confirmed = await confirmImageDeletionDialog({
+        image,
+        container: document.body,
+      });
+      if (!confirmed) return;
 
-      if (state.imagesSeen.length === 0) {
-        closeZoom();
-      } else {
-        currentZoomIndex = Math.min(
-          currentZoomIndex,
-          state.imagesSeen.length - 1,
-        );
-        updateZoomContent();
-      }
+      const imageIdKey =
+        image?.id === undefined || image?.id === null ? null : String(image.id);
+      const removedReviewIndex = currentZoomIndex;
+      const removedReviewImage = image;
+      const originalMeta =
+        imageIdKey && state.imagesSeenMetaById
+          ? state.imagesSeenMetaById[imageIdKey]
+          : undefined;
+      const stateIndex =
+        imageIdKey === null
+          ? -1
+          : state.images.findIndex((img) => String(img.id) === imageIdKey);
+      let removedStateImage = null;
+
+      queueImageDeletionWithUndo({
+        image,
+        actionId: `delete-image-review-${Date.now()}-${imageIdKey || "noid"}`,
+        removeLocal: () => {
+          if (imageIdKey && state.imagesSeenMetaById?.[imageIdKey] !== undefined) {
+            delete state.imagesSeenMetaById[imageIdKey];
+          }
+
+          state.imagesSeen.splice(removedReviewIndex, 1);
+
+          if (stateIndex >= 0) {
+            removedStateImage = state.images.splice(stateIndex, 1)[0];
+            if (state.currentIndex >= state.images.length) {
+              state.currentIndex = Math.max(0, state.images.length - 1);
+            }
+          }
+
+          renderReviewGrid();
+
+          if (state.imagesSeen.length === 0) {
+            closeZoom();
+          } else {
+            currentZoomIndex = Math.min(
+              removedReviewIndex,
+              state.imagesSeen.length - 1,
+            );
+            updateZoomContent();
+          }
+        },
+        restoreLocal: () => {
+          const restoreReviewAt = Math.max(
+            0,
+            Math.min(removedReviewIndex, state.imagesSeen.length),
+          );
+          const alreadyInReview = state.imagesSeen.some(
+            (img) =>
+              imageIdKey !== null && String(img.id) === imageIdKey,
+          );
+          if (!alreadyInReview) {
+            state.imagesSeen.splice(restoreReviewAt, 0, removedReviewImage);
+          }
+
+          if (removedStateImage && stateIndex >= 0) {
+            const alreadyInState = state.images.some(
+              (img) => imageIdKey !== null && String(img.id) === imageIdKey,
+            );
+            if (!alreadyInState) {
+              const restoreStateAt = Math.max(
+                0,
+                Math.min(stateIndex, state.images.length),
+              );
+              state.images.splice(restoreStateAt, 0, removedStateImage);
+            }
+          }
+
+          if (imageIdKey) {
+            if (!state.imagesSeenMetaById || typeof state.imagesSeenMetaById !== "object") {
+              state.imagesSeenMetaById = {};
+            }
+            if (originalMeta !== undefined) {
+              state.imagesSeenMetaById[imageIdKey] = originalMeta;
+            } else if (!state.imagesSeenMetaById[imageIdKey]) {
+              state.imagesSeenMetaById[imageIdKey] = { duration: 0 };
+            }
+          }
+
+          renderReviewGrid();
+          if (currentZoomIndex !== null && state.imagesSeen.length > 0) {
+            currentZoomIndex = Math.min(restoreReviewAt, state.imagesSeen.length - 1);
+            updateZoomContent();
+          }
+        },
+        commitDelete: async () => {
+          try {
+            if (typeof image.moveToTrash === "function") {
+              await image.moveToTrash();
+            } else if (
+              eagle?.item?.moveToTrash &&
+              image?.id !== undefined &&
+              image?.id !== null
+            ) {
+              await eagle.item.moveToTrash([image.id]);
+            }
+          } catch (e) {
+            console.error("Erreur suppression:", e);
+            try {
+              if (
+                eagle?.item?.moveToTrash &&
+                image?.id !== undefined &&
+                image?.id !== null
+              ) {
+                await eagle.item.moveToTrash([image.id]);
+              }
+            } catch (_) {}
+          }
+        },
+      });
     };
 
     toolbar.appendChild(btnFlip);
@@ -9180,6 +9803,8 @@ function showReview() {
     }
     const overlay = document.getElementById("zoom-overlay");
     if (overlay) overlay.remove();
+    window.zoomOverlayCurrentImage = null;
+    renderReviewGrid();
     document.body.style.overflow = "auto";
     document.removeEventListener("keydown", handleZoomKeyboard);
     currentZoomIndex = null;
@@ -9341,8 +9966,13 @@ function showReview() {
           openZoomDrawingMode(overlay, image);
         }
       }
+    } else if (keyLow === hk.TAGS.toLowerCase()) {
+      e.preventDefault();
+      if (typeof openTagsModal === "function") {
+        const zoomImage = state.imagesSeen[currentZoomIndex] || null;
+        openTagsModal(currentZoomIndex, zoomImage);
+      }
     }
-    // Le raccourci T est géré par l'écouteur global
   }
 }
 
@@ -9704,7 +10334,7 @@ function toggleImageInfo() {
 // GESTION DES TAGS
 // ================================================================
 
-async function openTagsModal(reviewIndex = null) {
+async function openTagsModal(reviewIndex = null, explicitImage = null) {
   const tagsModal = document.getElementById("tags-modal");
   const closeTagsModal = document.getElementById("close-tags-modal");
   const newTagInput = document.getElementById("new-tag-input");
@@ -9714,16 +10344,28 @@ async function openTagsModal(reviewIndex = null) {
   if (!tagsModal) return;
 
   // Déterminer l'image selon le contexte (session ou review)
-  let currentImage;
-  if (reviewIndex !== null) {
+  let currentImage = explicitImage || null;
+  if (!currentImage && reviewIndex !== null) {
     // Mode review : utiliser state.imagesSeen
     currentImage = state.imagesSeen[reviewIndex];
-  } else {
+  } else if (!currentImage) {
     // Mode session : utiliser state.images
     currentImage = state.images[state.currentIndex];
   }
 
   if (!currentImage) return;
+  if (!currentImage.id) {
+    if (typeof window.showPoseChronoToast === "function") {
+      window.showPoseChronoToast({
+        type: "error",
+        message: i18next.t("errors.tagError"),
+        duration: 2500,
+      });
+    } else {
+      alert(i18next.t("errors.tagError"));
+    }
+    return;
+  }
 
   // Sauvegarder l'état du timer et l'arrêter
   state.wasPlayingBeforeModal = state.isPlaying;
@@ -10417,26 +11059,125 @@ async function deleteImage() {
   const image = state.images[state.currentIndex];
   if (!image) return;
 
-  try {
-    await image.moveToTrash();
-    state.images.splice(state.currentIndex, 1);
+  const confirmed = await confirmImageDeletionDialog({
+    image,
+    container: drawingScreen || document.body,
+  });
+  if (!confirmed) return;
 
-    if (state.images.length === 0) {
-      alert(i18next.t("settings.noImagesFound"));
-      location.reload();
-    } else {
+  const imageId = image?.id;
+  const imageIdKey =
+    imageId === undefined || imageId === null ? null : String(imageId);
+
+  const originalIndex = state.currentIndex;
+  const originalSeenIndex =
+    imageIdKey === null
+      ? -1
+      : state.imagesSeen.findIndex((img) => String(img.id) === imageIdKey);
+  const originalSeenImage =
+    originalSeenIndex >= 0 ? state.imagesSeen[originalSeenIndex] : null;
+  const originalMeta =
+    imageIdKey && state.imagesSeenMetaById
+      ? state.imagesSeenMetaById[imageIdKey]
+      : undefined;
+  const wasPlayingBeforeDelete = state.isPlaying;
+
+  queueImageDeletionWithUndo({
+    image,
+    actionId: `delete-image-main-${Date.now()}-${imageIdKey || "noid"}`,
+    removeLocal: () => {
+      state.images.splice(originalIndex, 1);
+
+      if (originalSeenIndex >= 0) {
+        state.imagesSeen.splice(originalSeenIndex, 1);
+      }
+
+      if (imageIdKey && state.imagesSeenMetaById?.[imageIdKey] !== undefined) {
+        delete state.imagesSeenMetaById[imageIdKey];
+      }
+
+      if (state.images.length === 0) {
+        stopTimer();
+        if (drawingScreen) drawingScreen.classList.add("hidden");
+        if (reviewScreen) reviewScreen.classList.add("hidden");
+        if (settingsScreen) settingsScreen.classList.remove("hidden");
+        document.body.classList.remove("review-active");
+        if (folderInfo) {
+          folderInfo.textContent = i18next.t("settings.noImagesFound");
+        }
+        return;
+      }
+
       if (state.currentIndex >= state.images.length) {
-        state.currentIndex = 0;
+        state.currentIndex = state.images.length - 1;
       }
       state.timeRemaining = state.selectedDuration;
       updateDisplay();
-    }
-  } catch (e) {
-    console.error("Erreur suppression:", e);
-    try {
-      await eagle.item.moveToTrash([image.id]);
-    } catch (err) {}
-  }
+    },
+    restoreLocal: () => {
+      const restoreAt = Math.max(0, Math.min(originalIndex, state.images.length));
+      state.images.splice(restoreAt, 0, image);
+
+      if (originalSeenImage) {
+        const alreadySeen = state.imagesSeen.some(
+          (img) => String(img.id) === imageIdKey,
+        );
+        if (!alreadySeen) {
+          const restoreSeenAt = Math.max(
+            0,
+            Math.min(originalSeenIndex, state.imagesSeen.length),
+          );
+          state.imagesSeen.splice(restoreSeenAt, 0, originalSeenImage);
+        }
+      }
+
+      if (imageIdKey) {
+        if (!state.imagesSeenMetaById || typeof state.imagesSeenMetaById !== "object") {
+          state.imagesSeenMetaById = {};
+        }
+        if (originalMeta !== undefined) {
+          state.imagesSeenMetaById[imageIdKey] = originalMeta;
+        } else if (!state.imagesSeenMetaById[imageIdKey]) {
+          state.imagesSeenMetaById[imageIdKey] = { duration: 0 };
+        }
+      }
+
+      state.currentIndex = restoreAt;
+      state.timeRemaining = state.selectedDuration;
+
+      if (settingsScreen && !settingsScreen.classList.contains("hidden")) {
+        settingsScreen.classList.add("hidden");
+        if (reviewScreen) reviewScreen.classList.add("hidden");
+        if (drawingScreen) drawingScreen.classList.remove("hidden");
+      }
+
+      updateDisplay();
+      if (wasPlayingBeforeDelete && !state.isPlaying) {
+        startTimer();
+      }
+    },
+    commitDelete: async () => {
+      try {
+        if (typeof image.moveToTrash === "function") {
+          await image.moveToTrash();
+        } else if (eagle?.item?.moveToTrash && imageId !== undefined && imageId !== null) {
+          await eagle.item.moveToTrash([imageId]);
+        }
+      } catch (e) {
+        console.error("Erreur suppression:", e);
+        try {
+          if (eagle?.item?.moveToTrash && imageId !== undefined && imageId !== null) {
+            await eagle.item.moveToTrash([imageId]);
+          }
+        } catch (err) {}
+      }
+
+      if (state.images.length === 0) {
+        alert(i18next.t("settings.noImagesFound"));
+        location.reload();
+      }
+    },
+  });
 }
 
 function updateRelaxDisplay() {

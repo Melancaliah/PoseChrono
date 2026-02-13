@@ -124,13 +124,20 @@
     "copyImage": "Копировать изображение",
     "sessionStats": "Вы нарисовали {{count}} {{poseWord}} за {{timeStr}}.",
     "noDrawnPoses": "Вы нарисовали 0 поз",
+    "showDurations": "Показать длительности",
+    "hideDurations": "Скрыть длительности",
     "pause": "ПЕРЕРЫВ",
     "nextSeriesIn": "Следующая серия через",
     "drawingBadge": "РИСОВАНИЕ",
     "unitLabel": "Единица:",
     "resetUnit": "Сбросить единицу",
     "totalLabel": "Всего:",
-    "previousImage": "Предыдущее изображение"
+    "previousImage": "Предыдущее изображение",
+    "hints": {
+      "ignoreOtherShapes": "Игнорировать другие фигуры (Ctrl)",
+      "snapMode": "Привязка (Ctrl)",
+      "rotateShape": "Поворот фигуры (Q)"
+    }
   },
   "timer": {
     "showHide": "Показать/скрыть таймер",
@@ -244,6 +251,7 @@
       "DRAWING_TOOL_CALIBRATE": "Калибровать единицу",
       "DRAWING_TOOL_LASER": "Лазерная указка",
       "DRAWING_TOOL_PROTRACTOR": "Инструмент транспортир",
+      "DRAWING_ROTATE_SHAPE": "Повернуть выбранную фигуру (удерживать + перетаскивать)",
       "DRAWING_SIZE_DECREASE": "Уменьшить размер кисти",
       "DRAWING_SIZE_INCREASE": "Увеличить размер кисти",
       "TAGS": "Открыть модальное окно тегов"
@@ -354,6 +362,8 @@
       "useGlobalValues": "(использовать глобальные значения)"
     },
     "config": {
+      "appearance": "Обводка",
+      "fill": "Заливка",
       "color": "Цвет",
       "none": "Нет",
       "proportions": "Пропорции",
@@ -376,12 +386,16 @@
       "showLabel": "Показать метку",
       "showUnit": "Показать единицу",
       "subdivisions": "Подразделения",
-      "labelSize": "Размер метки"
+      "labelSize": "Размер метки",
+      "fillEnabled": "Включить заливку",
+      "fillColor": "Цвет заливки",
+      "fillOpacity": "Прозрачность заливки"
     },
     "modals": {
       "measureSettings": "Настройки измерения",
       "configureMeasure": "Настроить измерение",
       "configureUnit": "Настроить единицу",
+      "configureShape": "Настроить форму",
       "compassSettings": "Настройки циркуля",
       "exportTitle": "Экспорт рисунка",
       "exportQuestion": "Что вы хотите экспортировать?",
@@ -404,7 +418,11 @@
       "enableStabilizer": "Включить стабилизатор",
       "rectangle": "Прямоугольник",
       "rectangleEditMode": "Включить редактирование прямоугольников",
-      "shapeEditMode": "Включить редактирование фигур"
+      "shapeEditMode": "Включить редактирование фигур",
+      "shapeSafeSelectMode": "Сначала клик для выбора",
+      "eraserShapeModeTitle": "Поведение ластика для фигур",
+      "eraserShapeModeVector": "Удалять фигуры целиком",
+      "eraserShapeModeClassic": "Классика (если фигура стерта, ее больше нельзя редактировать как вектор)"
     },
     "sliders": {
       "size": "Размер",
@@ -486,3 +504,9 @@
     "history": "История занятий"
   }
 }
+
+
+
+
+
+

@@ -120,13 +120,20 @@
     "copyImage": "复制图片",
     "sessionStats": "你画了 {{count}} {{poseWord}}，用时 {{timeStr}}。",
     "noDrawnPoses": "你画了 0 个姿势",
+    "showDurations": "显示时长",
+    "hideDurations": "隐藏时长",
     "pause": "休息",
     "nextSeriesIn": "下一组在",
     "drawingBadge": "绘画中",
     "unitLabel": "单位：",
     "resetUnit": "重置单位",
     "totalLabel": "总计：",
-    "previousImage": "上一张图片"
+    "previousImage": "上一张图片",
+    "hints": {
+      "ignoreOtherShapes": "忽略其他形状 (Ctrl)",
+      "snapMode": "吸附 (Ctrl)",
+      "rotateShape": "旋转图形 (Q)"
+    }
   },
   "timer": {
     "showHide": "显示/隐藏计时器",
@@ -240,6 +247,7 @@
       "DRAWING_TOOL_CALIBRATE": "校准单位",
       "DRAWING_TOOL_LASER": "激光笔",
       "DRAWING_TOOL_PROTRACTOR": "量角器工具",
+      "DRAWING_ROTATE_SHAPE": "旋转已选图形（按住并拖动）",
       "DRAWING_SIZE_DECREASE": "减小画笔大小",
       "DRAWING_SIZE_INCREASE": "增大画笔大小",
       "TAGS": "打开标签模态框"
@@ -350,6 +358,8 @@
       "useGlobalValues": "(使用全局值)"
     },
     "config": {
+      "appearance": "描边",
+      "fill": "填充",
       "color": "颜色",
       "none": "无",
       "proportions": "比例",
@@ -372,12 +382,16 @@
       "showLabel": "显示标签",
       "showUnit": "显示单位",
       "subdivisions": "细分",
-      "labelSize": "标签大小"
+      "labelSize": "标签大小",
+      "fillEnabled": "启用填充",
+      "fillColor": "填充颜色",
+      "fillOpacity": "填充不透明度"
     },
     "modals": {
       "measureSettings": "测量设置",
       "configureMeasure": "配置测量",
       "configureUnit": "配置单位",
+      "configureShape": "配置形状",
       "compassSettings": "圆规设置",
       "exportTitle": "导出绘图",
       "exportQuestion": "您想导出什么？",
@@ -400,7 +414,11 @@
       "enableStabilizer": "启用防抖",
       "rectangle": "矩形",
       "rectangleEditMode": "启用矩形编辑",
-      "shapeEditMode": "启用图形编辑"
+      "shapeEditMode": "启用图形编辑",
+      "shapeSafeSelectMode": "先点击再选择",
+      "eraserShapeModeTitle": "橡皮对图形的行为",
+      "eraserShapeModeVector": "整形状一次删除",
+      "eraserShapeModeClassic": "经典（图形被擦除后将不再支持矢量编辑）"
     },
     "sliders": {
       "size": "大小",
@@ -482,3 +500,9 @@
     "history": "练习历史"
   }
 }
+
+
+
+
+
+

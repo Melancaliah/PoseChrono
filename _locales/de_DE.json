@@ -120,13 +120,20 @@
     "copyImage": "Bild kopieren",
     "sessionStats": "Du hast {{count}} {{poseWord}} in {{timeStr}} gezeichnet.",
     "noDrawnPoses": "Du hast 0 Posen gezeichnet",
+    "showDurations": "Dauern anzeigen",
+    "hideDurations": "Dauern ausblenden",
     "pause": "PAUSE",
     "nextSeriesIn": "Nächste Serie in",
     "drawingBadge": "ZEICHNEN",
     "unitLabel": "Einheit:",
     "resetUnit": "Einheit zurücksetzen",
     "totalLabel": "Gesamt:",
-    "previousImage": "Vorheriges Bild"
+    "previousImage": "Vorheriges Bild",
+    "hints": {
+      "ignoreOtherShapes": "Andere Formen ignorieren (Ctrl)",
+      "snapMode": "Einrasten (Ctrl)",
+      "rotateShape": "Form drehen (Q)"
+    }
   },
   "timer": {
     "showHide": "Timer anzeigen/verbergen",
@@ -240,6 +247,7 @@
       "DRAWING_TOOL_CALIBRATE": "Einheit kalibrieren",
       "DRAWING_TOOL_LASER": "Laserpointer",
       "DRAWING_TOOL_PROTRACTOR": "Winkelmesser-Werkzeug",
+      "DRAWING_ROTATE_SHAPE": "Ausgewahlte Form drehen (halten + ziehen)",
       "DRAWING_SIZE_DECREASE": "Pinselgröße verkleinern",
       "DRAWING_SIZE_INCREASE": "Pinselgröße vergrößern",
       "TAGS": "Tags-Modal öffnen"
@@ -350,6 +358,8 @@
       "useGlobalValues": "(Globale Werte verwenden)"
     },
     "config": {
+      "appearance": "Kontur",
+      "fill": "Füllung",
       "color": "Farbe",
       "none": "Keine",
       "proportions": "Proportionen",
@@ -372,12 +382,16 @@
       "showLabel": "Beschriftung anzeigen",
       "showUnit": "Einheit anzeigen",
       "subdivisions": "Unterteilungen",
-      "labelSize": "Beschriftungsgröße"
+      "labelSize": "Beschriftungsgröße",
+      "fillEnabled": "Füllung aktivieren",
+      "fillColor": "Füllfarbe",
+      "fillOpacity": "Füllungsdeckkraft"
     },
     "modals": {
       "measureSettings": "Messeinstellungen",
       "configureMeasure": "Messung konfigurieren",
       "configureUnit": "Einheit konfigurieren",
+      "configureShape": "Form konfigurieren",
       "compassSettings": "Zirkel-Einstellungen",
       "exportTitle": "Zeichnung exportieren",
       "exportQuestion": "Was möchten Sie exportieren?",
@@ -400,7 +414,11 @@
       "enableStabilizer": "Stabilisator aktivieren",
       "rectangle": "Rechteck",
       "rectangleEditMode": "Rechteckbearbeitung aktivieren",
-      "shapeEditMode": "Formbearbeitung aktivieren"
+      "shapeEditMode": "Formbearbeitung aktivieren",
+      "shapeSafeSelectMode": "Erst klicken zum Auswahlen",
+      "eraserShapeModeTitle": "Radierer-Verhalten bei Formen",
+      "eraserShapeModeVector": "Formen auf einmal loschen",
+      "eraserShapeModeClassic": "Klassisch (wenn eine Form radiert wird, ist sie nicht mehr als Vektor bearbeitbar)"
     },
     "sliders": {
       "size": "Größe",
@@ -482,3 +500,9 @@
     "history": "Übungsverlauf"
   }
 }
+
+
+
+
+
+

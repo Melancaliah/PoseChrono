@@ -591,11 +591,13 @@ video {
 /* Badge PAUSE */
 .pause-badge {
   background: var(--color-primary-elegant);
+  text-align: center;
 }
 
 /* Badge DESSIN */
 .drawing-badge {
   background: var(--color-drawing-badge);
+  text-align: center;
 }
 
 /* Lueur statique autour du timer-display en pause */
@@ -720,6 +722,7 @@ video {
 .review-grid .review-item {
   width: 100%;
   aspect-ratio: 1;
+  position: relative;
   border-radius: 8px;
   overflow: hidden;
   background: rgba(255, 255, 255, 0.05);
@@ -812,6 +815,34 @@ video {
   width: fit-content;
   padding: 12px 40px;
   margin: 0 auto;
+}
+
+.review-duration-toggle {
+  align-self: flex-start;
+  margin: 0px 20px -5px 20px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: 0;
+  color: #ffffff38;
+  font-size: 13px;
+  cursor: pointer;
+  opacity: 0.9;
+    transition: color 0.1s ease-in-out, opacity 0.5s ease-in-out;
+
+}
+
+.review-duration-toggle:hover {
+  color: #ffffff51;
+}
+
+.review-duration-toggle svg {
+  flex: 0 0 auto;
+}
+
+.review-duration-toggle:hover {
+  opacity: 1;
 }
 
 #zoom-overlay:hover {
@@ -1051,6 +1082,63 @@ video {
 
 .review-item.is-video:hover .video-indicator {
   opacity: 0.8;
+}
+
+.review-item .review-meta-badges {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
+}
+
+.review-item .review-duration-badge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.62);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #fff;
+  font-size: 11px;
+  line-height: 1.4;
+  font-weight: 600;
+  transform-origin: 50% 50%;
+  transition:
+    transform 0.18s cubic-bezier(0.2, 0.9, 0.2, 1),
+    opacity 0.16s ease,
+    filter 0.18s ease;
+}
+
+.review-item .review-duration-badge.is-zipping-out {
+  transform: translateY(10px) scaleY(0.72);
+  opacity: 0;
+  filter: blur(0.6px);
+}
+
+.review-item .review-duration-badge.is-zipping-in {
+  transform: translateY(10px) scaleY(0.72);
+  opacity: 0;
+  filter: blur(0.6px);
+}
+
+.review-item .review-annotated-badge {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.62);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #f3f4f6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.review-item .review-annotated-badge svg {
+  width: 13px;
+  height: 13px;
+  fill: currentColor !important;
 }
 
 /* === ZOOM VIDEO WRAPPER === */

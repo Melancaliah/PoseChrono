@@ -120,13 +120,20 @@
     "copyImage": "이미지 복사",
     "sessionStats": "{{timeStr}} 동안 {{count}} {{poseWord}}를 그렸습니다.",
     "noDrawnPoses": "0개 포즈를 그렸습니다",
+    "showDurations": "시간 표시",
+    "hideDurations": "시간 숨기기",
     "pause": "휴식",
     "nextSeriesIn": "다음 시리즈까지",
     "drawingBadge": "그리기",
     "unitLabel": "단위:",
     "resetUnit": "단위 초기화",
     "totalLabel": "합계:",
-    "previousImage": "이전 이미지"
+    "previousImage": "이전 이미지",
+    "hints": {
+      "ignoreOtherShapes": "다른 도형 무시 (Ctrl)",
+      "snapMode": "스냅 (Ctrl)",
+      "rotateShape": "도형 회전 (Q)"
+    }
   },
   "timer": {
     "showHide": "타이머 표시/숨기기",
@@ -240,6 +247,7 @@
       "DRAWING_TOOL_CALIBRATE": "단위 보정",
       "DRAWING_TOOL_LASER": "레이저 포인터",
       "DRAWING_TOOL_PROTRACTOR": "각도기 도구",
+      "DRAWING_ROTATE_SHAPE": "선택한 도형 회전 (누른 채 드래그)",
       "DRAWING_SIZE_DECREASE": "브러시 크기 감소",
       "DRAWING_SIZE_INCREASE": "브러시 크기 증가",
       "TAGS": "태그 모달 열기"
@@ -350,6 +358,8 @@
       "useGlobalValues": "(전역 값 사용)"
     },
     "config": {
+      "appearance": "윤곽선",
+      "fill": "채우기",
       "color": "색상",
       "none": "없음",
       "proportions": "비율",
@@ -372,12 +382,16 @@
       "showLabel": "라벨 표시",
       "showUnit": "단위 표시",
       "subdivisions": "세분",
-      "labelSize": "라벨 크기"
+      "labelSize": "라벨 크기",
+      "fillEnabled": "채우기 사용",
+      "fillColor": "채우기 색상",
+      "fillOpacity": "채우기 불투명도"
     },
     "modals": {
       "measureSettings": "측정 설정",
       "configureMeasure": "측정 구성",
       "configureUnit": "단위 구성",
+      "configureShape": "도형 설정",
       "compassSettings": "컴퍼스 설정",
       "exportTitle": "그리기 내보내기",
       "exportQuestion": "무엇을 내보내시겠습니까?",
@@ -400,7 +414,11 @@
       "enableStabilizer": "안정기 활성화",
       "rectangle": "사각형",
       "rectangleEditMode": "사각형 편집 활성화",
-      "shapeEditMode": "도형 편집 활성화"
+      "shapeEditMode": "도형 편집 활성화",
+      "shapeSafeSelectMode": "먼저 클릭해 선택",
+      "eraserShapeModeTitle": "도형에 대한 지우개 동작",
+      "eraserShapeModeVector": "도형을 한 번에 지우기",
+      "eraserShapeModeClassic": "클래식 (도형이 지워지면 더 이상 벡터로 수정할 수 없음)"
     },
     "sliders": {
       "size": "크기",
@@ -482,3 +500,9 @@
     "history": "연습 기록"
   }
 }
+
+
+
+
+
+
