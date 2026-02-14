@@ -12,6 +12,7 @@
     "description": "크로키 연습 타이머 도구"
   },
   "titlebar": {
+    "settingsTooltip": "Settings (Ctrl + K)",
     "pinTooltip": "항상 위에 (Shift+T)",
     "minimize": "최소화",
     "maximize": "최대화",
@@ -43,7 +44,51 @@
     "loadedFromSession": "세션에서 {{count}}개 로드됨",
     "posesLabel": "포즈",
     "durationLabelShort": "시간",
-    "timerLabel": "타이머"
+    "timerLabel": "타이머",
+    "repairStorage": "Repair storage",
+    "repairStorageTooltip": "Repair timeline/plans/hotkeys storage",
+    "global": {
+      "title": "Global settings",
+      "appearance": "Appearance",
+      "history": "History",
+      "drawing": "Drawing",
+      "general": "General",
+      "showBackgroundGrid": "Show background grid",
+      "hideBackgroundGrid": "Hide background grid",
+      "titlebarAlwaysVisible": "Titlebar always visible",
+      "changeTheme": "Change theme",
+      "openTimeline": "Open timeline",
+      "repairStorage": "Repair storage",
+      "openHotkeys": "Configure hotkeys",
+      "exportPreferences": "Export preferences",
+      "importPreferences": "Import preferences",
+      "preferencesPackageExportMessage": "Choose what to include in the backup file.",
+      "preferencesPackageImportMessage": "Choose what to import from this backup file.",
+      "packageSectionUi": "UI preferences",
+      "packageSectionHotkeys": "Keyboard shortcuts",
+      "packageSectionPlans": "Session plans",
+      "packageSectionTimeline": "Timeline history",
+      "preferencesExportDone": "Preferences exported.",
+      "preferencesExportError": "Preferences export failed.",
+      "preferencesImportDone": "Preferences imported: {{targets}}",
+      "preferencesImportError": "Preferences import failed.",
+      "preferencesImportInvalid": "Invalid backup file.",
+      "storageStatusReady": "Storage backend: IndexedDB (normal mode).",
+      "storageStatusFallback": "Storage backend: localStorage fallback active.",
+      "maintenance": "Maintenance",
+      "preferencesHint": "Export creates one JSON backup. Import applies only selected sections.",
+      "maintenanceHint": "Maintenance actions may remove local data. Consider exporting a backup first.",
+      "storageDiagDays": "Days",
+      "storageDiagSessions": "Sessions",
+      "storageDiagPlans": "Plans",
+      "storageDiagCustomHotkeys": "Custom hotkeys",
+      "resetSettings": "설정 초기화",
+      "resetSettingsConfirm": "모든 설정을 기본값으로 초기화할까요? (테마, UI 설정, 사용자 지정 단축키)",
+      "resetSettingsDone": "모든 설정이 기본값으로 초기화되었습니다.",
+      "defaultSessionMode": "기본 세션 모드",
+      "preferencesSection": "환경설정",
+      "dataSection": "데이터"
+    }
   },
   "modes": {
     "classic": {
@@ -436,7 +481,15 @@
     }
   },
   "timeline": {
-    "dayLabels": ["월", "화", "수", "목", "금", "토", "일"],
+    "dayLabels": [
+      "월",
+      "화",
+      "수",
+      "목",
+      "금",
+      "토",
+      "일"
+    ],
     "monthLabels": [
       "1월",
       "2월",
@@ -499,11 +552,21 @@
     "posesLabel": "포즈",
     "sessionsLabel": "연습",
     "history": "연습 기록"
+  },
+  "storage": {
+    "fallbackActive": "Storage fallback enabled: IndexedDB unavailable, using local storage.",
+    "repairTitle": "Repair storage",
+    "repairMessage": "Choose what to reset. This action cannot be undone.",
+    "repairConfirm": "Repair",
+    "targetTimeline": "Timeline history",
+    "targetPlans": "Session plans",
+    "targetHotkeys": "Keyboard shortcuts",
+    "repairDone": "Storage repaired: {{targets}}",
+    "nothingSelected": "No storage section selected.",
+    "repairError": "Storage repair failed.",
+    "repairMessageDetailed": "Choose what to reset. Selected data will be deleted locally and cannot be recovered automatically.",
+    "repairImpactTimeline": "Timeline: removes day/session history and related image references.",
+    "repairImpactPlans": "Plans: removes saved session plans.",
+    "repairImpactHotkeys": "Hotkeys: restores default shortcuts."
   }
 }
-
-
-
-
-
-

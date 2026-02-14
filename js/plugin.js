@@ -245,6 +245,707 @@ const state = new Proxy(stateManager, {
   },
 });
 
+function escapeHtml(input) {
+  const str = String(input ?? "");
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function encodeDataToken(input) {
+  return encodeURIComponent(String(input ?? ""));
+}
+
+function decodeDataToken(input) {
+  try {
+    return decodeURIComponent(String(input ?? ""));
+  } catch (_) {
+    return String(input ?? "");
+  }
+}
+
+const PoseChronoStorage = (() => {
+  const DB_NAME = "posechrono-storage";
+  const DB_VERSION = 1;
+  const STORE_NAME = "kv";
+  const FALLBACK_PREFIX = "posechrono-db:";
+  let openPromise = null;
+  let indexedDbAvailable = true;
+  let fallbackNotified = false;
+
+  const i18nText = (key, fallback) => {
+    try {
+      if (typeof i18next !== "undefined" && typeof i18next.t === "function") {
+        return i18next.t(key, { defaultValue: fallback });
+      }
+    } catch (_) {}
+    return fallback;
+  };
+
+  const notifyFallbackMode = () => {
+    if (fallbackNotified) return;
+    fallbackNotified = true;
+    const message = i18nText(
+      "storage.fallbackActive",
+      "Storage fallback enabled: IndexedDB unavailable, using local storage.",
+    );
+
+    if (
+      typeof window !== "undefined" &&
+      typeof window.showPoseChronoToast === "function"
+    ) {
+      window.showPoseChronoToast({
+        type: "error",
+        message,
+        duration: 5000,
+      });
+      return;
+    }
+
+    if (
+      typeof eagle !== "undefined" &&
+      eagle?.notification &&
+      typeof eagle.notification.show === "function"
+    ) {
+      eagle.notification.show({
+        title: message,
+        body: "",
+        mute: false,
+        duration: 5000,
+      });
+    }
+  };
+
+  const cloneValue = (value) => {
+    try {
+      if (typeof structuredClone === "function") {
+        return structuredClone(value);
+      }
+    } catch (_) {}
+    return JSON.parse(JSON.stringify(value));
+  };
+
+  const openDb = () => {
+    if (openPromise) return openPromise;
+    openPromise = new Promise((resolve, reject) => {
+      if (typeof indexedDB === "undefined") {
+        reject(new Error("IndexedDB unavailable"));
+        return;
+      }
+      const request = indexedDB.open(DB_NAME, DB_VERSION);
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains(STORE_NAME)) {
+          db.createObjectStore(STORE_NAME, { keyPath: "key" });
+        }
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () =>
+        reject(request.error || new Error("open db failed"));
+    }).catch((error) => {
+      console.warn(
+        "[Storage] IndexedDB disabled, fallback localStorage:",
+        error,
+      );
+      indexedDbAvailable = false;
+      notifyFallbackMode();
+      return null;
+    });
+    return openPromise;
+  };
+
+  const getFallbackKey = (key) => `${FALLBACK_PREFIX}${key}`;
+
+  const withStore = async (mode, fn) => {
+    const db = await openDb();
+    if (!db) return null;
+    return new Promise((resolve, reject) => {
+      try {
+        const tx = db.transaction(STORE_NAME, mode);
+        const store = tx.objectStore(STORE_NAME);
+        const req = fn(store);
+        tx.oncomplete = () => resolve(req ? req.result : null);
+        tx.onabort = () => reject(tx.error || new Error("transaction aborted"));
+        tx.onerror = () => reject(tx.error || new Error("transaction error"));
+      } catch (e) {
+        reject(e);
+      }
+    });
+  };
+
+  const getJson = async (key, fallback = null) => {
+    try {
+      const db = await openDb();
+      if (!db) {
+        try {
+          const raw = localStorage.getItem(getFallbackKey(key));
+          if (raw === null) return fallback;
+          return JSON.parse(raw);
+        } catch (_) {
+          return fallback;
+        }
+      }
+      const row = await withStore("readonly", (store) => store.get(key));
+      if (!row || row.value === undefined || row.value === null)
+        return fallback;
+      return cloneValue(row.value);
+    } catch (e) {
+      console.warn("[Storage] getJson failed:", key, e);
+      return fallback;
+    }
+  };
+
+  const setJson = async (key, value) => {
+    try {
+      const db = await openDb();
+      if (!db) {
+        localStorage.setItem(
+          getFallbackKey(key),
+          JSON.stringify(cloneValue(value)),
+        );
+        return true;
+      }
+      const payload = {
+        key,
+        value: cloneValue(value),
+        updatedAt: Date.now(),
+      };
+      await withStore("readwrite", (store) => store.put(payload));
+      return true;
+    } catch (e) {
+      console.warn("[Storage] setJson failed:", key, e);
+      return false;
+    }
+  };
+
+  const remove = async (key) => {
+    try {
+      const db = await openDb();
+      if (!db) {
+        localStorage.removeItem(getFallbackKey(key));
+        return true;
+      }
+      await withStore("readwrite", (store) => store.delete(key));
+      return true;
+    } catch (e) {
+      console.warn("[Storage] remove failed:", key, e);
+      return false;
+    }
+  };
+
+  const migrateFromLocalStorage = async (
+    localStorageKey,
+    dbKey,
+    fallback = null,
+  ) => {
+    const existing = await getJson(dbKey, undefined);
+    if (existing !== undefined) return existing;
+
+    let parsed = fallback;
+    try {
+      const raw = localStorage.getItem(localStorageKey);
+      if (raw) parsed = JSON.parse(raw);
+    } catch (e) {
+      console.warn("[Storage] migration parse failed:", localStorageKey, e);
+    }
+
+    if (parsed !== undefined) {
+      const written = await setJson(dbKey, parsed);
+      if (written) {
+        try {
+          localStorage.removeItem(localStorageKey);
+        } catch (_) {}
+      }
+    }
+    return parsed;
+  };
+
+  return {
+    getJson,
+    setJson,
+    remove,
+    migrateFromLocalStorage,
+    status() {
+      return {
+        indexedDbAvailable,
+        fallbackMode: !indexedDbAvailable,
+      };
+    },
+  };
+})();
+
+if (typeof window !== "undefined") {
+  window.PoseChronoStorage = PoseChronoStorage;
+}
+
+const STORAGE_SCHEMA_VERSION = 2;
+const STORAGE_KEYS = {
+  SESSION_PLANS_DB: "session_plans",
+  HOTKEYS_DB: "hotkeys",
+  TIMELINE_DB: "timeline_data",
+};
+
+const UI_PREFS_STORAGE_KEY = "posechrono-ui-prefs";
+const UI_PREFS_SCHEMA_VERSION = 1;
+const PREFS_PACKAGE_SCHEMA_VERSION = 1;
+const PREFS_PACKAGE_SECTION_KEYS = ["ui", "hotkeys", "plans", "timeline"];
+const LEGACY_UI_PREF_KEYS = {
+  REVIEW_DURATIONS_VISIBLE: "posechrono_review_durations_visible",
+  GLOBAL_SETTINGS_COLLAPSED: "posechrono-global-settings-collapsed",
+};
+const LEGACY_DEFAULT_SESSION_MODE_STORAGE_KEY = "posechrono-default-session-mode";
+const SESSION_MODE_VALUES = new Set(["classique", "custom", "relax", "memory"]);
+
+function normalizeSessionModeValue(mode, fallback = "classique") {
+  const normalized = String(mode ?? "")
+    .trim()
+    .toLowerCase();
+  return SESSION_MODE_VALUES.has(normalized) ? normalized : fallback;
+}
+
+function loadPreferredDefaultSessionMode() {
+  const fallback = normalizeSessionModeValue(CONFIG?.defaultSessionMode);
+  try {
+    if (typeof UIPreferences !== "undefined" && UIPreferences) {
+      return normalizeSessionModeValue(
+        UIPreferences.get("defaultSessionMode", fallback),
+        fallback,
+      );
+    }
+    return fallback;
+  } catch (_) {
+    return fallback;
+  }
+}
+
+function savePreferredDefaultSessionMode(mode, persist = true) {
+  const next = normalizeSessionModeValue(mode);
+  CONFIG.defaultSessionMode = next;
+  if (!persist) return next;
+  try {
+    if (typeof UIPreferences !== "undefined" && UIPreferences) {
+      UIPreferences.set("defaultSessionMode", next);
+    }
+  } catch (_) {}
+  return next;
+}
+
+function normalizeStringArray(input) {
+  if (!Array.isArray(input)) return [];
+  const seen = new Set();
+  const out = [];
+  input.forEach((entry) => {
+    if (typeof entry !== "string") return;
+    const key = entry.trim();
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    out.push(key);
+  });
+  return out;
+}
+
+const UIPreferences = (() => {
+  // Capture defaults once from config bootstrap so reset is stable even after runtime toggles.
+  const BASE_DEFAULT_GRID_ENABLED =
+    typeof CONFIG !== "undefined" ? !!(CONFIG?.backgroundGrid ?? false) : false;
+  const BASE_DEFAULT_TITLEBAR_ALWAYS_VISIBLE =
+    typeof CONFIG !== "undefined"
+      ? !!(CONFIG?.titlebarAlwaysVisible ?? false)
+      : false;
+  const BASE_DEFAULT_SESSION_MODE = normalizeSessionModeValue(
+    typeof CONFIG !== "undefined" ? CONFIG?.defaultSessionMode : "classique",
+    "classique",
+  );
+
+  const getDefaultGridEnabled = () => BASE_DEFAULT_GRID_ENABLED;
+  const getDefaultTitlebarAlwaysVisible = () =>
+    BASE_DEFAULT_TITLEBAR_ALWAYS_VISIBLE;
+  const getDefaultSessionMode = () => BASE_DEFAULT_SESSION_MODE;
+
+  const getDefaultPrefs = () => ({
+    schemaVersion: UI_PREFS_SCHEMA_VERSION,
+    backgroundGridEnabled: getDefaultGridEnabled(),
+    titlebarAlwaysVisible: getDefaultTitlebarAlwaysVisible(),
+    defaultSessionMode: getDefaultSessionMode(),
+    reviewDurationsVisible: true,
+    hotkeysCollapsedCategories: [],
+    globalSettingsCollapsedCategories: ["maintenance"],
+  });
+
+  let cache = null;
+
+  const persist = () => {
+    if (!cache) return;
+    try {
+      localStorage.setItem(UI_PREFS_STORAGE_KEY, JSON.stringify(cache));
+    } catch (_) {}
+  };
+
+  const load = () => {
+    if (cache) return cache;
+    const defaults = getDefaultPrefs();
+    let parsed = {};
+    let changed = false;
+
+    try {
+      const raw = localStorage.getItem(UI_PREFS_STORAGE_KEY);
+      if (raw) {
+        const obj = JSON.parse(raw);
+        if (obj && typeof obj === "object") {
+          parsed = obj;
+        }
+      }
+    } catch (_) {
+      changed = true;
+    }
+
+    cache = {
+      ...defaults,
+      ...parsed,
+      schemaVersion: UI_PREFS_SCHEMA_VERSION,
+    };
+
+    cache.backgroundGridEnabled = !!cache.backgroundGridEnabled;
+    cache.reviewDurationsVisible = cache.reviewDurationsVisible !== false;
+    cache.defaultSessionMode = normalizeSessionModeValue(
+      cache.defaultSessionMode,
+      getDefaultSessionMode(),
+    );
+    cache.hotkeysCollapsedCategories = normalizeStringArray(
+      cache.hotkeysCollapsedCategories,
+    );
+    cache.globalSettingsCollapsedCategories = normalizeStringArray(
+      cache.globalSettingsCollapsedCategories,
+    );
+
+    // Migration legacy: review durations visibility
+    if (
+      !Object.prototype.hasOwnProperty.call(parsed, "reviewDurationsVisible")
+    ) {
+      try {
+        const raw = localStorage.getItem(
+          LEGACY_UI_PREF_KEYS.REVIEW_DURATIONS_VISIBLE,
+        );
+        if (raw !== null) {
+          cache.reviewDurationsVisible = raw !== "0";
+          changed = true;
+          localStorage.removeItem(LEGACY_UI_PREF_KEYS.REVIEW_DURATIONS_VISIBLE);
+        }
+      } catch (_) {}
+    }
+
+    // Migration legacy: global settings collapsed categories
+    if (
+      !Object.prototype.hasOwnProperty.call(
+        parsed,
+        "globalSettingsCollapsedCategories",
+      )
+    ) {
+      try {
+        const raw = localStorage.getItem(
+          LEGACY_UI_PREF_KEYS.GLOBAL_SETTINGS_COLLAPSED,
+        );
+        if (raw) {
+          cache.globalSettingsCollapsedCategories = normalizeStringArray(
+            JSON.parse(raw),
+          );
+          changed = true;
+          localStorage.removeItem(
+            LEGACY_UI_PREF_KEYS.GLOBAL_SETTINGS_COLLAPSED,
+          );
+        }
+      } catch (_) {}
+    }
+
+    // Migration legacy: default session mode (old standalone localStorage key)
+    if (!Object.prototype.hasOwnProperty.call(parsed, "defaultSessionMode")) {
+      try {
+        const raw = localStorage.getItem(LEGACY_DEFAULT_SESSION_MODE_STORAGE_KEY);
+        if (raw) {
+          cache.defaultSessionMode = normalizeSessionModeValue(
+            raw,
+            getDefaultSessionMode(),
+          );
+          changed = true;
+          localStorage.removeItem(LEGACY_DEFAULT_SESSION_MODE_STORAGE_KEY);
+        }
+      } catch (_) {}
+    }
+
+    if (changed) persist();
+    return cache;
+  };
+
+  const sanitizeByKey = (key, value) => {
+    switch (key) {
+      case "backgroundGridEnabled":
+      case "titlebarAlwaysVisible":
+      case "reviewDurationsVisible":
+        return !!value;
+      case "defaultSessionMode":
+        return normalizeSessionModeValue(value, getDefaultSessionMode());
+      case "hotkeysCollapsedCategories":
+      case "globalSettingsCollapsedCategories":
+        return normalizeStringArray(value);
+      default:
+        return value;
+    }
+  };
+
+  return {
+    init() {
+      return load();
+    },
+    get(key, fallback = undefined) {
+      const prefs = load();
+      return Object.prototype.hasOwnProperty.call(prefs, key)
+        ? prefs[key]
+        : fallback;
+    },
+    set(key, value, options = {}) {
+      const { persist: shouldPersist = true } = options;
+      const prefs = load();
+      prefs[key] = sanitizeByKey(key, value);
+      if (shouldPersist) persist();
+      return prefs[key];
+    },
+    getStringArray(key) {
+      return normalizeStringArray(this.get(key, []));
+    },
+    setStringArray(key, value, options = {}) {
+      return this.set(key, normalizeStringArray(value), options);
+    },
+    exportData() {
+      const prefs = load();
+      return {
+        schemaVersion: UI_PREFS_SCHEMA_VERSION,
+        backgroundGridEnabled: !!prefs.backgroundGridEnabled,
+        titlebarAlwaysVisible: !!prefs.titlebarAlwaysVisible,
+        defaultSessionMode: normalizeSessionModeValue(
+          prefs.defaultSessionMode,
+          getDefaultSessionMode(),
+        ),
+        reviewDurationsVisible: !!prefs.reviewDurationsVisible,
+        hotkeysCollapsedCategories: normalizeStringArray(
+          prefs.hotkeysCollapsedCategories,
+        ),
+        globalSettingsCollapsedCategories: normalizeStringArray(
+          prefs.globalSettingsCollapsedCategories,
+        ),
+      };
+    },
+    importData(data, options = {}) {
+      if (!data || typeof data !== "object") return false;
+      const { persist: shouldPersist = true } = options;
+      const prefs = load();
+      const knownKeys = [
+        "backgroundGridEnabled",
+        "titlebarAlwaysVisible",
+        "defaultSessionMode",
+        "reviewDurationsVisible",
+        "hotkeysCollapsedCategories",
+        "globalSettingsCollapsedCategories",
+      ];
+      let changed = false;
+      knownKeys.forEach((key) => {
+        if (!Object.prototype.hasOwnProperty.call(data, key)) return;
+        prefs[key] = sanitizeByKey(key, data[key]);
+        changed = true;
+      });
+      if (changed && shouldPersist) persist();
+      return changed;
+    },
+    resetVisualPrefs() {
+      const defaults = getDefaultPrefs();
+      cache = defaults;
+      persist();
+      return this.exportData();
+    },
+  };
+})();
+
+function clampInt(value, min, max, fallback = min) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return fallback;
+  return Math.max(min, Math.min(max, Math.round(num)));
+}
+
+function normalizeCustomStep(step) {
+  if (!step || typeof step !== "object") return null;
+  const type =
+    step.type === "pause" ? "pause" : step.type === "pose" ? "pose" : null;
+  if (!type) return null;
+
+  const duration = clampInt(step.duration, 1, 86400, 60);
+  const count = type === "pause" ? 1 : clampInt(step.count, 1, 10000, 1);
+  const idCandidate = Number(step.id);
+  const id = Number.isFinite(idCandidate)
+    ? idCandidate
+    : Date.now() + Math.floor(Math.random() * 10000);
+
+  return { type, count, duration, id };
+}
+
+function normalizeSessionPlansPayload(raw) {
+  const source =
+    raw && typeof raw === "object" && Array.isArray(raw.plans)
+      ? raw.plans
+      : Array.isArray(raw)
+        ? raw
+        : [];
+
+  let repaired = false;
+  const plans = [];
+
+  source.forEach((plan, index) => {
+    if (!plan || typeof plan !== "object") {
+      repaired = true;
+      return;
+    }
+    const nameRaw = String(plan.name ?? "").trim();
+    const name =
+      nameRaw.length > 0 ? nameRaw.slice(0, 120) : `Plan ${index + 1}`;
+    if (name !== nameRaw) repaired = true;
+
+    const date = clampInt(plan.date, 0, 4102444800000, Date.now());
+    const rawSteps = Array.isArray(plan.steps) ? plan.steps : [];
+    if (!Array.isArray(plan.steps)) repaired = true;
+    const steps = rawSteps
+      .map((step) => normalizeCustomStep(step))
+      .filter(Boolean);
+    if (steps.length !== rawSteps.length) repaired = true;
+    if (steps.length === 0) {
+      repaired = true;
+      return;
+    }
+
+    plans.push({
+      name,
+      steps,
+      date,
+    });
+  });
+
+  const payload = {
+    schemaVersion: STORAGE_SCHEMA_VERSION,
+    plans,
+  };
+  if (
+    !raw ||
+    typeof raw !== "object" ||
+    raw.schemaVersion !== STORAGE_SCHEMA_VERSION ||
+    !Array.isArray(raw.plans)
+  ) {
+    repaired = true;
+  }
+  return { payload, plans, repaired };
+}
+
+function normalizeHotkeysPayload(raw) {
+  const sourceBindings =
+    raw &&
+    typeof raw === "object" &&
+    raw.bindings &&
+    typeof raw.bindings === "object"
+      ? raw.bindings
+      : raw && typeof raw === "object"
+        ? raw
+        : {};
+
+  let repaired = false;
+  const bindings = {};
+
+  Object.keys(DEFAULT_HOTKEYS).forEach((key) => {
+    if (NON_CUSTOMIZABLE_HOTKEYS.has(key)) return;
+    if (!Object.prototype.hasOwnProperty.call(sourceBindings, key)) return;
+
+    const rawVal = sourceBindings[key];
+    if (typeof rawVal !== "string") {
+      repaired = true;
+      return;
+    }
+    const value = rawVal.trim();
+    if (value.length === 0) {
+      repaired = true;
+      return;
+    }
+    if (value.length > 48) {
+      repaired = true;
+      bindings[key] = value.slice(0, 48);
+      return;
+    }
+    bindings[key] = value;
+  });
+
+  const payload = {
+    schemaVersion: STORAGE_SCHEMA_VERSION,
+    bindings,
+  };
+
+  if (
+    !raw ||
+    typeof raw !== "object" ||
+    raw.schemaVersion !== STORAGE_SCHEMA_VERSION ||
+    !raw.bindings
+  ) {
+    repaired = true;
+  }
+
+  return { payload, bindings, repaired };
+}
+
+async function runStorageSmokeTests() {
+  try {
+    const testKey = "__smoke_test__";
+    const probe = {
+      schemaVersion: STORAGE_SCHEMA_VERSION,
+      ok: true,
+      ts: Date.now(),
+    };
+    const writeOk = await PoseChronoStorage.setJson(testKey, probe);
+    const readBack = await PoseChronoStorage.getJson(testKey, null);
+    await PoseChronoStorage.remove(testKey);
+
+    const plansProbe = normalizeSessionPlansPayload([
+      { name: "A", steps: [{ type: "pose", count: 2, duration: 30 }] },
+      { bad: true },
+    ]);
+    const hotkeysProbe = normalizeHotkeysPayload({
+      FLIP_H: "h",
+      UNKNOWN: "x",
+      DRAWING_CLOSE: "Space",
+    });
+
+    const ok =
+      writeOk &&
+      readBack &&
+      readBack.ok === true &&
+      Array.isArray(plansProbe.plans) &&
+      plansProbe.plans.length === 1 &&
+      hotkeysProbe.bindings.FLIP_H === "h" &&
+      !Object.prototype.hasOwnProperty.call(hotkeysProbe.bindings, "UNKNOWN");
+
+    if (!ok) {
+      console.warn("[Storage smoke] Some checks failed.", {
+        writeOk,
+        readBack,
+        plansCount: plansProbe.plans.length,
+        hotkeysKeys: Object.keys(hotkeysProbe.bindings || {}),
+      });
+      return false;
+    }
+
+    console.log("[Storage smoke] OK");
+    return true;
+  } catch (e) {
+    console.error("[Storage smoke] Error:", e);
+    return false;
+  }
+}
+
 // ================================================================
 // 2.5 IMAGE CACHE - GESTION INTELLIGENTE DE LA MÉMOIRE
 // ================================================================
@@ -665,11 +1366,42 @@ let isDuplicatingWithAlt = false;
 // Virtual Scroller pour customQueue (initialisé après le DOM loading)
 let customQueueScroller = null;
 
+const CONFIG_RUNTIME_DEFAULTS = Object.freeze({
+  currentTheme: typeof CONFIG !== "undefined" ? CONFIG.currentTheme : "violet",
+  defaultSessionMode:
+    typeof CONFIG !== "undefined"
+      ? normalizeSessionModeValue(CONFIG.defaultSessionMode)
+      : "classique",
+  enableFlipAnimation:
+    typeof CONFIG !== "undefined" ? !!CONFIG.enableFlipAnimation : false,
+  smoothProgress:
+    typeof CONFIG !== "undefined" ? !!CONFIG.smoothProgress : false,
+  smoothPauseCircle:
+    typeof CONFIG !== "undefined" ? !!CONFIG.smoothPauseCircle : true,
+  reverseProgressiveBlur:
+    typeof CONFIG !== "undefined" ? !!CONFIG.reverseProgressiveBlur : false,
+  defaultAutoFlip:
+    typeof CONFIG !== "undefined" ? !!CONFIG.defaultAutoFlip : false,
+  titlebarAlwaysVisible:
+    typeof CONFIG !== "undefined" ? !!CONFIG.titlebarAlwaysVisible : false,
+  backgroundGrid:
+    typeof CONFIG !== "undefined" ? !!CONFIG.backgroundGrid : true,
+});
+
 // ================================================================
 // 4. ICÔNES SVG ET RESSOURCES
 // ================================================================
 
 const ICONS = {
+  SETTINGS:
+    '<svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="currentColor"><path d="m370-80-16-128q-13-5-24.5-12T307-235l-119 50L78-375l103-78q-1-7-1-13.5v-27q0-6.5 1-13.5L78-585l110-190 119 50q11-8 23-15t24-12l16-128h220l16 128q13 5 24.5 12t22.5 15l119-50 110 190-103 78q1 7 1 13.5v27q0 6.5-2 13.5l103 78-110 190-118-50q-11 8-23 15t-24 12L590-80H370Zm70-80h79l14-106q31-8 57.5-23.5T639-327l99 41 39-68-86-65q5-14 7-29.5t2-31.5q0-16-2-31.5t-7-29.5l86-65-39-68-99 42q-22-23-48.5-38.5T533-694l-13-106h-79l-14 106q-31 8-57.5 23.5T321-633l-99-41-39 68 86 64q-5 15-7 30t-2 32q0 16 2 31t7 30l-86 65 39 68 99-42q22 23 48.5 38.5T427-266l13 106Zm42-180q58 0 99-41t41-99q0-58-41-99t-99-41q-59 0-99.5 41T342-480q0 58 40.5 99t99.5 41Zm-2-140Z"/></svg>',
+  GRID_TOGGLE:
+    '<svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="currentColor"><path d="M176-120q-19-4-35.5-20.5T120-176l664-664q21 5 36 20.5t21 35.5L176-120Zm-56-252v-112l356-356h112L120-372Zm0-308v-80q0-33 23.5-56.5T200-840h80L120-680Zm560 560 160-160v80q0 33-23.5 56.5T760-120h-80Zm-308 0 468-468v112L484-120H372Z"/></svg>',
+  THEME:
+    '<svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="currentColor"><path d="M346-140 100-386q-10-10-15-22t-5-25q0-13 5-25t15-22l230-229-106-106 62-65 400 400q10 10 14.5 22t4.5 25q0 13-4.5 25T686-386L440-140q-10 10-22 15t-25 5q-13 0-25-5t-22-15Zm47-506L179-432h428L393-646Zm399 526q-36 0-61-25.5T706-208q0-27 13.5-51t30.5-47l42-54 44 54q16 23 30 47t14 51q0 37-26 62.5T792-120Z"/></svg>',
+  KEYBOARD:
+    '<svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="currentColor"><path d="M120-160q-33 0-56.5-23.5T40-240v-480q0-33 23.5-56.5T120-800h720q33 0 56.5 23.5T920-720v480q0 33-23.5 56.5T840-160H120Zm0-80h720v-480H120v480Zm200-40h320v-80H320v80ZM200-420h80v-80h-80v80Zm160 0h80v-80h-80v80Zm160 0h80v-80h-80v80Zm160 0h80v-80h-80v80ZM200-560h80v-80h-80v80Zm160 0h80v-80h-80v80Zm160 0h80v-80h-80v80Zm160 0h80v-80h-80v80ZM120-240v-480 480Z"/></svg>',
+  HOME: '<svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="currentColor"><path d="M240-200h120v-240h240v240h120v-360L480-740 240-560v360Zm-80 80v-480l320-240 320 240v480H520v-240h-80v240H160Zm320-350Z"/></svg>',
   PLAY: '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>',
   PAUSE:
     '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>',
@@ -1059,7 +1791,7 @@ eagle.onPluginCreate(async () => {
   setupTitlebarHover(); // Initialiser l'affichage au survol de la titlebar
   // Initialiser le module historique/timeline
   if (typeof initTimeline === "function") {
-    initTimeline();
+    await initTimeline();
   }
   // Fade in l'interface une fois prête
   requestAnimationFrame(() => {
@@ -1079,7 +1811,15 @@ function setupTitlebarControls() {
   const closeBtn = document.getElementById("close-btn");
   const minimizeBtn = document.getElementById("minimize-btn");
   const maximizeBtn = document.getElementById("maximize-btn");
+  const settingsBtn = document.getElementById("titlebar-settings-btn");
   const pinBtn = document.getElementById("pin-btn");
+
+  if (settingsBtn) {
+    settingsBtn.innerHTML = ICONS.SETTINGS;
+    settingsBtn.addEventListener("click", () => {
+      openGlobalSettingsModal();
+    });
+  }
 
   // Fermer la fenetre
   if (closeBtn) {
@@ -1140,35 +1880,67 @@ function setupTitlebarControls() {
 /**
  * Gère l'affichage de la titlebar au survol
  */
-function setupTitlebarHover() {
+let titlebarHoverMousemoveBound = false;
+let titlebarHoverHideTimeout = null;
+
+function applyTitlebarVisibilityMode() {
   const titlebar = document.querySelector(".custom-titlebar");
   if (!titlebar) return;
 
-  // Si la titlebar doit toujours être visible, la rendre opaque et arrêter
   if (CONFIG.titlebarAlwaysVisible) {
+    if (titlebarHoverHideTimeout) {
+      clearTimeout(titlebarHoverHideTimeout);
+      titlebarHoverHideTimeout = null;
+    }
     titlebar.style.opacity = "1";
     return;
   }
 
-  let hideTimeout;
+  titlebar.style.opacity = "0";
+}
 
-  window.addEventListener("mousemove", (e) => {
-    // Annuler le timeout de masquage si en cours
-    if (hideTimeout) {
-      clearTimeout(hideTimeout);
-      hideTimeout = null;
-    }
+function setupTitlebarHover() {
+  const titlebar = document.querySelector(".custom-titlebar");
+  if (!titlebar) return;
 
-    // Si la souris est dans les 36px du haut, afficher la titlebar
-    if (e.clientY <= 36) {
-      titlebar.style.opacity = "1";
-    } else {
-      // Sinon, masquer après un court délai
-      hideTimeout = setTimeout(() => {
-        titlebar.style.opacity = "0";
-      }, 10);
-    }
-  });
+  if (!titlebarHoverMousemoveBound) {
+    titlebarHoverMousemoveBound = true;
+    window.addEventListener("mousemove", (e) => {
+      if (CONFIG.titlebarAlwaysVisible) {
+        titlebar.style.opacity = "1";
+        return;
+      }
+
+      // Annuler le timeout de masquage si en cours
+      if (titlebarHoverHideTimeout) {
+        clearTimeout(titlebarHoverHideTimeout);
+        titlebarHoverHideTimeout = null;
+      }
+
+      // Si la souris est dans les 36px du haut, afficher la titlebar
+      if (e.clientY <= 36) {
+        titlebar.style.opacity = "1";
+      } else {
+        // Sinon, masquer après un court délai
+        titlebarHoverHideTimeout = setTimeout(() => {
+          if (!CONFIG.titlebarAlwaysVisible) {
+            titlebar.style.opacity = "0";
+          }
+        }, 10);
+      }
+    });
+  }
+
+  applyTitlebarVisibilityMode();
+}
+
+function setTitlebarAlwaysVisible(enabled, persist = true) {
+  const next = !!enabled;
+  CONFIG.titlebarAlwaysVisible = next;
+  applyTitlebarVisibilityMode();
+  if (persist) {
+    UIPreferences.set("titlebarAlwaysVisible", next);
+  }
 }
 
 /**
@@ -1194,13 +1966,1105 @@ function toggleTheme() {
   applyTheme(THEMES[nextIndex]);
 }
 
+function getGlobalSettingsText(key, fallback, vars = undefined) {
+  try {
+    if (typeof i18next !== "undefined" && typeof i18next.t === "function") {
+      return i18next.t(key, { defaultValue: fallback, ...(vars || {}) });
+    }
+  } catch (_) {}
+  return fallback;
+}
+
+const GLOBAL_SETTINGS_SECTION_ICONS = {
+  appearance:
+    '<svg xmlns="http://www.w3.org/2000/svg" height="14" viewBox="0 -960 960 960" width="14" fill="currentColor"><path d="M480-80q-84 0-158-32T193-193Q112-267 80-341T48-500q0-84 32-158t113-129q74-74 148-106t158-32q84 0 158 32t148 106q81 55 113 129t32 158q0 85-32 159T767-193q-74 74-148 106T480-80Zm0-80q117 0 198.5-81.5T760-440q0-117-81.5-198.5T480-720q-117 0-198.5 81.5T200-440q0 117 81.5 198.5T480-160Zm0-280Zm0 200q17 0 28.5-11.5T520-280q0-17-11.5-28.5T480-320q-17 0-28.5 11.5T440-280q0 17 11.5 28.5T480-240Zm40-360h-80v240h80v-240Z"/></svg>',
+  general:
+    '<svg xmlns="http://www.w3.org/2000/svg" height="14" viewBox="0 -960 960 960" width="14" fill="currentColor"><path d="M370-80v-280H80v-240h290v-280h220v280h290v240H590v280H370Zm80-80h60v-280h290v-80H510v-280h-60v280H160v80h290v280Z"/></svg>',
+  maintenance:
+    '<svg xmlns="http://www.w3.org/2000/svg" height="14" viewBox="0 -960 960 960" width="14" fill="currentColor"><path d="M80-120 480-800l400 680H80Zm140-80h520L480-640 220-200Zm260-40q17 0 28.5-11.5T520-280q0-17-11.5-28.5T480-320q-17 0-28.5 11.5T440-280q0 17 11.5 28.5T480-240Zm-40-120h80v-160h-80v160Z"/></svg>',
+};
+
+const GLOBAL_SETTINGS_ROLE_CLASSES = {
+  toggle: "global-settings-btn-toggle",
+  nav: "global-settings-btn-nav",
+  primary: "global-settings-btn-primary",
+  danger: "global-settings-btn-danger",
+};
+
+ICONS.GLOBAL_SETTINGS_ACTIONS = {
+  repair:
+    '<svg xmlns="http://www.w3.org/2000/svg" height="14" viewBox="0 -960 960 960" width="14" fill="currentColor"><path d="M80-120 480-800l400 680H80Zm140-80h520L480-640 220-200Zm260-40q17 0 28.5-11.5T520-280q0-17-11.5-28.5T480-320q-17 0-28.5 11.5T440-280q0 17 11.5 28.5T480-240Zm-40-120h80v-160h-80v160Z"/></svg>',
+  section:
+    '<svg xmlns="http://www.w3.org/2000/svg" height="14" viewBox="0 -960 960 960" width="14" fill="currentColor"><path d="M180-180v-80h600v80H180Zm0-170v-80h420v80H180Zm0-170v-80h600v80H180Zm0-170v-80h420v80H180Z"/></svg>',
+  data: '<svg xmlns="http://www.w3.org/2000/svg" height="44px" viewBox="0 -960 960 960" width="14px" fill="currentColor"><path d="M480-120q-151 0-255.5-46.5T120-280v-400q0-66 105.5-113T480-840q149 0 254.5 47T840-680v400q0 67-104.5 113.5T480-120Zm0-479q89 0 179-25.5T760-679q-11-29-100.5-55T480-760q-91 0-178.5 25.5T200-679q14 30 101.5 55T480-599Zm0 199q42 0 81-4t74.5-11.5q35.5-7.5 67-18.5t57.5-25v-120q-26 14-57.5 25t-67 18.5Q600-528 561-524t-81 4q-42 0-82-4t-75.5-11.5Q287-543 256-554t-56-25v120q25 14 56 25t66.5 18.5Q358-408 398-404t82 4Zm0 200q46 0 93.5-7t87.5-18.5q40-11.5 67-26t32-29.5v-98q-26 14-57.5 25t-67 18.5Q600-328 561-324t-81 4q-42 0-82-4t-75.5-11.5Q287-343 256-354t-56-25v99q5 15 31.5 29t66.5 25.5q40 11.5 88 18.5t94 7Z"/></svg>',
+  import:
+    '<svg xmlns="http://www.w3.org/2000/svg" width="14px" height="14px" viewBox="0 0 24 24"><path fill="currentColor" d="M18 15v3H6v-3H4v3c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-3h-2zm-1-4l-1.41-1.41L13 12.17V4h-2v8.17L8.41 9.59L7 11l5 5l5-5z"/></svg>',
+  export:
+    '<svg xmlns="http://www.w3.org/2000/svg" width="14px" height="14px" viewBox="0 0 24 24"><path fill="currentColor" d="M18 15v3H6v-3H4v3c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-3h-2zM7 9l1.41 1.41L11 7.83V16h2V7.83l2.59 2.58L17 9l-5-5l-5 5z"/></svg>',
+};
+
+const GLOBAL_SETTINGS_ACTIONS = {
+  toggleGrid: {
+    id: "global-settings-toggle-grid-btn",
+    control: "checkbox",
+    i18nKey: "settings.global.hideBackgroundGrid",
+    fallback: "Hide background grid",
+    span: "full",
+  },
+  toggleTheme: {
+    id: "global-settings-toggle-theme-btn",
+    role: "toggle",
+    i18nKey: "settings.global.changeTheme",
+    fallback: "Change theme",
+    icon: ICONS.THEME,
+  },
+  titlebarAlwaysVisible: {
+    id: "global-settings-titlebar-always-visible-btn",
+    control: "checkbox",
+    i18nKey: "settings.global.titlebarAlwaysVisible",
+    fallback: "Titlebar always visible",
+    span: "full",
+  },
+  openHotkeys: {
+    id: "global-settings-open-hotkeys-btn",
+    role: "nav",
+    i18nKey: "settings.global.openHotkeys",
+    fallback: "Configure hotkeys",
+    icon: ICONS.KEYBOARD,
+  },
+  defaultSessionMode: {
+    id: "global-settings-default-mode-group",
+    control: "mode-toggle",
+    i18nKey: "settings.global.defaultSessionMode",
+    fallback: "Default session mode",
+    span: "full",
+  },
+  exportPrefs: {
+    id: "global-settings-export-prefs-btn",
+    role: "primary",
+    i18nKey: "settings.global.exportPreferences",
+    fallback: "Export preferences",
+    icon: ICONS.GLOBAL_SETTINGS_ACTIONS.export,
+  },
+  importPrefs: {
+    id: "global-settings-import-prefs-btn",
+    role: "primary",
+    i18nKey: "settings.global.importPreferences",
+    fallback: "Import preferences",
+    icon: ICONS.GLOBAL_SETTINGS_ACTIONS.import,
+  },
+  repairStorage: {
+    id: "global-settings-repair-storage-btn",
+    role: "danger",
+    i18nKey: "settings.global.repairStorage",
+    fallback: "Repair storage",
+    tooltipKey: "settings.repairStorageTooltip",
+    icon: ICONS.GLOBAL_SETTINGS_ACTIONS.repair,
+  },
+};
+
+// Config compacte: change l'ordre des sections et des options ici.
+const GLOBAL_SETTINGS_SECTIONS = [
+  {
+    id: "appearance",
+    titleKey: "settings.global.appearance",
+    fallbackTitle: "Appearance",
+    icon: "",
+    actionGroups: [
+      {
+        columns: 1,
+        align: "start",
+        items: [
+          { type: "action", key: "toggleGrid" },
+          { type: "action", key: "toggleTheme" },
+        ],
+      },
+    ],
+  },
+  {
+    id: "general",
+    titleKey: "settings.global.general",
+    fallbackTitle: "General",
+    icon: "",
+    actionGroups: [
+      {
+        columns: 1,
+        align: "start",
+        items: [
+          { type: "action", key: "openHotkeys" },
+          { type: "action", key: "titlebarAlwaysVisible" },
+          { type: "action", key: "defaultSessionMode" },
+        ],
+      },
+    ],
+  },
+  {
+    id: "maintenance",
+    titleKey: "settings.global.maintenance",
+    fallbackTitle: "Maintenance",
+    icon: "",
+    sectionClassName: "global-settings-section-maintenance",
+    actionGroups: [
+      {
+        className: "global-settings-actions-inline global-settings-actions-segmented",
+        align: "start",
+        items: [
+          {
+            type: "label",
+            icon: ICONS.SETTINGS,
+            i18nKey: "settings.global.preferencesSection",
+            text: "Preferences",
+            className: "global-settings-action-label-muted",
+          },
+          { type: "action", key: "exportPrefs" },
+          { type: "action", key: "importPrefs" },
+        ],
+      },
+      {
+        className: "global-settings-actions-inline",
+        align: "start",
+        items: [
+          {
+            type: "label",
+            icon: ICONS.GLOBAL_SETTINGS_ACTIONS.data,
+            i18nKey: "settings.global.dataSection",
+            text: "Data",
+            className: "global-settings-action-label-muted",
+          },
+          { type: "action", key: "repairStorage" },
+        ],
+      },
+    ],
+    hint: {
+      className: "global-settings-maintenance-note",
+      i18nKey: "settings.global.maintenanceHint",
+      fallback:
+        "Maintenance actions may remove local data. Consider exporting a backup first.",
+    },
+  },
+];
+
+function setGlobalSettingsButtonLabel(buttonEl, text) {
+  if (!buttonEl) return;
+  const labelEl = buttonEl.querySelector(".global-settings-btn-text");
+  if (labelEl) {
+    labelEl.textContent = text;
+    return;
+  }
+  buttonEl.textContent = text;
+}
+
+function renderGlobalSettingsSections() {
+  const container = document.getElementById("global-settings-sections");
+  if (!container) return;
+
+  container.innerHTML = "";
+
+  const hasRenderableIcon = (iconMarkup) => {
+    if (iconMarkup === null || iconMarkup === undefined) return false;
+    if (typeof iconMarkup === "string") return iconMarkup.trim().length > 0;
+    return true;
+  };
+
+  const buildHintElement = (hintConfig) => {
+    if (!hintConfig) return null;
+    const hintEl = document.createElement("div");
+    hintEl.className = hintConfig.className || "global-settings-hint";
+    if (hintConfig.i18nKey) {
+      hintEl.setAttribute("data-i18n", hintConfig.i18nKey);
+    }
+    hintEl.textContent = getGlobalSettingsText(
+      hintConfig.i18nKey || "",
+      hintConfig.fallback || "",
+    );
+    return hintEl;
+  };
+
+  const normalizeActionGroup = (groupConfig) => {
+    if (Array.isArray(groupConfig)) {
+      return {
+        items: groupConfig.map((entry) =>
+          typeof entry === "string" ? { type: "action", key: entry } : entry,
+        ),
+      };
+    }
+    if (groupConfig && typeof groupConfig === "object") {
+      const rawItems = Array.isArray(groupConfig.items)
+        ? groupConfig.items
+        : Array.isArray(groupConfig.actions)
+          ? groupConfig.actions
+          : [];
+      return {
+        ...groupConfig,
+        items: rawItems.map((entry) =>
+          typeof entry === "string" ? { type: "action", key: entry } : entry,
+        ),
+      };
+    }
+    return { items: [] };
+  };
+
+  const buildActionsElement = (groupConfig) => {
+    const normalizedGroup = normalizeActionGroup(groupConfig);
+    const actionsEl = document.createElement("div");
+    actionsEl.className = `global-settings-actions${
+      normalizedGroup.className ? ` ${normalizedGroup.className}` : ""
+    }`;
+
+    if (
+      Number.isInteger(normalizedGroup.columns) &&
+      normalizedGroup.columns >= 1 &&
+      normalizedGroup.columns <= 4
+    ) {
+      actionsEl.style.setProperty(
+        "--gs-columns",
+        String(normalizedGroup.columns),
+      );
+    }
+    if (normalizedGroup.align) {
+      actionsEl.classList.add(`is-align-${normalizedGroup.align}`);
+    }
+
+    const applyGridSpan = (el, item, actionConfig = {}) => {
+      const spanValue =
+        item?.span ?? actionConfig.span ?? (item?.fullRow ? "full" : null);
+      if (spanValue === "full") {
+        el.style.gridColumn = "1 / -1";
+      } else if (Number.isInteger(spanValue) && spanValue > 0) {
+        el.style.gridColumn = `span ${spanValue}`;
+      }
+    };
+
+    (normalizedGroup.items || []).forEach((item) => {
+      const itemType = item?.type || "action";
+
+      if (itemType === "separator") {
+        const separatorEl = document.createElement("div");
+        separatorEl.className = `global-settings-action-separator${
+          item.className ? ` ${item.className}` : ""
+        }`;
+        actionsEl.appendChild(separatorEl);
+        return;
+      }
+
+      if (itemType === "break") {
+        const breakEl = document.createElement("div");
+        breakEl.className = "global-settings-action-break";
+        actionsEl.appendChild(breakEl);
+        return;
+      }
+
+      if (itemType === "label") {
+        const labelEl = document.createElement("div");
+        labelEl.className = `global-settings-action-label${
+          item.className ? ` ${item.className}` : ""
+        }`;
+        if (hasRenderableIcon(item.icon)) {
+          const labelIcon = document.createElement("span");
+          labelIcon.className = "global-settings-action-label-icon";
+          labelIcon.setAttribute("aria-hidden", "true");
+          labelIcon.innerHTML = item.icon;
+          labelEl.appendChild(labelIcon);
+        }
+        const labelText = document.createElement("span");
+        if (item.i18nKey) {
+          labelText.setAttribute("data-i18n", item.i18nKey);
+        }
+        labelText.textContent = getGlobalSettingsText(
+          item.i18nKey || "",
+          item.text || "",
+        );
+        labelEl.appendChild(labelText);
+        actionsEl.appendChild(labelEl);
+        return;
+      }
+
+      const actionKey = item?.key || item?.actionKey || item?.id;
+      const actionConfig = GLOBAL_SETTINGS_ACTIONS[actionKey];
+      if (!actionConfig) return;
+
+      if (actionConfig.control === "mode-toggle") {
+        const modeRow = document.createElement("div");
+        modeRow.className = `global-settings-mode-toggle-row ${
+          actionConfig.className || ""
+        } ${item.className || ""}`.trim();
+
+        const modeLabel = document.createElement("span");
+        modeLabel.className = "global-settings-mode-label hotkey-description";
+        if (actionConfig.i18nKey) {
+          modeLabel.setAttribute("data-i18n", actionConfig.i18nKey);
+        }
+        modeLabel.textContent = getGlobalSettingsText(
+          actionConfig.i18nKey || "",
+          actionConfig.fallback || "",
+        );
+        modeRow.appendChild(modeLabel);
+
+        const modeGroup = document.createElement("div");
+        modeGroup.id = actionConfig.id;
+        modeGroup.className = "hotkeys-search-toggle global-settings-mode-toggle";
+        modeGroup.setAttribute("role", "group");
+        modeGroup.setAttribute("aria-label", modeLabel.textContent);
+
+        const sessionModes = [
+          { value: "classique", key: "modes.classic.title", fallback: "Classic" },
+          { value: "custom", key: "modes.custom.title", fallback: "Custom" },
+          { value: "relax", key: "modes.relax.title", fallback: "Relax" },
+          { value: "memory", key: "modes.memory.title", fallback: "Memory" },
+        ];
+
+        sessionModes.forEach((modeConfig) => {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "search-toggle-btn";
+          btn.dataset.mode = modeConfig.value;
+          btn.setAttribute("data-i18n", modeConfig.key);
+          btn.textContent = getGlobalSettingsText(
+            modeConfig.key,
+            modeConfig.fallback,
+          );
+          modeGroup.appendChild(btn);
+        });
+
+        modeRow.appendChild(modeGroup);
+        applyGridSpan(modeRow, item, actionConfig);
+        actionsEl.appendChild(modeRow);
+        return;
+      }
+
+      if (actionConfig.control === "checkbox") {
+        const checkboxWrap = document.createElement("label");
+        checkboxWrap.className = `global-settings-checkbox-item ${
+          actionConfig.className || ""
+        } ${item.className || ""}`.trim();
+        checkboxWrap.setAttribute("for", actionConfig.id);
+        if (actionConfig.tooltipKey) {
+          checkboxWrap.setAttribute(
+            "data-i18n-tooltip",
+            actionConfig.tooltipKey,
+          );
+        }
+
+        const checkboxEl = document.createElement("input");
+        checkboxEl.type = "checkbox";
+        checkboxEl.id = actionConfig.id;
+        checkboxEl.className = "global-settings-checkbox-input checkbox-simple";
+        checkboxWrap.appendChild(checkboxEl);
+
+        const iconMarkup =
+          Object.prototype.hasOwnProperty.call(item, "icon") &&
+          item.icon !== undefined
+            ? item.icon
+            : actionConfig.icon;
+        if (hasRenderableIcon(iconMarkup)) {
+          const iconEl = document.createElement("span");
+          iconEl.className = "global-settings-checkbox-icon";
+          iconEl.setAttribute("aria-hidden", "true");
+          iconEl.innerHTML = iconMarkup;
+          checkboxWrap.appendChild(iconEl);
+        }
+
+        const textEl = document.createElement("span");
+        textEl.className = "hotkey-description";
+        if (actionConfig.i18nKey) {
+          textEl.setAttribute("data-i18n", actionConfig.i18nKey);
+        }
+        textEl.textContent = getGlobalSettingsText(
+          actionConfig.i18nKey || "",
+          actionConfig.fallback || "",
+        );
+        checkboxWrap.appendChild(textEl);
+
+        applyGridSpan(checkboxWrap, item, actionConfig);
+        actionsEl.appendChild(checkboxWrap);
+        return;
+      }
+
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.id = actionConfig.id;
+      const roleClass = GLOBAL_SETTINGS_ROLE_CLASSES[actionConfig.role] || "";
+      btn.className = `option-toggle-btn global-settings-btn ${roleClass} ${
+        actionConfig.className || ""
+      } ${item.className || ""}`.trim();
+      if (actionConfig.tooltipKey) {
+        btn.setAttribute("data-i18n-tooltip", actionConfig.tooltipKey);
+      }
+
+      const iconMarkup =
+        Object.prototype.hasOwnProperty.call(item, "icon") &&
+        item.icon !== undefined
+          ? item.icon
+          : actionConfig.icon;
+      if (hasRenderableIcon(iconMarkup)) {
+        const iconEl = document.createElement("span");
+        iconEl.className = `global-settings-btn-icon${
+          actionConfig.dynamicLabel ? " is-dynamic-label-icon" : ""
+        }`;
+        iconEl.setAttribute("aria-hidden", "true");
+        iconEl.innerHTML = iconMarkup;
+        btn.appendChild(iconEl);
+      }
+
+      const textEl = document.createElement("span");
+      textEl.className = "global-settings-btn-text";
+      if (actionConfig.i18nKey && !actionConfig.dynamicLabel) {
+        textEl.setAttribute("data-i18n", actionConfig.i18nKey);
+      }
+      textEl.textContent = actionConfig.dynamicLabel
+        ? actionConfig.fallback || ""
+        : getGlobalSettingsText(
+            actionConfig.i18nKey || "",
+            actionConfig.fallback || "",
+          );
+      btn.appendChild(textEl);
+
+      applyGridSpan(btn, item, actionConfig);
+      actionsEl.appendChild(btn);
+    });
+
+    return actionsEl;
+  };
+
+  GLOBAL_SETTINGS_SECTIONS.forEach((sectionConfig) => {
+    const sectionEl = document.createElement("section");
+    sectionEl.className = `hotkey-category global-settings-section${
+      sectionConfig.sectionClassName ? ` ${sectionConfig.sectionClassName}` : ""
+    }`;
+    sectionEl.dataset.category = sectionConfig.id;
+
+    const toggleBtn = document.createElement("button");
+    toggleBtn.type = "button";
+    toggleBtn.className =
+      "hotkey-category-toggle global-settings-category-toggle";
+    toggleBtn.setAttribute("aria-expanded", "true");
+    toggleBtn.tabIndex = -1;
+
+    const titleWrap = document.createElement("span");
+    titleWrap.className = "hotkey-category-title";
+
+    const sectionIconMarkup =
+      typeof sectionConfig.icon === "string" &&
+      Object.prototype.hasOwnProperty.call(
+        GLOBAL_SETTINGS_SECTION_ICONS,
+        sectionConfig.icon,
+      )
+        ? GLOBAL_SETTINGS_SECTION_ICONS[sectionConfig.icon]
+        : sectionConfig.icon;
+
+    const titleText = document.createElement("span");
+    if (sectionConfig.titleKey) {
+      titleText.setAttribute("data-i18n", sectionConfig.titleKey);
+    }
+    titleText.textContent = getGlobalSettingsText(
+      sectionConfig.titleKey || "",
+      sectionConfig.fallbackTitle || "",
+    );
+
+    if (hasRenderableIcon(sectionIconMarkup)) {
+      const iconWrap = document.createElement("span");
+      iconWrap.className = "global-settings-section-icon";
+      iconWrap.setAttribute("aria-hidden", "true");
+      iconWrap.innerHTML = sectionIconMarkup;
+      titleWrap.appendChild(iconWrap);
+    }
+    titleWrap.appendChild(titleText);
+
+    const chevron = document.createElement("span");
+    chevron.className = "hotkey-category-chevron";
+    chevron.setAttribute("aria-hidden", "true");
+    chevron.textContent = "▾";
+
+    toggleBtn.appendChild(titleWrap);
+    toggleBtn.appendChild(chevron);
+    sectionEl.appendChild(toggleBtn);
+
+    const listEl = document.createElement("div");
+    listEl.className = "hotkey-list global-settings-list";
+
+    const actionGroups =
+      Array.isArray(sectionConfig.actionGroups) &&
+      sectionConfig.actionGroups.length
+        ? sectionConfig.actionGroups
+        : [sectionConfig.actions || []];
+
+    const hintsByGroup = new Map();
+    (sectionConfig.hintsBetweenGroups || []).forEach((hintConfig) => {
+      if (typeof hintConfig?.afterGroupIndex !== "number") return;
+      hintsByGroup.set(hintConfig.afterGroupIndex, hintConfig);
+    });
+
+    actionGroups.forEach((groupActions, groupIndex) => {
+      listEl.appendChild(buildActionsElement(groupActions));
+      const inlineHint = buildHintElement(hintsByGroup.get(groupIndex));
+      if (inlineHint) {
+        listEl.appendChild(inlineHint);
+      }
+    });
+
+    const sectionHint = buildHintElement(sectionConfig.hint);
+    if (sectionHint) {
+      listEl.appendChild(sectionHint);
+    }
+
+    if (sectionConfig.storageStatus) {
+      const statusEl = document.createElement("div");
+      statusEl.id = "global-settings-storage-status";
+      statusEl.className = "global-settings-storage-status";
+      listEl.appendChild(statusEl);
+    }
+
+    sectionEl.appendChild(listEl);
+    container.appendChild(sectionEl);
+  });
+}
+
+const globalSettingsCollapsed = new Set();
+const globalSettingsTransitionState = new WeakMap();
+const globalSettingsTransitionDurationMs = 240;
+let globalSettingsCategoriesInitialized = false;
+let globalSettingsFocusTrapHandler = null;
+let globalSettingsLastFocusedElement = null;
+let globalSettingsStatusRequestId = 0;
+
+function loadGlobalSettingsCollapsedState() {
+  const arr = UIPreferences.getStringArray("globalSettingsCollapsedCategories");
+  globalSettingsCollapsed.clear();
+  arr.forEach((entry) => {
+    globalSettingsCollapsed.add(entry);
+  });
+}
+
+function saveGlobalSettingsCollapsedState() {
+  UIPreferences.setStringArray(
+    "globalSettingsCollapsedCategories",
+    Array.from(globalSettingsCollapsed),
+  );
+}
+
+function clearGlobalSettingsCategoryTransition(listEl) {
+  const prev = globalSettingsTransitionState.get(listEl);
+  if (!prev) return;
+  if (typeof prev.onEnd === "function") {
+    listEl.removeEventListener("transitionend", prev.onEnd);
+  }
+  if (prev.timeoutId) {
+    clearTimeout(prev.timeoutId);
+  }
+  globalSettingsTransitionState.delete(listEl);
+}
+
+function setGlobalSettingsCategoryCollapsed(
+  categoryEl,
+  collapsed,
+  persist = true,
+  animate = true,
+) {
+  if (!categoryEl) return;
+  const key = categoryEl.dataset.category;
+  const listEl = categoryEl.querySelector(".global-settings-list");
+  const toggleEl = categoryEl.querySelector(".global-settings-category-toggle");
+  if (!key || !listEl || !toggleEl) return;
+
+  const isCollapsed = categoryEl.classList.contains("collapsed");
+  const wantsCollapsed = !!collapsed;
+
+  if (persist) {
+    if (wantsCollapsed) {
+      globalSettingsCollapsed.add(key);
+    } else {
+      globalSettingsCollapsed.delete(key);
+    }
+    saveGlobalSettingsCollapsedState();
+  }
+
+  if (isCollapsed === wantsCollapsed) {
+    toggleEl.setAttribute("aria-expanded", wantsCollapsed ? "false" : "true");
+    return;
+  }
+
+  clearGlobalSettingsCategoryTransition(listEl);
+  categoryEl.classList.toggle("collapsed", wantsCollapsed);
+  toggleEl.setAttribute("aria-expanded", wantsCollapsed ? "false" : "true");
+
+  if (!animate) {
+    if (wantsCollapsed) {
+      listEl.hidden = true;
+      listEl.style.maxHeight = "0px";
+      listEl.style.opacity = "0";
+      listEl.style.transform = "translateY(-8px)";
+      listEl.style.overflow = "hidden";
+      listEl.style.pointerEvents = "none";
+    } else {
+      listEl.hidden = false;
+      listEl.style.maxHeight = "none";
+      listEl.style.opacity = "1";
+      listEl.style.transform = "translateY(0)";
+      listEl.style.overflow = "visible";
+      listEl.style.pointerEvents = "auto";
+    }
+    return;
+  }
+
+  if (wantsCollapsed) {
+    listEl.hidden = false;
+    const startHeight = Math.max(listEl.scrollHeight, 1);
+    listEl.style.maxHeight = `${startHeight}px`;
+    listEl.style.opacity = "1";
+    listEl.style.transform = "translateY(0)";
+    listEl.style.overflow = "hidden";
+    listEl.style.pointerEvents = "none";
+    void listEl.offsetHeight;
+    listEl.style.maxHeight = "0px";
+    listEl.style.opacity = "0";
+    listEl.style.transform = "translateY(-8px)";
+
+    const finish = () => {
+      clearGlobalSettingsCategoryTransition(listEl);
+      listEl.hidden = true;
+      listEl.style.maxHeight = "0px";
+      listEl.style.overflow = "hidden";
+      listEl.style.pointerEvents = "none";
+    };
+
+    const onEnd = (evt) => {
+      if (evt.propertyName !== "max-height") return;
+      finish();
+    };
+    listEl.addEventListener("transitionend", onEnd);
+    const timeoutId = setTimeout(
+      finish,
+      globalSettingsTransitionDurationMs + 80,
+    );
+    globalSettingsTransitionState.set(listEl, { onEnd, timeoutId });
+    return;
+  }
+
+  listEl.hidden = false;
+  listEl.style.maxHeight = "0px";
+  listEl.style.opacity = "0";
+  listEl.style.transform = "translateY(-8px)";
+  listEl.style.overflow = "hidden";
+  listEl.style.pointerEvents = "none";
+  void listEl.offsetHeight;
+  const targetHeight = Math.max(listEl.scrollHeight, 1);
+  listEl.style.maxHeight = `${targetHeight}px`;
+  listEl.style.opacity = "1";
+  listEl.style.transform = "translateY(0)";
+
+  const finish = () => {
+    clearGlobalSettingsCategoryTransition(listEl);
+    if (!categoryEl.classList.contains("collapsed")) {
+      listEl.style.maxHeight = "none";
+      listEl.style.overflow = "visible";
+      listEl.style.pointerEvents = "auto";
+    }
+  };
+
+  const onEnd = (evt) => {
+    if (evt.propertyName !== "max-height") return;
+    finish();
+  };
+  listEl.addEventListener("transitionend", onEnd);
+  const timeoutId = setTimeout(finish, globalSettingsTransitionDurationMs + 80);
+  globalSettingsTransitionState.set(listEl, { onEnd, timeoutId });
+}
+
+function initGlobalSettingsCategoryToggles() {
+  if (globalSettingsCategoriesInitialized) return;
+  const modal = document.getElementById("global-settings-modal");
+  if (!modal) return;
+
+  loadGlobalSettingsCollapsedState();
+
+  const categories = modal.querySelectorAll(".global-settings-section");
+  categories.forEach((categoryEl) => {
+    const toggle = categoryEl.querySelector(".global-settings-category-toggle");
+    if (!toggle) return;
+
+    const key = categoryEl.dataset.category;
+    const collapsed = key ? globalSettingsCollapsed.has(key) : false;
+    setGlobalSettingsCategoryCollapsed(categoryEl, collapsed, false, false);
+
+    toggle.addEventListener("click", () => {
+      const willCollapse = !categoryEl.classList.contains("collapsed");
+      setGlobalSettingsCategoryCollapsed(categoryEl, willCollapse, true, true);
+      if (typeof toggle.blur === "function") toggle.blur();
+    });
+  });
+
+  globalSettingsCategoriesInitialized = true;
+}
+
+function countCustomHotkeys() {
+  try {
+    return Object.keys(DEFAULT_HOTKEYS).reduce((count, key) => {
+      if (NON_CUSTOMIZABLE_HOTKEYS.has(key)) return count;
+      if (!Object.prototype.hasOwnProperty.call(CONFIG.HOTKEYS, key))
+        return count;
+      return CONFIG.HOTKEYS[key] !== DEFAULT_HOTKEYS[key] ? count + 1 : count;
+    }, 0);
+  } catch (_) {
+    return 0;
+  }
+}
+
+function extractTimelineStatsFromData(data) {
+  const source =
+    data &&
+    typeof data === "object" &&
+    data.data &&
+    typeof data.data === "object"
+      ? data.data
+      : data;
+  const daysObj =
+    source && typeof source === "object" && source.days ? source.days : {};
+  const daysEntries =
+    daysObj && typeof daysObj === "object" ? Object.values(daysObj) : [];
+  const days = daysEntries.length;
+  const sessions = daysEntries.reduce(
+    (sum, day) =>
+      sum + (Array.isArray(day?.sessions) ? day.sessions.length : 0),
+    0,
+  );
+  return { days, sessions };
+}
+
+async function collectGlobalSettingsStorageDiagnostics() {
+  const diagnostics = {
+    timelineDays: 0,
+    timelineSessions: 0,
+    plansCount: 0,
+    customHotkeysCount: countCustomHotkeys(),
+  };
+
+  try {
+    if (
+      window.TimelineData &&
+      typeof window.TimelineData.getData === "function"
+    ) {
+      const timelineStats = extractTimelineStatsFromData(
+        window.TimelineData.getData(),
+      );
+      diagnostics.timelineDays = timelineStats.days;
+      diagnostics.timelineSessions = timelineStats.sessions;
+    } else if (
+      typeof PoseChronoStorage !== "undefined" &&
+      PoseChronoStorage &&
+      typeof PoseChronoStorage.getJson === "function"
+    ) {
+      const timelinePayload = await PoseChronoStorage.getJson(
+        STORAGE_KEYS.TIMELINE_DB,
+        undefined,
+      );
+      if (timelinePayload !== undefined) {
+        const timelineStats = extractTimelineStatsFromData(timelinePayload);
+        diagnostics.timelineDays = timelineStats.days;
+        diagnostics.timelineSessions = timelineStats.sessions;
+      }
+    }
+  } catch (_) {}
+
+  try {
+    if (
+      typeof PoseChronoStorage !== "undefined" &&
+      PoseChronoStorage &&
+      typeof PoseChronoStorage.getJson === "function"
+    ) {
+      const plansPayload = await PoseChronoStorage.getJson(
+        STORAGE_KEYS.SESSION_PLANS_DB,
+        undefined,
+      );
+      if (plansPayload !== undefined) {
+        diagnostics.plansCount =
+          normalizeSessionPlansPayload(plansPayload).plans.length;
+      } else {
+        const localRaw = localStorage.getItem("posechrono_session_plans");
+        if (localRaw) {
+          diagnostics.plansCount = normalizeSessionPlansPayload(
+            JSON.parse(localRaw),
+          ).plans.length;
+        }
+      }
+    }
+  } catch (_) {}
+
+  return diagnostics;
+}
+
+async function refreshGlobalSettingsStorageStatus(storageStatus, fallbackMode) {
+  if (!storageStatus) return;
+
+  const requestId = ++globalSettingsStatusRequestId;
+  const backendText = fallbackMode
+    ? getGlobalSettingsText(
+        "settings.global.storageStatusFallback",
+        "Storage backend: localStorage fallback active.",
+      )
+    : getGlobalSettingsText(
+        "settings.global.storageStatusReady",
+        "Storage backend: IndexedDB (normal mode).",
+      );
+
+  storageStatus.innerHTML = `
+    <div class="global-settings-storage-line">${escapeHtml(backendText)}</div>
+    <div class="global-settings-storage-metrics">
+      <div class="global-settings-storage-metric">
+        <span class="global-settings-storage-label">${escapeHtml(
+          getGlobalSettingsText("settings.global.storageDiagDays", "Days"),
+        )}</span>
+        <span class="global-settings-storage-value">...</span>
+      </div>
+      <div class="global-settings-storage-metric">
+        <span class="global-settings-storage-label">${escapeHtml(
+          getGlobalSettingsText(
+            "settings.global.storageDiagSessions",
+            "Sessions",
+          ),
+        )}</span>
+        <span class="global-settings-storage-value">...</span>
+      </div>
+      <div class="global-settings-storage-metric">
+        <span class="global-settings-storage-label">${escapeHtml(
+          getGlobalSettingsText("settings.global.storageDiagPlans", "Plans"),
+        )}</span>
+        <span class="global-settings-storage-value">...</span>
+      </div>
+      <div class="global-settings-storage-metric">
+        <span class="global-settings-storage-label">${escapeHtml(
+          getGlobalSettingsText(
+            "settings.global.storageDiagCustomHotkeys",
+            "Custom hotkeys",
+          ),
+        )}</span>
+        <span class="global-settings-storage-value">...</span>
+      </div>
+    </div>
+  `;
+
+  try {
+    const diagnostics = await collectGlobalSettingsStorageDiagnostics();
+    if (requestId !== globalSettingsStatusRequestId) return;
+    storageStatus.innerHTML = `
+      <div class="global-settings-storage-line">${escapeHtml(backendText)}</div>
+      <div class="global-settings-storage-metrics">
+        <div class="global-settings-storage-metric">
+          <span class="global-settings-storage-label">${escapeHtml(
+            getGlobalSettingsText("settings.global.storageDiagDays", "Days"),
+          )}</span>
+          <span class="global-settings-storage-value">${escapeHtml(
+            String(diagnostics.timelineDays),
+          )}</span>
+        </div>
+        <div class="global-settings-storage-metric">
+          <span class="global-settings-storage-label">${escapeHtml(
+            getGlobalSettingsText(
+              "settings.global.storageDiagSessions",
+              "Sessions",
+            ),
+          )}</span>
+          <span class="global-settings-storage-value">${escapeHtml(
+            String(diagnostics.timelineSessions),
+          )}</span>
+        </div>
+        <div class="global-settings-storage-metric">
+          <span class="global-settings-storage-label">${escapeHtml(
+            getGlobalSettingsText("settings.global.storageDiagPlans", "Plans"),
+          )}</span>
+          <span class="global-settings-storage-value">${escapeHtml(
+            String(diagnostics.plansCount),
+          )}</span>
+        </div>
+        <div class="global-settings-storage-metric">
+          <span class="global-settings-storage-label">${escapeHtml(
+            getGlobalSettingsText(
+              "settings.global.storageDiagCustomHotkeys",
+              "Custom hotkeys",
+            ),
+          )}</span>
+          <span class="global-settings-storage-value">${escapeHtml(
+            String(diagnostics.customHotkeysCount),
+          )}</span>
+        </div>
+      </div>
+    `;
+  } catch (_) {}
+}
+
+function enableGlobalSettingsFocusTrap(modal) {
+  if (!modal) return;
+  if (globalSettingsFocusTrapHandler) {
+    modal.removeEventListener("keydown", globalSettingsFocusTrapHandler, true);
+    globalSettingsFocusTrapHandler = null;
+  }
+
+  globalSettingsFocusTrapHandler = (e) => {
+    if (e.key !== "Tab") return;
+    const focusables = Array.from(
+      modal.querySelectorAll(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      ),
+    ).filter(
+      (el) =>
+        !el.classList.contains("global-settings-category-toggle") &&
+        !el.disabled &&
+        !el.hidden &&
+        el.offsetParent !== null &&
+        !el.closest(".hidden"),
+    );
+
+    if (focusables.length === 0) {
+      e.preventDefault();
+      return;
+    }
+
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    const active = document.activeElement;
+
+    if (e.shiftKey) {
+      if (active === first || !modal.contains(active)) {
+        e.preventDefault();
+        last.focus();
+      }
+      return;
+    }
+
+    if (active === last || !modal.contains(active)) {
+      e.preventDefault();
+      first.focus();
+    }
+  };
+
+  modal.addEventListener("keydown", globalSettingsFocusTrapHandler, true);
+}
+
+function disableGlobalSettingsFocusTrap(modal) {
+  if (!modal || !globalSettingsFocusTrapHandler) return;
+  modal.removeEventListener("keydown", globalSettingsFocusTrapHandler, true);
+  globalSettingsFocusTrapHandler = null;
+}
+
+function updateGlobalSettingsModalState() {
+  const modal = document.getElementById("global-settings-modal");
+  if (!modal) return;
+
+  const gridBtn = document.getElementById("global-settings-toggle-grid-btn");
+  const titlebarAlwaysVisibleInput = document.getElementById(
+    "global-settings-titlebar-always-visible-btn",
+  );
+  const defaultModeGroup = document.getElementById(
+    "global-settings-default-mode-group",
+  );
+  const storageStatus = document.getElementById(
+    "global-settings-storage-status",
+  );
+
+  if (gridBtn) {
+    const isGridEnabled = document.body.classList.contains("grid-enabled");
+    if (
+      gridBtn.tagName === "INPUT" &&
+      String(gridBtn.type || "").toLowerCase() === "checkbox"
+    ) {
+      // "Hide background grid": checked = grille cachée
+      gridBtn.checked = !isGridEnabled;
+    } else {
+      setGlobalSettingsButtonLabel(
+        gridBtn,
+        getGlobalSettingsText(
+          isGridEnabled
+            ? "settings.global.hideBackgroundGrid"
+            : "settings.global.showBackgroundGrid",
+          isGridEnabled ? "Hide background grid" : "Show background grid",
+        ),
+      );
+      gridBtn.classList.toggle("active", isGridEnabled);
+    }
+  }
+
+  if (
+    titlebarAlwaysVisibleInput &&
+    titlebarAlwaysVisibleInput.tagName === "INPUT" &&
+    String(titlebarAlwaysVisibleInput.type || "").toLowerCase() === "checkbox"
+  ) {
+    titlebarAlwaysVisibleInput.checked = !!CONFIG.titlebarAlwaysVisible;
+  }
+
+  if (defaultModeGroup) {
+    const activeMode = normalizeSessionModeValue(
+      CONFIG?.defaultSessionMode,
+      "classique",
+    );
+    defaultModeGroup
+      .querySelectorAll(".search-toggle-btn[data-mode]")
+      .forEach((btn) => {
+        const isActive = btn.dataset.mode === activeMode;
+        btn.classList.toggle("active", isActive);
+        btn.setAttribute("aria-pressed", isActive ? "true" : "false");
+      });
+  }
+
+  if (storageStatus) {
+    const storage =
+      typeof PoseChronoStorage !== "undefined" &&
+      PoseChronoStorage &&
+      typeof PoseChronoStorage.status === "function"
+        ? PoseChronoStorage.status()
+        : { fallbackMode: true };
+
+    const fallbackMode = !!storage.fallbackMode;
+    storageStatus.classList.toggle("is-fallback", fallbackMode);
+    void refreshGlobalSettingsStorageStatus(storageStatus, fallbackMode);
+  }
+}
+
+function openGlobalSettingsModal() {
+  const modal = document.getElementById("global-settings-modal");
+  if (!modal) return;
+  globalSettingsLastFocusedElement = document.activeElement;
+  initGlobalSettingsCategoryToggles();
+  updateGlobalSettingsModalState();
+  modal.classList.remove("hidden");
+  enableGlobalSettingsFocusTrap(modal);
+
+  const focusTarget =
+    modal.querySelector(".global-settings-actions .option-toggle-btn") ||
+    modal.querySelector(".modal-close-btn");
+  setTimeout(() => {
+    if (focusTarget && typeof focusTarget.focus === "function") {
+      focusTarget.focus();
+    }
+  }, 0);
+}
+
+function closeGlobalSettingsModal(options = {}) {
+  const { restoreFocus = true } = options;
+  const modal = document.getElementById("global-settings-modal");
+  if (!modal) return;
+  disableGlobalSettingsFocusTrap(modal);
+  modal.classList.add("hidden");
+  if (
+    restoreFocus &&
+    globalSettingsLastFocusedElement &&
+    typeof globalSettingsLastFocusedElement.focus === "function"
+  ) {
+    globalSettingsLastFocusedElement.focus();
+  }
+  globalSettingsLastFocusedElement = null;
+}
+
 eagle.onPluginRun(async () => {
   // Charger les traductions avant de charger les images
   await loadTranslations();
   await loadImages();
 });
 
-eagle.onPluginHide(() => stopTimer());
+eagle.onPluginHide(() => {
+  stopTimer();
+  if (typeof window.flushTimelineStorage === "function") {
+    void window.flushTimelineStorage();
+  }
+});
 /**
  * Charge manuellement les traductions depuis le fichier JSON
  * Eagle ne semble pas charger automatiquement les fichiers _locales
@@ -1259,6 +3123,10 @@ function translateStaticHTML() {
 
   const elements = {
     // Titlebar tooltips
+    "#titlebar-settings-btn": {
+      attr: "data-tooltip",
+      key: "titlebar.settingsTooltip",
+    },
     "#pin-btn": { attr: "data-tooltip", key: "titlebar.pinTooltip" },
     "#minimize-btn": { attr: "data-tooltip", key: "titlebar.minimize" },
     "#maximize-btn": { attr: "data-tooltip", key: "titlebar.maximize" },
@@ -1405,6 +3273,14 @@ function translateStaticHTML() {
     } catch (e) {}
   });
 
+  // Attributs data-i18n-aria-label génériques
+  document.querySelectorAll("[data-i18n-aria-label]").forEach((el) => {
+    const key = el.getAttribute("data-i18n-aria-label");
+    try {
+      el.setAttribute("aria-label", i18next.t(key));
+    } catch (e) {}
+  });
+
   // Mettre à jour la langue du document et le titre
   const locale = window.getLocale ? window.getLocale() : "fr-FR";
   document.documentElement.lang = locale.split("-")[0];
@@ -1418,8 +3294,18 @@ function translateStaticHTML() {
  * Charge le DOM, initialise les gestionnaires, configure les événements
  */
 async function initPlugin() {
-  // Charger les raccourcis clavier personnalisés depuis localStorage
-  loadHotkeysFromStorage();
+  UIPreferences.init();
+  applyVisualPreferencesFromStore();
+
+  // Charger les raccourcis clavier personnalisés (IndexedDB + migration locale)
+  await loadHotkeysFromStorage();
+
+  if (
+    window.location.hostname === "localhost" ||
+    window.location.hostname === "127.0.0.1"
+  ) {
+    await runStorageSmokeTests();
+  }
 
   // Initialiser le gestionnaire de sons
   SoundManager.init();
@@ -1586,6 +3472,10 @@ async function initPlugin() {
     homeProgressiveBlurBtn.classList.toggle("active", state.isProgressiveBlur);
   }
 
+  if (settingsBtn) {
+    settingsBtn.innerHTML = ICONS.HOME;
+  }
+
   soundBtn.innerHTML = state.soundEnabled ? ICONS.SOUND_ON : ICONS.SOUND_OFF;
   toggleTimerBtn.innerHTML = state.showTimer ? ICONS.TIMER_ON : ICONS.TIMER_OFF;
   grayscaleBtn.innerHTML = state.grayscale ? ICONS.BW_ON : ICONS.BW_OFF;
@@ -1600,7 +3490,8 @@ async function initPlugin() {
     });
 
   // === Lancer la configuration ===
-  switchMode(CONFIG?.defaultSessionMode || "classique");
+  CONFIG.defaultSessionMode = loadPreferredDefaultSessionMode();
+  switchMode(CONFIG.defaultSessionMode || "classique");
   updateFlipButtonUI();
   updateButtonLabels();
 
@@ -1632,8 +3523,18 @@ async function initPlugin() {
     memoryProgressiveBtns.forEach((btn) => btn.classList.remove("active"));
   }
 
+  renderGlobalSettingsSections();
   setupEventListeners();
   updateTimerDisplay();
+
+  if (!window.__posechronoTimelineFlushBound) {
+    window.__posechronoTimelineFlushBound = true;
+    window.addEventListener("beforeunload", () => {
+      if (typeof window.flushTimelineStorage === "function") {
+        void window.flushTimelineStorage();
+      }
+    });
+  }
 
   // === Charger les traductions manuellement ===
   await loadTranslations();
@@ -1655,9 +3556,129 @@ async function initPlugin() {
  * Initialise la grille d'arrière-plan selon la configuration
  */
 function initBackgroundGrid() {
-  if (CONFIG?.backgroundGrid) {
-    document.body.classList.add("grid-enabled");
+  const isEnabled = UIPreferences.get(
+    "backgroundGridEnabled",
+    typeof CONFIG !== "undefined" ? !!(CONFIG?.backgroundGrid ?? false) : false,
+  );
+  document.body.classList.toggle("grid-enabled", !!isEnabled);
+}
+
+function setBackgroundGridEnabled(enabled, persist = true) {
+  const next = !!enabled;
+  document.body.classList.toggle("grid-enabled", next);
+  if (persist) {
+    UIPreferences.set("backgroundGridEnabled", next);
   }
+}
+
+function applyVisualPreferencesFromStore() {
+  const gridEnabled = UIPreferences.get(
+    "backgroundGridEnabled",
+    typeof CONFIG !== "undefined" ? !!(CONFIG?.backgroundGrid ?? false) : false,
+  );
+  setBackgroundGridEnabled(gridEnabled, false);
+  const titlebarAlwaysVisible = UIPreferences.get(
+    "titlebarAlwaysVisible",
+    typeof CONFIG !== "undefined"
+      ? !!(CONFIG?.titlebarAlwaysVisible ?? false)
+      : false,
+  );
+  setTitlebarAlwaysVisible(titlebarAlwaysVisible, false);
+  state.reviewDurationsVisible = UIPreferences.get(
+    "reviewDurationsVisible",
+    true,
+  );
+}
+
+function applyPreferredDefaultSessionMode(options = {}) {
+  const { syncUi = false } = options;
+  const preferred = normalizeSessionModeValue(
+    UIPreferences.get(
+      "defaultSessionMode",
+      normalizeSessionModeValue(CONFIG?.defaultSessionMode),
+    ),
+    normalizeSessionModeValue(CONFIG?.defaultSessionMode),
+  );
+  CONFIG.defaultSessionMode = preferred;
+  if (
+    syncUi &&
+    !state.isRunning &&
+    settingsScreen &&
+    !settingsScreen.classList.contains("hidden")
+  ) {
+    switchMode(preferred);
+  }
+}
+
+function createPrefsBackupFilename() {
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, "0");
+  const dd = String(now.getDate()).padStart(2, "0");
+  const hh = String(now.getHours()).padStart(2, "0");
+  const min = String(now.getMinutes()).padStart(2, "0");
+  const ss = String(now.getSeconds()).padStart(2, "0");
+  return `posechrono-backup-${yyyy}${mm}${dd}-${hh}${min}${ss}.json`;
+}
+
+function downloadJsonPayload(filename, payload) {
+  try {
+    const content = JSON.stringify(payload, null, 2);
+    const blob = new Blob([content], {
+      type: "application/json;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+    return true;
+  } catch (e) {
+    console.error("[Prefs] export download error:", e);
+    return false;
+  }
+}
+
+function pickJsonFileText() {
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".json,application/json";
+    input.style.display = "none";
+    document.body.appendChild(input);
+
+    const cleanup = () => {
+      input.remove();
+    };
+
+    input.addEventListener(
+      "change",
+      () => {
+        const file = input.files && input.files[0];
+        if (!file) {
+          cleanup();
+          resolve(null);
+          return;
+        }
+        const reader = new FileReader();
+        reader.onload = () => {
+          cleanup();
+          resolve(typeof reader.result === "string" ? reader.result : null);
+        };
+        reader.onerror = () => {
+          cleanup();
+          resolve(null);
+        };
+        reader.readAsText(file, "utf-8");
+      },
+      { once: true },
+    );
+
+    input.click();
+  });
 }
 
 /**
@@ -1780,23 +3801,90 @@ function setupEventListeners() {
   const planNameInput = document.getElementById("plan-name-input");
   const savePlanBtn = document.getElementById("save-plan-btn");
   const savedPlansList = document.getElementById("saved-plans-list");
+  const globalSettingsModal = document.getElementById("global-settings-modal");
+  const closeGlobalSettingsModalBtn = document.getElementById(
+    "close-global-settings-modal",
+  );
+  const globalSettingsToggleGridBtn = document.getElementById(
+    "global-settings-toggle-grid-btn",
+  );
+  const globalSettingsToggleThemeBtn = document.getElementById(
+    "global-settings-toggle-theme-btn",
+  );
+  const globalSettingsOpenHotkeysBtn = document.getElementById(
+    "global-settings-open-hotkeys-btn",
+  );
+  const globalSettingsTitlebarAlwaysVisibleInput = document.getElementById(
+    "global-settings-titlebar-always-visible-btn",
+  );
+  const globalSettingsDefaultModeGroup = document.getElementById(
+    "global-settings-default-mode-group",
+  );
+  const globalSettingsRepairStorageBtn = document.getElementById(
+    "global-settings-repair-storage-btn",
+  );
+  const globalResetSettingsBtn = document.getElementById(
+    "global-reset-settings-btn",
+  );
+  const globalSettingsExportPrefsBtn = document.getElementById(
+    "global-settings-export-prefs-btn",
+  );
+  const globalSettingsImportPrefsBtn = document.getElementById(
+    "global-settings-import-prefs-btn",
+  );
   const SESSION_PLANS_KEY = "posechrono_session_plans";
+  const SESSION_PLANS_DB_KEY = STORAGE_KEYS.SESSION_PLANS_DB;
+  let sessionPlansCache = null;
 
-  // Charger les plans depuis localStorage
-  function loadSessionPlans() {
+  // Charger les plans (IndexedDB + migration depuis localStorage)
+  async function loadSessionPlans() {
+    if (Array.isArray(sessionPlansCache)) {
+      return sessionPlansCache;
+    }
     try {
-      const data = localStorage.getItem(SESSION_PLANS_KEY);
-      return data ? JSON.parse(data) : [];
+      const migrated = await PoseChronoStorage.migrateFromLocalStorage(
+        SESSION_PLANS_KEY,
+        SESSION_PLANS_DB_KEY,
+        [],
+      );
+      const rawPayload =
+        migrated !== undefined
+          ? migrated
+          : await PoseChronoStorage.getJson(SESSION_PLANS_DB_KEY, {
+              schemaVersion: STORAGE_SCHEMA_VERSION,
+              plans: [],
+            });
+      const normalized = normalizeSessionPlansPayload(rawPayload);
+      sessionPlansCache = normalized.plans;
+      if (normalized.repaired) {
+        console.warn(
+          `[Storage] Session plans repaired (${sessionPlansCache.length} plan(s)).`,
+        );
+        await PoseChronoStorage.setJson(
+          SESSION_PLANS_DB_KEY,
+          normalized.payload,
+        );
+      }
+      return sessionPlansCache;
     } catch (e) {
       console.error(i18next.t("errors.loadPlansError") + ":", e);
       return [];
     }
   }
 
-  // Sauvegarder les plans dans localStorage
-  function saveSessionPlans(plans) {
+  // Sauvegarder les plans (IndexedDB)
+  async function saveSessionPlans(plans) {
     try {
-      localStorage.setItem(SESSION_PLANS_KEY, JSON.stringify(plans));
+      sessionPlansCache = Array.isArray(plans) ? plans : [];
+      const normalized = normalizeSessionPlansPayload({
+        schemaVersion: STORAGE_SCHEMA_VERSION,
+        plans: sessionPlansCache,
+      });
+      sessionPlansCache = normalized.plans;
+      await PoseChronoStorage.setJson(SESSION_PLANS_DB_KEY, normalized.payload);
+      try {
+        localStorage.removeItem(SESSION_PLANS_KEY);
+      } catch (_) {}
     } catch (e) {
       console.error(i18next.t("errors.savePlansError") + ":", e);
     }
@@ -1850,8 +3938,8 @@ function setupEventListeners() {
   }
 
   // Afficher la liste des plans
-  function displaySavedPlans() {
-    const plans = loadSessionPlans();
+  async function displaySavedPlans() {
+    const plans = await loadSessionPlans();
     if (plans.length === 0) {
       savedPlansList.innerHTML = `<div class="empty-plans-msg">${i18next.t("modes.custom.noPlansSaved")}</div>`;
       return;
@@ -1869,7 +3957,7 @@ function setupEventListeners() {
         return `
       <div class="plan-item">
         <div class="plan-info">
-          <div class="plan-name" data-index="${index}" contenteditable="false" style="cursor: pointer;">${plan.name}</div>
+          <div class="plan-name" data-index="${index}" contenteditable="false" style="cursor: pointer;">${escapeHtml(plan.name)}</div>
           <div class="plan-meta">${durationText} - ${totalPoses} ${posesLabel} - ${totalSteps} ${stepsLabel}</div>
         </div>
         <div class="plan-actions">
@@ -1883,18 +3971,18 @@ function setupEventListeners() {
   }
 
   // Supprimer un plan
-  function deletePlan(index) {
-    const plans = loadSessionPlans();
+  async function deletePlan(index) {
+    const plans = await loadSessionPlans();
     if (index < 0 || index >= plans.length) return;
 
     plans.splice(index, 1);
-    saveSessionPlans(plans);
-    displaySavedPlans();
+    await saveSessionPlans(plans);
+    await displaySavedPlans();
   }
 
   // Suppression avec corbeille logique (undo 10s)
-  function deletePlanWithUndo(index) {
-    const plans = loadSessionPlans();
+  async function deletePlanWithUndo(index) {
+    const plans = await loadSessionPlans();
     if (index < 0 || index >= plans.length) return;
 
     const deletedPlan = plans[index];
@@ -1903,8 +3991,8 @@ function setupEventListeners() {
 
     // Suppression immédiate de l'UI, restauration possible pendant 10s
     plans.splice(index, 1);
-    saveSessionPlans(plans);
-    displaySavedPlans();
+    await saveSessionPlans(plans);
+    await displaySavedPlans();
 
     const undoLabel = i18next.t("notifications.undo", { defaultValue: "Undo" });
     const deletedMsg = i18next.t("notifications.deleteQueued", {
@@ -1918,11 +4006,18 @@ function setupEventListeners() {
         message: deletedMsg,
         undoLabel,
         onUndo: () => {
-          const currentPlans = loadSessionPlans();
-          const restoreAt = Math.max(0, Math.min(safeIndex, currentPlans.length));
-          currentPlans.splice(restoreAt, 0, deletedPlan);
-          saveSessionPlans(currentPlans);
-          displaySavedPlans();
+          (async () => {
+            const currentPlans = await loadSessionPlans();
+            const restoreAt = Math.max(
+              0,
+              Math.min(safeIndex, currentPlans.length),
+            );
+            currentPlans.splice(restoreAt, 0, deletedPlan);
+            await saveSessionPlans(currentPlans);
+            await displaySavedPlans();
+          })().catch((err) => {
+            console.error("[Plans] undo restore error:", err);
+          });
 
           if (typeof window.showPoseChronoToast === "function") {
             window.showPoseChronoToast({
@@ -1948,9 +4043,9 @@ function setupEventListeners() {
 
   // Ouvrir le modal
   if (managePlansBtn) {
-    managePlansBtn.addEventListener("click", () => {
+    managePlansBtn.addEventListener("click", async () => {
       sessionPlansModal.classList.remove("hidden");
-      displaySavedPlans();
+      await displaySavedPlans();
     });
   }
 
@@ -1998,9 +4093,458 @@ function setupEventListeners() {
     });
   }
 
+  // Modal paramètres globaux
+  if (closeGlobalSettingsModalBtn) {
+    closeGlobalSettingsModalBtn.addEventListener("click", () => {
+      closeGlobalSettingsModal();
+    });
+  }
+
+  if (globalSettingsModal) {
+    globalSettingsModal.addEventListener("click", (e) => {
+      if (e.target === globalSettingsModal) {
+        closeGlobalSettingsModal();
+      }
+    });
+  }
+
+  if (globalSettingsToggleGridBtn) {
+    const isCheckboxControl =
+      globalSettingsToggleGridBtn.tagName === "INPUT" &&
+      String(globalSettingsToggleGridBtn.type || "").toLowerCase() ===
+        "checkbox";
+    const gridToggleHandler = () => {
+      if (isCheckboxControl) {
+        // checked => cacher la grille
+        setBackgroundGridEnabled(!globalSettingsToggleGridBtn.checked, true);
+      } else {
+        const isEnabled = document.body.classList.contains("grid-enabled");
+        setBackgroundGridEnabled(!isEnabled, true);
+      }
+      updateGlobalSettingsModalState();
+    };
+    globalSettingsToggleGridBtn.addEventListener(
+      isCheckboxControl ? "change" : "click",
+      gridToggleHandler,
+    );
+  }
+
+  if (globalSettingsToggleThemeBtn) {
+    globalSettingsToggleThemeBtn.addEventListener("click", () => {
+      toggleTheme();
+      updateGlobalSettingsModalState();
+    });
+  }
+
+  if (globalSettingsOpenHotkeysBtn) {
+    globalSettingsOpenHotkeysBtn.addEventListener("click", () => {
+      closeGlobalSettingsModal({ restoreFocus: false });
+      showHotkeysModal();
+    });
+  }
+
+  if (globalSettingsTitlebarAlwaysVisibleInput) {
+    globalSettingsTitlebarAlwaysVisibleInput.addEventListener("change", () => {
+      setTitlebarAlwaysVisible(
+        globalSettingsTitlebarAlwaysVisibleInput.checked,
+      );
+      updateGlobalSettingsModalState();
+    });
+  }
+
+  if (globalSettingsDefaultModeGroup) {
+    globalSettingsDefaultModeGroup.addEventListener("click", (event) => {
+      const modeBtn = event.target.closest(".search-toggle-btn[data-mode]");
+      if (!modeBtn || !globalSettingsDefaultModeGroup.contains(modeBtn)) return;
+      const nextMode = savePreferredDefaultSessionMode(modeBtn.dataset.mode, true);
+      updateGlobalSettingsModalState();
+      if (
+        !state.isRunning &&
+        settingsScreen &&
+        !settingsScreen.classList.contains("hidden")
+      ) {
+        switchMode(nextMode);
+      }
+    });
+  }
+
+  const handleResetAllSettings = async () => {
+    const { confirmed } = await showPoseChronoConfirmDialog({
+      title: i18next.t("settings.global.resetSettings", {
+        defaultValue: "Reset settings",
+      }),
+      message: i18next.t("settings.global.resetSettingsConfirm", {
+        defaultValue:
+          "Reset all settings to defaults? (theme, UI preferences, custom hotkeys)",
+      }),
+      confirmText: i18next.t("settings.global.resetSettings", {
+        defaultValue: "Reset settings",
+      }),
+      cancelText: i18next.t("notifications.deleteCancel", {
+        defaultValue: "Cancel",
+      }),
+      container: globalSettingsModal || settingsScreen || document.body,
+    });
+    if (!confirmed) return;
+
+    try {
+      await PoseChronoStorage.remove(STORAGE_KEYS.HOTKEYS_DB);
+    } catch (_) {}
+    try {
+      localStorage.removeItem(HOTKEYS_STORAGE_KEY);
+    } catch (_) {}
+    try {
+      localStorage.removeItem(LEGACY_DEFAULT_SESSION_MODE_STORAGE_KEY);
+    } catch (_) {}
+
+    Object.keys(CONFIG.HOTKEYS).forEach((k) => {
+      delete CONFIG.HOTKEYS[k];
+    });
+    Object.assign(CONFIG.HOTKEYS, DEFAULT_HOTKEYS);
+
+    UIPreferences.resetVisualPrefs();
+    UIPreferences.set(
+      "backgroundGridEnabled",
+      CONFIG_RUNTIME_DEFAULTS.backgroundGrid,
+    );
+    UIPreferences.set(
+      "titlebarAlwaysVisible",
+      CONFIG_RUNTIME_DEFAULTS.titlebarAlwaysVisible,
+    );
+    UIPreferences.set(
+      "defaultSessionMode",
+      CONFIG_RUNTIME_DEFAULTS.defaultSessionMode,
+    );
+    UIPreferences.set("reviewDurationsVisible", true);
+    globalSettingsCollapsed.clear();
+    globalSettingsCategoriesInitialized = false;
+
+    CONFIG.enableFlipAnimation = CONFIG_RUNTIME_DEFAULTS.enableFlipAnimation;
+    CONFIG.smoothProgress = CONFIG_RUNTIME_DEFAULTS.smoothProgress;
+    CONFIG.smoothPauseCircle = CONFIG_RUNTIME_DEFAULTS.smoothPauseCircle;
+    CONFIG.reverseProgressiveBlur =
+      CONFIG_RUNTIME_DEFAULTS.reverseProgressiveBlur;
+    CONFIG.defaultAutoFlip = CONFIG_RUNTIME_DEFAULTS.defaultAutoFlip;
+    CONFIG.defaultSessionMode = CONFIG_RUNTIME_DEFAULTS.defaultSessionMode;
+    CONFIG.backgroundGrid = CONFIG_RUNTIME_DEFAULTS.backgroundGrid;
+    CONFIG.titlebarAlwaysVisible =
+      CONFIG_RUNTIME_DEFAULTS.titlebarAlwaysVisible;
+
+    applyTheme(CONFIG_RUNTIME_DEFAULTS.currentTheme);
+    if (typeof eagle !== "undefined" && eagle?.preferences?.set) {
+      try {
+        await eagle.preferences.set(
+          "theme",
+          CONFIG_RUNTIME_DEFAULTS.currentTheme,
+        );
+      } catch (_) {}
+    }
+
+    applyVisualPreferencesFromStore();
+    if (
+      !state.isRunning &&
+      settingsScreen &&
+      !settingsScreen.classList.contains("hidden")
+    ) {
+      switchMode(CONFIG.defaultSessionMode);
+    }
+    updateGlobalSettingsModalState();
+    initGlobalSettingsCategoryToggles();
+    updateButtonLabels();
+    updateSidebarTooltips();
+
+    if (typeof window.showPoseChronoToast === "function") {
+      window.showPoseChronoToast({
+        type: "success",
+        message: i18next.t("settings.global.resetSettingsDone", {
+          defaultValue: "All settings reset to defaults.",
+        }),
+        duration: 2400,
+      });
+    }
+  };
+
+  if (globalResetSettingsBtn) {
+    globalResetSettingsBtn.addEventListener("click", async () => {
+      await handleResetAllSettings();
+    });
+  }
+
+  if (globalSettingsExportPrefsBtn) {
+    globalSettingsExportPrefsBtn.addEventListener("click", async () => {
+      const { confirmed, selections } = await showPreferencesPackageDialog({
+        mode: "export",
+        defaults: {
+          ui: true,
+          hotkeys: true,
+          plans: true,
+          timeline: false,
+        },
+        container: globalSettingsModal || settingsScreen || document.body,
+      });
+      if (!confirmed) return;
+
+      const selected = Object.values(selections || {}).some(Boolean);
+      if (!selected) {
+        if (typeof window.showPoseChronoToast === "function") {
+          window.showPoseChronoToast({
+            type: "info",
+            message: i18next.t("storage.nothingSelected", {
+              defaultValue: "No storage section selected.",
+            }),
+            duration: 2200,
+          });
+        }
+        return;
+      }
+
+      const sections = {};
+
+      if (selections.ui) {
+        sections.ui = UIPreferences.exportData();
+      }
+
+      if (selections.hotkeys) {
+        const hotkeysToSave = {};
+        Object.keys(DEFAULT_HOTKEYS).forEach((key) => {
+          if (NON_CUSTOMIZABLE_HOTKEYS.has(key)) return;
+          if (CONFIG.HOTKEYS[key] !== DEFAULT_HOTKEYS[key]) {
+            hotkeysToSave[key] = CONFIG.HOTKEYS[key];
+          }
+        });
+        sections.hotkeys = normalizeHotkeysPayload({
+          schemaVersion: STORAGE_SCHEMA_VERSION,
+          bindings: hotkeysToSave,
+        }).payload;
+      }
+
+      if (selections.plans) {
+        const plans = await loadSessionPlans();
+        sections.plans = normalizeSessionPlansPayload({
+          schemaVersion: STORAGE_SCHEMA_VERSION,
+          plans,
+        }).payload;
+      }
+
+      if (selections.timeline) {
+        try {
+          if (
+            window.TimelineData &&
+            typeof window.TimelineData.getData === "function"
+          ) {
+            sections.timeline = JSON.parse(
+              JSON.stringify(window.TimelineData.getData()),
+            );
+          } else {
+            sections.timeline = null;
+          }
+        } catch (e) {
+          console.warn("[Prefs] timeline export read failed:", e);
+          sections.timeline = null;
+        }
+      }
+
+      const payload = {
+        schemaVersion: PREFS_PACKAGE_SCHEMA_VERSION,
+        app: "PoseChrono",
+        exportedAt: new Date().toISOString(),
+        sections,
+      };
+
+      const ok = downloadJsonPayload(createPrefsBackupFilename(), payload);
+      if (typeof window.showPoseChronoToast === "function") {
+        window.showPoseChronoToast({
+          type: ok ? "success" : "error",
+          message: ok
+            ? i18next.t("settings.global.preferencesExportDone", {
+                defaultValue: "Preferences exported.",
+              })
+            : i18next.t("settings.global.preferencesExportError", {
+                defaultValue: "Preferences export failed.",
+              }),
+          duration: 2400,
+        });
+      }
+    });
+  }
+
+  if (globalSettingsImportPrefsBtn) {
+    globalSettingsImportPrefsBtn.addEventListener("click", async () => {
+      const text = await pickJsonFileText();
+      if (!text) return;
+
+      let parsed = null;
+      try {
+        parsed = JSON.parse(text);
+      } catch (_) {
+        showPoseChronoErrorMessage(
+          i18next.t("settings.global.preferencesImportInvalid", {
+            defaultValue: "Invalid backup file.",
+          }),
+        );
+        return;
+      }
+
+      if (!parsed || typeof parsed !== "object" || !parsed.sections) {
+        showPoseChronoErrorMessage(
+          i18next.t("settings.global.preferencesImportInvalid", {
+            defaultValue: "Invalid backup file.",
+          }),
+        );
+        return;
+      }
+
+      const available = {
+        ui: !!(parsed.sections && parsed.sections.ui),
+        hotkeys: !!(parsed.sections && parsed.sections.hotkeys),
+        plans: !!(parsed.sections && parsed.sections.plans),
+        timeline: !!(parsed.sections && parsed.sections.timeline),
+      };
+
+      const { confirmed, selections } = await showPreferencesPackageDialog({
+        mode: "import",
+        available,
+        defaults: available,
+        container: globalSettingsModal || settingsScreen || document.body,
+      });
+      if (!confirmed) return;
+
+      const selected = Object.values(selections || {}).some(Boolean);
+      if (!selected) {
+        if (typeof window.showPoseChronoToast === "function") {
+          window.showPoseChronoToast({
+            type: "info",
+            message: i18next.t("storage.nothingSelected", {
+              defaultValue: "No storage section selected.",
+            }),
+            duration: 2200,
+          });
+        }
+        return;
+      }
+
+      const applied = [];
+      try {
+        if (selections.ui && parsed.sections.ui) {
+          UIPreferences.importData(parsed.sections.ui, { persist: true });
+          applyVisualPreferencesFromStore();
+          applyPreferredDefaultSessionMode({ syncUi: true });
+          globalSettingsCollapsed.clear();
+          globalSettingsCategoriesInitialized = false;
+          initGlobalSettingsCategoryToggles();
+          applied.push(
+            i18next.t("settings.global.packageSectionUi", {
+              defaultValue: "UI preferences",
+            }),
+          );
+        }
+
+        if (selections.hotkeys && parsed.sections.hotkeys) {
+          const normalizedHotkeys = normalizeHotkeysPayload(
+            parsed.sections.hotkeys,
+          );
+          await PoseChronoStorage.setJson(
+            STORAGE_KEYS.HOTKEYS_DB,
+            normalizedHotkeys.payload,
+          );
+          try {
+            localStorage.removeItem(HOTKEYS_STORAGE_KEY);
+          } catch (_) {}
+          Object.keys(DEFAULT_HOTKEYS).forEach((key) => {
+            CONFIG.HOTKEYS[key] = DEFAULT_HOTKEYS[key];
+          });
+          Object.keys(normalizedHotkeys.bindings).forEach((key) => {
+            if (!NON_CUSTOMIZABLE_HOTKEYS.has(key) && CONFIG.HOTKEYS[key]) {
+              CONFIG.HOTKEYS[key] = normalizedHotkeys.bindings[key];
+            }
+          });
+          updateButtonLabels();
+          updateSidebarTooltips();
+          applied.push(
+            i18next.t("settings.global.packageSectionHotkeys", {
+              defaultValue: "Keyboard shortcuts",
+            }),
+          );
+        }
+
+        if (selections.plans && parsed.sections.plans) {
+          const normalizedPlans = normalizeSessionPlansPayload(
+            parsed.sections.plans,
+          );
+          sessionPlansCache = normalizedPlans.plans;
+          await PoseChronoStorage.setJson(
+            SESSION_PLANS_DB_KEY,
+            normalizedPlans.payload,
+          );
+          try {
+            localStorage.removeItem(SESSION_PLANS_KEY);
+          } catch (_) {}
+          if (
+            sessionPlansModal &&
+            !sessionPlansModal.classList.contains("hidden")
+          ) {
+            await displaySavedPlans();
+          }
+          applied.push(
+            i18next.t("settings.global.packageSectionPlans", {
+              defaultValue: "Session plans",
+            }),
+          );
+        }
+
+        if (selections.timeline && parsed.sections.timeline) {
+          if (
+            window.TimelineData &&
+            typeof window.TimelineData.importJSON === "function"
+          ) {
+            window.TimelineData.importJSON(
+              JSON.stringify(parsed.sections.timeline),
+            );
+          } else {
+            await PoseChronoStorage.setJson(STORAGE_KEYS.TIMELINE_DB, {
+              schemaVersion: STORAGE_SCHEMA_VERSION,
+              data: parsed.sections.timeline,
+            });
+          }
+          if (typeof window.refreshTimelineSettings === "function") {
+            window.refreshTimelineSettings();
+          }
+          if (typeof window.refreshTimelineReview === "function") {
+            window.refreshTimelineReview();
+          }
+          applied.push(
+            i18next.t("settings.global.packageSectionTimeline", {
+              defaultValue: "Timeline history",
+            }),
+          );
+        }
+
+        updateGlobalSettingsModalState();
+
+        if (typeof window.showPoseChronoToast === "function") {
+          window.showPoseChronoToast({
+            type: "success",
+            message: i18next.t("settings.global.preferencesImportDone", {
+              defaultValue: "Preferences imported: {{targets}}",
+              targets: applied.join(", "),
+            }),
+            duration: 3000,
+          });
+        }
+      } catch (e) {
+        console.error("[Prefs] import error:", e);
+        showPoseChronoErrorMessage(
+          i18next.t("settings.global.preferencesImportError", {
+            defaultValue: "Preferences import failed.",
+          }),
+        );
+      }
+    });
+  }
+
   // Sauvegarder le plan actuel
   if (savePlanBtn) {
-    savePlanBtn.addEventListener("click", () => {
+    savePlanBtn.addEventListener("click", async () => {
       const name = planNameInput.value.trim();
       if (!name) {
         // Shake et bordure rouge sur l'input
@@ -2021,7 +4565,7 @@ function setupEventListeners() {
         return;
       }
 
-      const plans = loadSessionPlans();
+      const plans = await loadSessionPlans();
       const newPlan = {
         name: name,
         steps: JSON.parse(JSON.stringify(state.customQueue)),
@@ -2029,11 +4573,11 @@ function setupEventListeners() {
       };
 
       plans.push(newPlan);
-      saveSessionPlans(plans);
+      await saveSessionPlans(plans);
 
       planNameInput.value = "";
       planNameInput.blur();
-      displaySavedPlans();
+      await displaySavedPlans();
 
       // Feedback visuel
       savePlanBtn.textContent = i18next.t("notifications.planSaved");
@@ -2063,7 +4607,7 @@ function setupEventListeners() {
 
       if (loadBtn) {
         const index = parseInt(loadBtn.dataset.index, 10);
-        const plans = loadSessionPlans();
+        const plans = await loadSessionPlans();
         if (plans[index]) {
           state.customQueue = JSON.parse(JSON.stringify(plans[index].steps));
           renderCustomQueue();
@@ -2072,7 +4616,7 @@ function setupEventListeners() {
         }
       } else if (deleteBtn) {
         const index = parseInt(deleteBtn.dataset.index, 10);
-        const plans = loadSessionPlans();
+        const plans = await loadSessionPlans();
         const plan = plans[index];
         if (!plan) return;
 
@@ -2081,19 +4625,25 @@ function setupEventListeners() {
         const stepsCount = (plan.steps || []).length;
         const posesLabel = getPlanWord("pose", totalPoses);
         const stepsLabel = getPlanWord("step", stepsCount);
-        const title = i18next.t("modes.custom.managePlans", { defaultValue: "Session Plans" });
+        const title = i18next.t("modes.custom.managePlans", {
+          defaultValue: "Session Plans",
+        });
         const message = `${i18next.t("modes.custom.confirmDeletePlan", { defaultValue: "Delete this plan?" })}\n${plan.name} (${totalDuration} - ${totalPoses} ${posesLabel}, ${stepsCount} ${stepsLabel})`;
 
         const { confirmed } = await showPoseChronoConfirmDialog({
           title,
           message,
-          confirmText: i18next.t("notifications.deleteConfirm", { defaultValue: "Delete" }),
-          cancelText: i18next.t("notifications.deleteCancel", { defaultValue: "Cancel" }),
+          confirmText: i18next.t("notifications.deleteConfirm", {
+            defaultValue: "Delete",
+          }),
+          cancelText: i18next.t("notifications.deleteCancel", {
+            defaultValue: "Cancel",
+          }),
           container: sessionPlansModal,
         });
 
         if (confirmed) {
-          deletePlanWithUndo(index);
+          await deletePlanWithUndo(index);
         }
       } else if (planName && planName.contentEditable === "false") {
         // Activer l'édition du nom
@@ -2114,11 +4664,15 @@ function setupEventListeners() {
           const newName = planName.textContent.trim();
           if (newName && newName !== originalName) {
             const index = parseInt(planName.dataset.index, 10);
-            const plans = loadSessionPlans();
-            if (plans[index]) {
-              plans[index].name = newName;
-              saveSessionPlans(plans);
-            }
+            (async () => {
+              const plans = await loadSessionPlans();
+              if (plans[index]) {
+                plans[index].name = newName;
+                await saveSessionPlans(plans);
+              }
+            })().catch((err) => {
+              console.error("[Plans] rename error:", err);
+            });
           } else if (!newName) {
             planName.textContent = originalName;
           }
@@ -2152,6 +4706,134 @@ function setupEventListeners() {
         planName.addEventListener("keydown", handleKeydown);
         planName.addEventListener("blur", handleBlur);
       }
+    });
+  }
+
+  async function handleRepairStorageClick() {
+    const { confirmed, selections } = await showStorageRepairDialog({
+      container: settingsScreen || document.body,
+      message: i18next.t("storage.repairMessageDetailed", {
+        defaultValue:
+          "Choose what to reset. Selected data will be deleted locally and cannot be recovered automatically.",
+      }),
+      impactItems: [
+        i18next.t("storage.repairImpactTimeline", {
+          defaultValue:
+            "Timeline: removes day/session history and related image references.",
+        }),
+        i18next.t("storage.repairImpactPlans", {
+          defaultValue: "Plans: removes saved session plans.",
+        }),
+        i18next.t("storage.repairImpactHotkeys", {
+          defaultValue: "Hotkeys: restores default shortcuts.",
+        }),
+      ],
+    });
+    if (!confirmed) return;
+
+    const hasTarget =
+      selections.timeline || selections.plans || selections.hotkeys;
+    if (!hasTarget) {
+      if (typeof window.showPoseChronoToast === "function") {
+        window.showPoseChronoToast({
+          type: "info",
+          message: i18next.t("storage.nothingSelected", {
+            defaultValue: "No storage section selected.",
+          }),
+          duration: 2200,
+        });
+      }
+      return;
+    }
+
+    const repairedLabels = [];
+
+    try {
+      if (selections.plans) {
+        await PoseChronoStorage.remove(SESSION_PLANS_DB_KEY);
+        try {
+          localStorage.removeItem(SESSION_PLANS_KEY);
+        } catch (_) {}
+        sessionPlansCache = [];
+        repairedLabels.push(
+          i18next.t("storage.targetPlans", {
+            defaultValue: "Session plans",
+          }),
+        );
+        if (
+          sessionPlansModal &&
+          !sessionPlansModal.classList.contains("hidden")
+        ) {
+          await displaySavedPlans();
+        }
+      }
+
+      if (selections.hotkeys) {
+        await PoseChronoStorage.remove(STORAGE_KEYS.HOTKEYS_DB);
+        try {
+          localStorage.removeItem(HOTKEYS_STORAGE_KEY);
+        } catch (_) {}
+        Object.keys(DEFAULT_HOTKEYS).forEach((key) => {
+          CONFIG.HOTKEYS[key] = DEFAULT_HOTKEYS[key];
+        });
+        NON_CUSTOMIZABLE_HOTKEYS.forEach((key) => {
+          if (DEFAULT_HOTKEYS[key]) CONFIG.HOTKEYS[key] = DEFAULT_HOTKEYS[key];
+        });
+        repairedLabels.push(
+          i18next.t("storage.targetHotkeys", {
+            defaultValue: "Keyboard shortcuts",
+          }),
+        );
+      }
+
+      if (selections.timeline) {
+        await PoseChronoStorage.remove(STORAGE_KEYS.TIMELINE_DB);
+        try {
+          localStorage.removeItem("posechrono-timeline-data");
+        } catch (_) {}
+        if (
+          window.TimelineData &&
+          typeof window.TimelineData.reset === "function"
+        ) {
+          window.TimelineData.reset();
+        }
+        if (typeof window.refreshTimelineSettings === "function") {
+          window.refreshTimelineSettings();
+        }
+        if (typeof window.refreshTimelineReview === "function") {
+          window.refreshTimelineReview();
+        }
+        repairedLabels.push(
+          i18next.t("storage.targetTimeline", {
+            defaultValue: "Timeline history",
+          }),
+        );
+      }
+
+      if (typeof window.showPoseChronoToast === "function") {
+        window.showPoseChronoToast({
+          type: "success",
+          message: i18next.t("storage.repairDone", {
+            defaultValue: "Storage repaired: {{targets}}",
+            targets: repairedLabels.join(", "),
+          }),
+          duration: 2800,
+        });
+      }
+    } catch (e) {
+      console.error("[Storage] repair error:", e);
+      showPoseChronoErrorMessage(
+        i18next.t("storage.repairError", {
+          defaultValue: "Storage repair failed.",
+        }),
+      );
+    }
+  }
+
+  if (globalSettingsRepairStorageBtn) {
+    globalSettingsRepairStorageBtn.addEventListener("click", async () => {
+      await handleRepairStorageClick();
+      updateGlobalSettingsModalState();
     });
   }
 
@@ -3157,6 +5839,22 @@ function setupEventListeners() {
     }
   });
 
+  // === RACCOURCI PARAMÈTRES GLOBAUX (Ctrl+K / Cmd+K) ===
+  document.addEventListener("keydown", (e) => {
+    const isModifier = e.ctrlKey || e.metaKey;
+    const isGlobalSettingsKey =
+      isModifier && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "k";
+    if (!isGlobalSettingsKey) return;
+
+    const tag = e.target?.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || e.target?.isContentEditable) {
+      return;
+    }
+
+    e.preventDefault();
+    openGlobalSettingsModal();
+  });
+
   // === RACCOURCI TAGS (désactivé pour l'instant) ===
   /* document.addEventListener("keydown", (e) => {
     // Ouvrir la modal tags (si pas en train de taper dans un input)
@@ -3283,10 +5981,12 @@ function handleKeyboardShortcuts(e) {
   // Vérifier si un modal est ouvert
   const tagsModal = document.getElementById("tags-modal");
   const sessionPlansModal = document.getElementById("session-plans-modal");
+  const globalSettingsModal = document.getElementById("global-settings-modal");
 
   const isAnyModalOpen =
     (tagsModal && !tagsModal.classList.contains("hidden")) ||
-    (sessionPlansModal && !sessionPlansModal.classList.contains("hidden"));
+    (sessionPlansModal && !sessionPlansModal.classList.contains("hidden")) ||
+    (globalSettingsModal && !globalSettingsModal.classList.contains("hidden"));
 
   // Si un modal est ouvert et qu'on appuie sur Escape, fermer le modal
   if (isAnyModalOpen && e.key === "Escape") {
@@ -3303,6 +6003,14 @@ function handleKeyboardShortcuts(e) {
 
     if (sessionPlansModal && !sessionPlansModal.classList.contains("hidden")) {
       sessionPlansModal.classList.add("hidden");
+      return;
+    }
+
+    if (
+      globalSettingsModal &&
+      !globalSettingsModal.classList.contains("hidden")
+    ) {
+      closeGlobalSettingsModal();
       return;
     }
 
@@ -3543,17 +6251,12 @@ function handleSettingsScreenKeyboardShortcuts(e) {
   if (!settingsScreen || settingsScreen.classList.contains("hidden")) return;
 
   // Espace simple uniquement (sans modificateurs)
-  const isSpace =
-    e.key === " " || e.key === "Spacebar" || e.code === "Space";
+  const isSpace = e.key === " " || e.key === "Spacebar" || e.code === "Space";
   if (!isSpace || e.shiftKey || e.ctrlKey || e.altKey || e.metaKey) return;
 
   // Ne pas interférer avec la saisie
   const tag = e.target?.tagName;
-  if (
-    tag === "INPUT" ||
-    tag === "TEXTAREA" ||
-    e.target?.isContentEditable
-  ) {
+  if (tag === "INPUT" || tag === "TEXTAREA" || e.target?.isContentEditable) {
     return;
   }
 
@@ -3620,6 +6323,11 @@ function toggleProgressiveBlur() {
 // CHARGEMENT DES IMAGES (FIXÉ POUR DOSSIER)
 async function loadImages() {
   try {
+    const folderInfoEl = folderInfo || document.getElementById("folder-info");
+    if (!folderInfo && folderInfoEl) folderInfo = folderInfoEl;
+    const startBtnEl = startBtn || document.getElementById("start-btn");
+    if (!startBtn && startBtnEl) startBtn = startBtnEl;
+
     let items = [];
     let sourceMessage = i18next.t("settings.imagesAnalyzed");
 
@@ -3662,8 +6370,12 @@ async function loadImages() {
     }
 
     if (state.images.length === 0) {
-      folderInfo.innerHTML = `<span class="warning-text">${i18next.t("settings.noImagesFound")}</span>`;
-      startBtn.disabled = true;
+      if (folderInfoEl) {
+        folderInfoEl.innerHTML = `<span class="warning-text">${i18next.t("settings.noImagesFound")}</span>`;
+      }
+      if (startBtnEl) {
+        startBtnEl.disabled = true;
+      }
     } else {
       // Compter séparément images et vidéos
       const imageCount = state.images.filter((item) =>
@@ -3692,16 +6404,16 @@ async function loadImages() {
         countMessage += `${videoCount} ${videoWord}`;
       }
 
-      if (folderInfo) {
-        folderInfo.innerHTML = `
+      if (folderInfoEl) {
+        folderInfoEl.innerHTML = `
       <div style="display: flex; align-items: baseline; justify-content: left; gap: 8px;">
         <span class="source-message-text">${sourceMessage}:</span>
         <span class="image-count-text">${countMessage}</span>
       </div>
     `;
       }
-      if (startBtn) {
-        startBtn.disabled = false;
+      if (startBtnEl) {
+        startBtnEl.disabled = false;
       }
 
       // Mettre à jour les sliders du mode mémoire avec le nombre d'images
@@ -3810,8 +6522,9 @@ async function loadImages() {
     }
   } catch (e) {
     console.error("Erreur chargement:", e);
-    if (folderInfo) {
-      folderInfo.textContent = i18next.t("notifications.readError");
+    const folderInfoEl = folderInfo || document.getElementById("folder-info");
+    if (folderInfoEl) {
+      folderInfoEl.textContent = i18next.t("notifications.readError");
     }
   }
 }
@@ -4061,7 +6774,10 @@ function stopTimer() {
 function ensureSeenMetaForImage(image) {
   if (!image || image.id === undefined || image.id === null) return;
   const key = String(image.id);
-  if (!state.imagesSeenMetaById || typeof state.imagesSeenMetaById !== "object") {
+  if (
+    !state.imagesSeenMetaById ||
+    typeof state.imagesSeenMetaById !== "object"
+  ) {
     state.imagesSeenMetaById = {};
   }
   if (!state.imagesSeenMetaById[key]) {
@@ -4115,7 +6831,10 @@ function isReviewImageAnnotated(image) {
 
   const imageSrc = `file:///${image.filePath}`;
   try {
-    if (typeof drawingStateCache !== "undefined" && drawingStateCache?.has?.(imageSrc)) {
+    if (
+      typeof drawingStateCache !== "undefined" &&
+      drawingStateCache?.has?.(imageSrc)
+    ) {
       return true;
     }
   } catch (_) {}
@@ -4131,26 +6850,12 @@ function isReviewImageAnnotated(image) {
   return false;
 }
 
-const REVIEW_DURATIONS_VISIBLE_STORAGE_KEY =
-  "posechrono_review_durations_visible";
-
 function loadReviewDurationsVisibility() {
-  try {
-    const raw = localStorage.getItem(REVIEW_DURATIONS_VISIBLE_STORAGE_KEY);
-    if (raw === null) return true;
-    return raw !== "0";
-  } catch (_) {
-    return true;
-  }
+  return UIPreferences.get("reviewDurationsVisible", true) !== false;
 }
 
 function saveReviewDurationsVisibility(isVisible) {
-  try {
-    localStorage.setItem(
-      REVIEW_DURATIONS_VISIBLE_STORAGE_KEY,
-      isVisible ? "1" : "0",
-    );
-  } catch (_) {}
+  UIPreferences.set("reviewDurationsVisible", !!isVisible);
 }
 
 function ensureReviewDurationsVisibilityState() {
@@ -5117,7 +7822,10 @@ function updateDisplay(shouldAnimateFlip = false) {
       state.sessionMode === "memory"
         ? Math.max(
             1,
-            Math.min(parseInt(state.memoryPosesCount) || 1, state.images.length),
+            Math.min(
+              parseInt(state.memoryPosesCount) || 1,
+              state.images.length,
+            ),
           )
         : state.images.length;
     imageCounter.textContent = `${state.currentIndex + 1} / ${displayTotal}`;
@@ -6375,7 +9083,7 @@ function showFlipAnimationMenu(x, y) {
   const checkbox = document.createElement("input");
   checkbox.type = "checkbox";
   checkbox.checked = CONFIG.enableFlipAnimation;
-  checkbox.className = "context-menu-checkbox";
+  checkbox.className = "context-menu-checkbox checkbox-simple";
 
   const label = document.createElement("span");
   label.textContent = i18next.t("filters.flipAnimation");
@@ -6417,15 +9125,15 @@ function showSettingsContextMenu(x, y) {
       text: isGridEnabled
         ? t("controls.hideGrid", "Masquer la grille de fond")
         : t("controls.showGrid", "Afficher la grille de fond"),
-      icon: `<svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="currentColor"><path d="M176-120q-19-4-35.5-20.5T120-176l664-664q21 5 36 20.5t21 35.5L176-120Zm-56-252v-112l356-356h112L120-372Zm0-308v-80q0-33 23.5-56.5T200-840h80L120-680Zm560 560 160-160v80q0 33-23.5 56.5T760-120h-80Zm-308 0 468-468v112L484-120H372Z"/></svg>`,
+      icon: ICONS.GRID_TOGGLE,
       active: isGridEnabled,
       onClick: () => {
-        document.body.classList.toggle("grid-enabled");
+        setBackgroundGridEnabled(!isGridEnabled, true);
       },
     },
     {
       text: t("controls.changeTheme", "Changer de thème"),
-      icon: `<svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#e3e3e3"><path d="M346-140 100-386q-10-10-15-22t-5-25q0-13 5-25t15-22l230-229-106-106 62-65 400 400q10 10 14.5 22t4.5 25q0 13-4.5 25T686-386L440-140q-10 10-22 15t-25 5q-13 0-25-5t-22-15Zm47-506L179-432h428L393-646Zm399 526q-36 0-61-25.5T706-208q0-27 13.5-51t30.5-47l42-54 44 54q16 23 30 47t14 51q0 37-26 62.5T792-120Z"/></svg>`,
+      icon: ICONS.THEME,
       shortcut: CONFIG.HOTKEYS.THEME,
       onClick: () => {
         // Cycle vers le thème suivant
@@ -6449,8 +9157,15 @@ function showSettingsContextMenu(x, y) {
       label: true,
     },
     {
+      text: t("settings.global.title", "Global settings"),
+      icon: ICONS.SETTINGS,
+      onClick: () => {
+        openGlobalSettingsModal();
+      },
+    },
+    {
       text: t("hotkeys.configure", "Configurer les raccourcis clavier"),
-      icon: `<svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="currentColor"><path d="M120-160q-33 0-56.5-23.5T40-240v-480q0-33 23.5-56.5T120-800h720q33 0 56.5 23.5T920-720v480q0 33-23.5 56.5T840-160H120Zm0-80h720v-480H120v480Zm200-40h320v-80H320v80ZM200-420h80v-80h-80v80Zm160 0h80v-80h-80v80Zm160 0h80v-80h-80v80Zm160 0h80v-80h-80v80ZM200-560h80v-80h-80v80Zm160 0h80v-80h-80v80Zm160 0h80v-80h-80v80Zm160 0h80v-80h-80v80ZM120-240v-480 480Z"/></svg>`,
+      icon: ICONS.KEYBOARD,
       onClick: () => {
         showHotkeysModal();
       },
@@ -6510,22 +9225,45 @@ function formatHotkeyDisplay(hotkeyName, value) {
  */
 const HOTKEY_CATEGORIES = {
   general: [
-    "FLIP_H", "GRAYSCALE", "BLUR", "MUTE", "GRID", "GRID_MODAL",
-    "SIDEBAR", "INFO", "SILHOUETTE", "SILHOUETTE_MODAL", "THEME", "ANNOTATE", "TAGS"
+    "FLIP_H",
+    "GRAYSCALE",
+    "BLUR",
+    "MUTE",
+    "GRID",
+    "GRID_MODAL",
+    "SIDEBAR",
+    "INFO",
+    "SILHOUETTE",
+    "SILHOUETTE_MODAL",
+    "THEME",
+    "ANNOTATE",
+    "TAGS",
   ],
   drawing: [
-    "DRAWING_EXPORT", "DRAWING_LIGHTBOX",
+    "DRAWING_EXPORT",
+    "DRAWING_LIGHTBOX",
     "DRAWING_ROTATE_SHAPE",
-    "DRAWING_SIZE_DECREASE", "DRAWING_SIZE_INCREASE",
-    "DRAWING_TOOL_PENCIL", "DRAWING_TOOL_ERASER", "DRAWING_TOOL_RECTANGLE",
-    "DRAWING_TOOL_CIRCLE", "DRAWING_TOOL_LINE", "DRAWING_TOOL_ARROW",
-    "DRAWING_TOOL_MEASURE", "DRAWING_TOOL_CALIBRATE", "DRAWING_TOOL_LASER",
-    "DRAWING_TOOL_PROTRACTOR"
+    "DRAWING_SIZE_DECREASE",
+    "DRAWING_SIZE_INCREASE",
+    "DRAWING_TOOL_PENCIL",
+    "DRAWING_TOOL_ERASER",
+    "DRAWING_TOOL_RECTANGLE",
+    "DRAWING_TOOL_CIRCLE",
+    "DRAWING_TOOL_LINE",
+    "DRAWING_TOOL_ARROW",
+    "DRAWING_TOOL_MEASURE",
+    "DRAWING_TOOL_CALIBRATE",
+    "DRAWING_TOOL_LASER",
+    "DRAWING_TOOL_PROTRACTOR",
   ],
   video: [
-    "VIDEO_SLOWER", "VIDEO_FASTER", "VIDEO_PREV_FRAME",
-    "VIDEO_NEXT_FRAME", "VIDEO_LOOP", "VIDEO_CONFIG"
-  ]
+    "VIDEO_SLOWER",
+    "VIDEO_FASTER",
+    "VIDEO_PREV_FRAME",
+    "VIDEO_NEXT_FRAME",
+    "VIDEO_LOOP",
+    "VIDEO_CONFIG",
+  ],
 };
 
 const NON_CUSTOMIZABLE_HOTKEYS = new Set(["DRAWING_CLOSE"]);
@@ -6590,7 +9328,8 @@ function getModalFocusRoot(modal) {
 
 let modalKeyboardSupportInitialized = false;
 function initGlobalModalKeyboardSupport() {
-  if (modalKeyboardSupportInitialized || typeof document === "undefined") return;
+  if (modalKeyboardSupportInitialized || typeof document === "undefined")
+    return;
   modalKeyboardSupportInitialized = true;
 
   document.addEventListener(
@@ -6661,7 +9400,11 @@ function initGlobalModalKeyboardSupport() {
         const primaryBtn = modal.querySelector(
           '[data-modal-primary="true"], .hotkeys-warning-btn-confirm, .ok, #save-plan-btn, #create-tag-btn',
         );
-        if (primaryBtn && !primaryBtn.disabled && typeof primaryBtn.click === "function") {
+        if (
+          primaryBtn &&
+          !primaryBtn.disabled &&
+          typeof primaryBtn.click === "function"
+        ) {
           e.preventDefault();
           e.stopPropagation();
           primaryBtn.click();
@@ -6730,6 +9473,18 @@ function showPoseChronoToast(options = {}) {
     toast.classList.remove("visible");
     setTimeout(() => toast.remove(), 180);
   }, duration);
+}
+
+function showPoseChronoErrorMessage(message, duration = 2500) {
+  if (typeof window.showPoseChronoToast === "function") {
+    window.showPoseChronoToast({
+      type: "error",
+      message: String(message || ""),
+      duration,
+    });
+    return;
+  }
+  console.error(String(message || ""));
 }
 
 /**
@@ -6866,7 +9621,7 @@ function showPoseChronoConfirmDialog(options = {}) {
 
         checkboxEl = document.createElement("input");
         checkboxEl.type = "checkbox";
-        checkboxEl.className = "hotkeys-warning-checkbox-input";
+        checkboxEl.className = "hotkeys-warning-checkbox-input checkbox-simple";
         checkboxEl.checked = !!checkboxChecked;
 
         const checkboxText = document.createElement("span");
@@ -6882,12 +9637,14 @@ function showPoseChronoConfirmDialog(options = {}) {
 
       const cancelBtn = document.createElement("button");
       cancelBtn.type = "button";
-      cancelBtn.className = "hotkeys-warning-btn hotkeys-warning-btn-cancel cancel";
+      cancelBtn.className =
+        "hotkeys-warning-btn hotkeys-warning-btn-cancel cancel";
       cancelBtn.textContent = cancelText;
 
       const confirmBtn = document.createElement("button");
       confirmBtn.type = "button";
-      confirmBtn.className = "hotkeys-warning-btn hotkeys-warning-btn-confirm ok";
+      confirmBtn.className =
+        "hotkeys-warning-btn hotkeys-warning-btn-confirm ok";
       confirmBtn.textContent = confirmText;
 
       action.appendChild(cancelBtn);
@@ -6917,7 +9674,10 @@ function showPoseChronoConfirmDialog(options = {}) {
         confirmBtn.removeEventListener("click", handleConfirmClick);
         warningOverlay.remove();
 
-        if (previouslyFocused && typeof previouslyFocused.focus === "function") {
+        if (
+          previouslyFocused &&
+          typeof previouslyFocused.focus === "function"
+        ) {
           previouslyFocused.focus();
         }
 
@@ -6985,17 +9745,478 @@ function showPoseChronoConfirmDialog(options = {}) {
   return resultPromise;
 }
 
+function showStorageRepairDialog(options = {}) {
+  const t = (key, fallback, vars = undefined) => {
+    if (typeof i18next !== "undefined" && typeof i18next.t === "function") {
+      return i18next.t(key, { defaultValue: fallback, ...(vars || {}) });
+    }
+    return fallback;
+  };
+
+  const openDialog = () =>
+    new Promise((resolve) => {
+      const {
+        container = document.body,
+        defaults = {
+          timeline: true,
+          plans: true,
+          hotkeys: false,
+        },
+        message = t(
+          "storage.repairMessage",
+          "Choose what to reset. This action cannot be undone.",
+        ),
+        impactItems = [],
+      } = options;
+
+      const host =
+        container && typeof container.appendChild === "function"
+          ? container
+          : document.body;
+
+      if (!host) {
+        resolve({
+          confirmed: false,
+          selections: { timeline: false, plans: false, hotkeys: false },
+        });
+        return;
+      }
+
+      const overlay = document.createElement("div");
+      overlay.className = "hotkeys-warning-overlay";
+
+      const dialog = document.createElement("div");
+      dialog.className = "hotkeys-warning-dialog storage-repair-dialog";
+      dialog.setAttribute("role", "alertdialog");
+      dialog.setAttribute("aria-modal", "true");
+      dialog.tabIndex = -1;
+
+      const dialogContainer = document.createElement("div");
+      dialogContainer.className = "dialog-container";
+
+      const iconWrapper = document.createElement("div");
+      iconWrapper.className = "image-vue dialog-icon";
+      const iconImage = document.createElement("img");
+      iconImage.src = "assets/icones/dialog-warning.png";
+      iconImage.alt = "dialog-warning";
+      iconImage.loading = "lazy";
+      iconWrapper.appendChild(iconImage);
+
+      const main = document.createElement("div");
+      main.className = "main";
+
+      const titleEl = document.createElement("div");
+      titleEl.className = "title";
+      titleEl.textContent = t("storage.repairTitle", "Repair storage");
+
+      const descriptionEl = document.createElement("div");
+      descriptionEl.className = "description";
+      descriptionEl.textContent = message;
+
+      if (Array.isArray(impactItems) && impactItems.length > 0) {
+        const impactList = document.createElement("ul");
+        impactList.className = "storage-repair-impact";
+        impactItems.forEach((item) => {
+          if (!item) return;
+          const li = document.createElement("li");
+          li.textContent = String(item);
+          impactList.appendChild(li);
+        });
+        if (impactList.children.length > 0) {
+          descriptionEl.appendChild(document.createElement("br"));
+          descriptionEl.appendChild(impactList);
+        }
+      }
+
+      const optionsWrap = document.createElement("div");
+      optionsWrap.className = "storage-repair-options";
+
+      const mkCheckbox = (id, labelText, checked) => {
+        const label = document.createElement("label");
+        label.className = "hotkeys-warning-checkbox";
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.className = "hotkeys-warning-checkbox-input checkbox-simple";
+        input.id = id;
+        input.checked = !!checked;
+        const span = document.createElement("span");
+        span.textContent = labelText;
+        label.appendChild(input);
+        label.appendChild(span);
+        optionsWrap.appendChild(label);
+        return input;
+      };
+
+      const cbTimeline = mkCheckbox(
+        "repair-storage-timeline",
+        t("storage.targetTimeline", "Timeline history"),
+        defaults.timeline,
+      );
+      const cbPlans = mkCheckbox(
+        "repair-storage-plans",
+        t("storage.targetPlans", "Session plans"),
+        defaults.plans,
+      );
+      const cbHotkeys = mkCheckbox(
+        "repair-storage-hotkeys",
+        t("storage.targetHotkeys", "Keyboard shortcuts"),
+        defaults.hotkeys,
+      );
+
+      const action = document.createElement("div");
+      action.className = "action";
+
+      const cancelBtn = document.createElement("button");
+      cancelBtn.type = "button";
+      cancelBtn.className =
+        "hotkeys-warning-btn hotkeys-warning-btn-cancel cancel";
+      cancelBtn.textContent = t("notifications.deleteCancel", "Cancel");
+
+      const confirmBtn = document.createElement("button");
+      confirmBtn.type = "button";
+      confirmBtn.className =
+        "hotkeys-warning-btn hotkeys-warning-btn-confirm ok";
+      confirmBtn.textContent = t("storage.repairConfirm", "Repair");
+      confirmBtn.setAttribute("data-modal-primary", "true");
+
+      action.appendChild(cancelBtn);
+      action.appendChild(confirmBtn);
+
+      main.appendChild(titleEl);
+      main.appendChild(descriptionEl);
+      main.appendChild(optionsWrap);
+      main.appendChild(action);
+
+      dialogContainer.appendChild(iconWrapper);
+      dialogContainer.appendChild(main);
+      dialog.appendChild(dialogContainer);
+      overlay.appendChild(dialog);
+      host.appendChild(overlay);
+
+      const previouslyFocused = document.activeElement;
+      const focusables = () =>
+        Array.from(
+          dialog.querySelectorAll(
+            'button, input, [href], [tabindex]:not([tabindex="-1"])',
+          ),
+        ).filter((el) => !el.disabled);
+
+      const close = (confirmed) => {
+        const selections = {
+          timeline: !!cbTimeline.checked,
+          plans: !!cbPlans.checked,
+          hotkeys: !!cbHotkeys.checked,
+        };
+        overlay.removeEventListener("click", onOverlayClick);
+        dialog.removeEventListener("keydown", onKeyDown);
+        cancelBtn.removeEventListener("click", onCancel);
+        confirmBtn.removeEventListener("click", onConfirm);
+        overlay.remove();
+        if (
+          previouslyFocused &&
+          typeof previouslyFocused.focus === "function"
+        ) {
+          previouslyFocused.focus();
+        }
+        resolve({ confirmed, selections });
+      };
+
+      const onOverlayClick = (e) => {
+        if (e.target === overlay) close(false);
+      };
+      const onCancel = () => close(false);
+      const onConfirm = () => close(true);
+      const onKeyDown = (e) => {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          e.stopPropagation();
+          close(false);
+          return;
+        }
+        if (e.key === "Tab") {
+          const list = focusables();
+          if (list.length === 0) return;
+          const first = list[0];
+          const last = list[list.length - 1];
+          const active = document.activeElement;
+          if (e.shiftKey && active === first) {
+            e.preventDefault();
+            last.focus();
+          } else if (!e.shiftKey && active === last) {
+            e.preventDefault();
+            first.focus();
+          }
+        }
+      };
+
+      overlay.addEventListener("click", onOverlayClick);
+      dialog.addEventListener("keydown", onKeyDown);
+      cancelBtn.addEventListener("click", onCancel);
+      confirmBtn.addEventListener("click", onConfirm);
+
+      cbTimeline.focus();
+    });
+
+  const resultPromise = poseChronoConfirmDialogQueue.then(() => openDialog());
+  poseChronoConfirmDialogQueue = resultPromise
+    .then(() => undefined)
+    .catch(() => undefined);
+  return resultPromise;
+}
+
+function showPreferencesPackageDialog(options = {}) {
+  const t = (key, fallback, vars = undefined) => {
+    if (typeof i18next !== "undefined" && typeof i18next.t === "function") {
+      return i18next.t(key, { defaultValue: fallback, ...(vars || {}) });
+    }
+    return fallback;
+  };
+
+  const mode = options.mode === "import" ? "import" : "export";
+  const available = {
+    ui: options.available?.ui !== false,
+    hotkeys: options.available?.hotkeys !== false,
+    plans: options.available?.plans !== false,
+    timeline: options.available?.timeline !== false,
+  };
+  const defaultAll = mode === "export";
+  const defaults = {
+    ui: options.defaults?.ui ?? defaultAll,
+    hotkeys: options.defaults?.hotkeys ?? defaultAll,
+    plans: options.defaults?.plans ?? defaultAll,
+    timeline: options.defaults?.timeline ?? defaultAll,
+  };
+
+  const openDialog = () =>
+    new Promise((resolve) => {
+      const host =
+        options.container && typeof options.container.appendChild === "function"
+          ? options.container
+          : document.body;
+
+      if (!host) {
+        resolve({
+          confirmed: false,
+          selections: {
+            ui: false,
+            hotkeys: false,
+            plans: false,
+            timeline: false,
+          },
+        });
+        return;
+      }
+
+      const overlay = document.createElement("div");
+      overlay.className = "hotkeys-warning-overlay";
+
+      const dialog = document.createElement("div");
+      dialog.className = "hotkeys-warning-dialog storage-repair-dialog";
+      dialog.setAttribute("role", "alertdialog");
+      dialog.setAttribute("aria-modal", "true");
+      dialog.tabIndex = -1;
+
+      const dialogContainer = document.createElement("div");
+      dialogContainer.className = "dialog-container";
+
+      const iconWrapper = document.createElement("div");
+      iconWrapper.className = "image-vue dialog-icon";
+      const iconImage = document.createElement("img");
+      iconImage.src = "assets/icones/dialog-warning.png";
+      iconImage.alt = "dialog-warning";
+      iconImage.loading = "lazy";
+      iconWrapper.appendChild(iconImage);
+
+      const main = document.createElement("div");
+      main.className = "main";
+
+      const titleEl = document.createElement("div");
+      titleEl.className = "title";
+      titleEl.textContent =
+        mode === "import"
+          ? t("settings.global.importPreferences", "Import preferences")
+          : t("settings.global.exportPreferences", "Export preferences");
+
+      const descriptionEl = document.createElement("div");
+      descriptionEl.className = "description";
+      descriptionEl.textContent =
+        mode === "import"
+          ? t(
+              "settings.global.preferencesPackageImportMessage",
+              "Choose what to import from this backup file.",
+            )
+          : t(
+              "settings.global.preferencesPackageExportMessage",
+              "Choose what to include in the backup file.",
+            );
+
+      const optionsWrap = document.createElement("div");
+      optionsWrap.className = "storage-repair-options";
+
+      const mkCheckbox = (id, labelText, checked) => {
+        const label = document.createElement("label");
+        label.className = "hotkeys-warning-checkbox";
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.className = "hotkeys-warning-checkbox-input checkbox-simple";
+        input.id = id;
+        input.checked = !!checked;
+        const span = document.createElement("span");
+        span.textContent = labelText;
+        label.appendChild(input);
+        label.appendChild(span);
+        optionsWrap.appendChild(label);
+        return input;
+      };
+
+      const cbUi = available.ui
+        ? mkCheckbox(
+            `prefs-package-ui-${mode}`,
+            t("settings.global.packageSectionUi", "UI preferences"),
+            defaults.ui,
+          )
+        : null;
+      const cbHotkeys = available.hotkeys
+        ? mkCheckbox(
+            `prefs-package-hotkeys-${mode}`,
+            t("settings.global.packageSectionHotkeys", "Keyboard shortcuts"),
+            defaults.hotkeys,
+          )
+        : null;
+      const cbPlans = available.plans
+        ? mkCheckbox(
+            `prefs-package-plans-${mode}`,
+            t("settings.global.packageSectionPlans", "Session plans"),
+            defaults.plans,
+          )
+        : null;
+      const cbTimeline = available.timeline
+        ? mkCheckbox(
+            `prefs-package-timeline-${mode}`,
+            t("settings.global.packageSectionTimeline", "Timeline history"),
+            defaults.timeline,
+          )
+        : null;
+
+      const action = document.createElement("div");
+      action.className = "action";
+
+      const cancelBtn = document.createElement("button");
+      cancelBtn.type = "button";
+      cancelBtn.className =
+        "hotkeys-warning-btn hotkeys-warning-btn-cancel cancel";
+      cancelBtn.textContent = t("notifications.deleteCancel", "Cancel");
+
+      const confirmBtn = document.createElement("button");
+      confirmBtn.type = "button";
+      confirmBtn.className =
+        "hotkeys-warning-btn hotkeys-warning-btn-confirm ok";
+      confirmBtn.textContent =
+        mode === "import"
+          ? t("settings.global.importPreferences", "Import preferences")
+          : t("settings.global.exportPreferences", "Export preferences");
+      confirmBtn.setAttribute("data-modal-primary", "true");
+
+      action.appendChild(cancelBtn);
+      action.appendChild(confirmBtn);
+
+      main.appendChild(titleEl);
+      main.appendChild(descriptionEl);
+      main.appendChild(optionsWrap);
+      main.appendChild(action);
+
+      dialogContainer.appendChild(iconWrapper);
+      dialogContainer.appendChild(main);
+      dialog.appendChild(dialogContainer);
+      overlay.appendChild(dialog);
+      host.appendChild(overlay);
+
+      const previouslyFocused = document.activeElement;
+      const focusables = () =>
+        Array.from(
+          dialog.querySelectorAll(
+            'button, input, [href], [tabindex]:not([tabindex="-1"])',
+          ),
+        ).filter((el) => !el.disabled);
+
+      const close = (confirmed) => {
+        const selections = {
+          ui: cbUi ? !!cbUi.checked : false,
+          hotkeys: cbHotkeys ? !!cbHotkeys.checked : false,
+          plans: cbPlans ? !!cbPlans.checked : false,
+          timeline: cbTimeline ? !!cbTimeline.checked : false,
+        };
+        overlay.removeEventListener("click", onOverlayClick);
+        dialog.removeEventListener("keydown", onKeyDown);
+        cancelBtn.removeEventListener("click", onCancel);
+        confirmBtn.removeEventListener("click", onConfirm);
+        overlay.remove();
+        if (
+          previouslyFocused &&
+          typeof previouslyFocused.focus === "function"
+        ) {
+          previouslyFocused.focus();
+        }
+        resolve({ confirmed, selections });
+      };
+
+      const onOverlayClick = (e) => {
+        if (e.target === overlay) close(false);
+      };
+      const onCancel = () => close(false);
+      const onConfirm = () => close(true);
+      const onKeyDown = (e) => {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          e.stopPropagation();
+          close(false);
+          return;
+        }
+        if (e.key === "Tab") {
+          const list = focusables();
+          if (list.length === 0) return;
+          const first = list[0];
+          const last = list[list.length - 1];
+          const active = document.activeElement;
+          if (e.shiftKey && active === first) {
+            e.preventDefault();
+            last.focus();
+          } else if (!e.shiftKey && active === last) {
+            e.preventDefault();
+            first.focus();
+          }
+        }
+      };
+
+      overlay.addEventListener("click", onOverlayClick);
+      dialog.addEventListener("keydown", onKeyDown);
+      cancelBtn.addEventListener("click", onCancel);
+      confirmBtn.addEventListener("click", onConfirm);
+
+      const firstInput =
+        cbUi || cbHotkeys || cbPlans || cbTimeline || confirmBtn;
+      if (firstInput && typeof firstInput.focus === "function") {
+        firstInput.focus();
+      }
+    });
+
+  const resultPromise = poseChronoConfirmDialogQueue.then(() => openDialog());
+  poseChronoConfirmDialogQueue = resultPromise
+    .then(() => undefined)
+    .catch(() => undefined);
+  return resultPromise;
+}
+
 if (typeof window !== "undefined") {
   window.showPoseChronoConfirmDialog = showPoseChronoConfirmDialog;
+  window.showStorageRepairDialog = showStorageRepairDialog;
+  window.showPreferencesPackageDialog = showPreferencesPackageDialog;
   window.showPoseChronoToast = showPoseChronoToast;
   window.schedulePoseChronoUndoAction = schedulePoseChronoUndoAction;
 }
 
 async function confirmImageDeletionDialog(options = {}) {
-  const {
-    image = null,
-    container = document.body,
-  } = options;
+  const { image = null, container = document.body } = options;
 
   const title = i18next.t("drawing.deleteImage", {
     defaultValue: "Delete image",
@@ -7087,7 +10308,7 @@ function queueImageDeletionWithUndo(options = {}) {
  */
 function showHotkeysModal() {
   closeAllContextMenus();
-  
+
   // Empêcher l'ouverture si un autre modal est ouvert
   if (document.getElementById("hotkeys-modal")) return;
 
@@ -7108,22 +10329,25 @@ function showHotkeysModal() {
   const generateCategorySection = (categoryKey, hotkeyKeys) => {
     const categoryTitle = t(`hotkeys.categories.${categoryKey}`, categoryKey);
 
-    const items = hotkeyKeys.map(key => {
-      const currentValue = CONFIG.HOTKEYS[key] ?? "";
-      const description = t(`hotkeys.descriptions.${key}`, key);
-      const defaultValue = DEFAULT_HOTKEYS[key] ?? "";
-      const isDefault = currentValue === defaultValue;
-      const displayValue = currentValue ? formatHotkeyDisplay(key, currentValue) : t('hotkeys.none', '—');
-      const isEmpty = !currentValue;
+    const items = hotkeyKeys
+      .map((key) => {
+        const currentValue = CONFIG.HOTKEYS[key] ?? "";
+        const description = t(`hotkeys.descriptions.${key}`, key);
+        const defaultValue = DEFAULT_HOTKEYS[key] ?? "";
+        const isDefault = currentValue === defaultValue;
+        const displayValue = currentValue
+          ? formatHotkeyDisplay(key, currentValue)
+          : t("hotkeys.none", "—");
+        const isEmpty = !currentValue;
 
-      return `
-        <div class="hotkey-item ${isDefault ? '' : 'hotkey-modified'} ${isEmpty ? 'hotkey-empty' : ''}" data-key="${key}">
+        return `
+        <div class="hotkey-item ${isDefault ? "" : "hotkey-modified"} ${isEmpty ? "hotkey-empty" : ""}" data-key="${key}">
           <span class="hotkey-description">${description}</span>
           <div class="hotkey-actions">
-            <button type="button" class="hotkey-value-btn ${isEmpty ? 'hotkey-unassigned' : ''}" data-key="${key}" aria-label="${t('hotkeys.pressKey', 'Press a key')} - ${description}">
+            <button type="button" class="hotkey-value-btn ${isEmpty ? "hotkey-unassigned" : ""}" data-key="${key}" aria-label="${t("hotkeys.pressKey", "Press a key")} - ${description}">
               <kbd>${displayValue}</kbd>
             </button>
-            <button type="button" class="hotkey-reset-btn ${isDefault ? 'disabled' : ''}" data-key="${key}" data-default="${defaultValue}" ${isDefault ? 'disabled' : ''} aria-label="${t('hotkeys.resetIndividual', 'Reset to default')}" title="${t('hotkeys.resetIndividual', 'Reset to default')}">
+            <button type="button" class="hotkey-reset-btn ${isDefault ? "disabled" : ""}" data-key="${key}" data-default="${defaultValue}" ${isDefault ? "disabled" : ""} aria-label="${t("hotkeys.resetIndividual", "Reset to default")}" title="${t("hotkeys.resetIndividual", "Reset to default")}">
               <svg xmlns="http://www.w3.org/2000/svg" height="16px" viewBox="0 -960 960 960" width="16px" fill="currentColor">
                 <path d="M480-160q-134 0-227-93t-93-227q0-134 93-227t227-93q69 0 132 28.5T720-690v-110h80v280H520v-80h168q-32-56-88.5-88T480-720q-100 0-170 70t-70 170q0 100 70 170t170 70q77 0 139-44t87-116h84q-28 106-114 173t-196 67Z"/>
               </svg>
@@ -7131,7 +10355,8 @@ function showHotkeysModal() {
           </div>
         </div>
       `;
-    }).join("");
+      })
+      .join("");
 
     return `
       <div class="hotkey-category" data-category="${categoryKey}">
@@ -7153,12 +10378,10 @@ function showHotkeysModal() {
     <div class="modal-container" role="dialog" aria-modal="true" aria-label="${t("hotkeys.title", "Keyboard Shortcuts")}" tabindex="-1" style="max-width: 600px; max-height: 80vh;">
       <div class="modal-header">
         <h3 class="modal-title">
-          <svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="currentColor">
-            <path d="M120-160q-33 0-56.5-23.5T40-240v-480q0-33 23.5-56.5T120-800h720q33 0 56.5 23.5T920-720v480q0 33-23.5 56.5T840-160H120Zm0-80h720v-480H120v480Zm200-40h320v-80H320v80ZM200-420h80v-80h-80v80Zm160 0h80v-80h-80v80Zm160 0h80v-80h-80v80Zm160 0h80v-80h-80v80ZM200-560h80v-80h-80v80Zm160 0h80v-80h-80v80Zm160 0h80v-80h-80v80Zm160 0h80v-80h-80v80ZM120-240v-480 480Z"/>
-          </svg>
+          ${ICONS.KEYBOARD}
           ${t("hotkeys.title", "Keyboard Shortcuts")}
         </h3>
-        <button type="button" class="modal-close-btn" id="close-hotkeys-modal" data-modal-close="true" aria-label="${t('notifications.deleteCancel', 'Close')}">
+        <button type="button" class="modal-close-btn" id="close-hotkeys-modal" data-modal-close="true" aria-label="${t("notifications.deleteCancel", "Close")}">
           <svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="currentColor">
             <path d="m256-200-56-56 224-224-224-224 56-56 224 224 224-224 56 56-224 224 224 224-56 56-224-224-224 224Z"/>
           </svg>
@@ -7167,10 +10390,10 @@ function showHotkeysModal() {
           <svg xmlns="http://www.w3.org/2000/svg" height="18px" viewBox="0 -960 960 960" width="18px" fill="currentColor">
             <path d="M784-120 532-372q-30 24-69 38t-83 14q-109 0-184.5-75.5T120-580q0-109 75.5-184.5T380-840q109 0 184.5 75.5T640-580q0 44-14 83t-38 69l252 252-56 56ZM380-400q75 0 127.5-52.5T560-580q0-75-52.5-127.5T380-760q-75 0-127.5 52.5T200-580q0 75 52.5 127.5T380-400Z"/>
           </svg>
-          <input type="text" id="hotkeys-search-input" placeholder="${t('hotkeys.search', 'Search shortcuts...')}" autocomplete="off" />
+          <input type="text" id="hotkeys-search-input" placeholder="${t("hotkeys.search", "Search shortcuts...")}" autocomplete="off" />
           <div class="hotkeys-search-toggle">
-            <button type="button" class="search-toggle-btn active" data-mode="name">${t('hotkeys.searchByName', 'Name')}</button>
-            <button type="button" class="search-toggle-btn" data-mode="key">${t('hotkeys.searchByKey', 'Key')}</button>
+            <button type="button" class="search-toggle-btn active" data-mode="name">${t("hotkeys.searchByName", "Name")}</button>
+            <button type="button" class="search-toggle-btn" data-mode="key">${t("hotkeys.searchByKey", "Key")}</button>
           </div>
         </div>
       </div>
@@ -7178,7 +10401,7 @@ function showHotkeysModal() {
         <div class="hotkeys-container">
           ${categoriesContent}
         </div>
-        <p class="hotkeys-no-results hidden">${t('hotkeys.noResults', 'No results found.')}</p>
+        <p class="hotkeys-no-results hidden">${t("hotkeys.noResults", "No results found.")}</p>
       </div>
       <div class="modal-footer hotkeys-footer">
         <button type="button" class="hotkeys-footer-btn hotkeys-reset-all-btn" id="reset-hotkeys-btn">
@@ -7186,9 +10409,6 @@ function showHotkeysModal() {
             <path d="M480-160q-134 0-227-93t-93-227q0-134 93-227t227-93q69 0 132 28.5T720-690v-110h80v280H520v-80h168q-32-56-88.5-88T480-720q-100 0-170 70t-70 170q0 100 70 170t170 70q77 0 139-44t87-116h84q-28 106-114 173t-196 67Z"/>
           </svg>
           ${t("hotkeys.reset", "Reset")}
-        </button>
-        <button type="button" class="hotkeys-footer-btn" id="close-hotkeys-btn" data-modal-close="true">
-          ${t("notifications.deleteCancel", "Close")}
         </button>
       </div>
     </div>
@@ -7209,7 +10429,8 @@ function showHotkeysModal() {
       if (
         document.querySelector(".hotkey-capture-overlay") ||
         document.querySelector(".hotkeys-warning-overlay")
-      ) return;
+      )
+        return;
       e.preventDefault();
       e.stopPropagation();
       closeModal();
@@ -7217,8 +10438,12 @@ function showHotkeysModal() {
   };
   document.addEventListener("keydown", handleEscape, true);
 
-  modal.querySelector("#close-hotkeys-modal").addEventListener("click", closeModal);
-  modal.querySelector("#close-hotkeys-btn").addEventListener("click", closeModal);
+  modal
+    .querySelector("#close-hotkeys-modal")
+    .addEventListener("click", closeModal);
+  modal
+    .querySelector("#close-hotkeys-btn")
+    ?.addEventListener("click", closeModal);
 
   modal.addEventListener("click", (e) => {
     if (e.target === modal) closeModal();
@@ -7232,8 +10457,12 @@ function showHotkeysModal() {
     const isDefault = currentValue === defaultValue;
     const isEmpty = !currentValue;
 
-    item.querySelector(".hotkey-value-btn kbd").textContent = currentValue ? formatHotkeyDisplay(key, currentValue) : t('hotkeys.none', '—');
-    item.querySelector(".hotkey-value-btn").classList.toggle("hotkey-unassigned", isEmpty);
+    item.querySelector(".hotkey-value-btn kbd").textContent = currentValue
+      ? formatHotkeyDisplay(key, currentValue)
+      : t("hotkeys.none", "—");
+    item
+      .querySelector(".hotkey-value-btn")
+      .classList.toggle("hotkey-unassigned", isEmpty);
     item.classList.toggle("hotkey-modified", !isDefault);
     item.classList.toggle("hotkey-empty", isEmpty);
 
@@ -7245,38 +10474,41 @@ function showHotkeysModal() {
   };
 
   // Événement pour réinitialiser tous les raccourcis
-  modal.querySelector("#reset-hotkeys-btn").addEventListener("click", async () => {
-    const { confirmed } = await showPoseChronoConfirmDialog({
-      title: t("hotkeys.title", "Keyboard Shortcuts"),
-      message: t("hotkeys.resetAll", "Reset all shortcuts to default?"),
-      confirmText: t("hotkeys.reset", "Reset"),
-      cancelText: t("notifications.deleteCancel", "Cancel"),
-      container: modal,
-    });
-
-    if (confirmed) {
-      Object.keys(DEFAULT_HOTKEYS).forEach(key => {
-        CONFIG.HOTKEYS[key] = DEFAULT_HOTKEYS[key];
+  modal
+    .querySelector("#reset-hotkeys-btn")
+    .addEventListener("click", async () => {
+      const { confirmed } = await showPoseChronoConfirmDialog({
+        title: t("hotkeys.title", "Keyboard Shortcuts"),
+        message: t("hotkeys.resetAll", "Reset all shortcuts to default?"),
+        confirmText: t("hotkeys.reset", "Reset"),
+        cancelText: t("notifications.deleteCancel", "Cancel"),
+        container: modal,
       });
-      try {
-        localStorage.removeItem(HOTKEYS_STORAGE_KEY);
-      } catch (e) {
-        console.error("Error removing hotkeys from localStorage:", e);
-      }
-      // Rafraîchir le DOM sans recréer le modal
-      modal.querySelectorAll(".hotkey-item").forEach(refreshHotkeyItem);
 
-      // Notification Eagle
-      if (typeof eagle !== "undefined" && eagle.notification) {
-        eagle.notification.show({
-          title: t("hotkeys.title", "Keyboard Shortcuts"),
-          body: t("hotkeys.resetDone", "All shortcuts reset to default."),
-          mute: true,
-          duration: 2000,
+      if (confirmed) {
+        Object.keys(DEFAULT_HOTKEYS).forEach((key) => {
+          CONFIG.HOTKEYS[key] = DEFAULT_HOTKEYS[key];
         });
+        try {
+          await PoseChronoStorage.remove(STORAGE_KEYS.HOTKEYS_DB);
+          localStorage.removeItem(HOTKEYS_STORAGE_KEY);
+        } catch (e) {
+          console.error("Error removing hotkeys from storage:", e);
+        }
+        // Rafraîchir le DOM sans recréer le modal
+        modal.querySelectorAll(".hotkey-item").forEach(refreshHotkeyItem);
+
+        // Notification Eagle
+        if (typeof eagle !== "undefined" && eagle.notification) {
+          eagle.notification.show({
+            title: t("hotkeys.title", "Keyboard Shortcuts"),
+            body: t("hotkeys.resetDone", "All shortcuts reset to default."),
+            mute: true,
+            duration: 2000,
+          });
+        }
       }
-    }
-  });
+    });
 
   // Événements pour éditer les raccourcis (délégation d'événements)
   modal.querySelector(".hotkeys-container").addEventListener("click", (e) => {
@@ -7292,7 +10524,7 @@ function showHotkeysModal() {
       const defaultValue = resetBtn.dataset.default;
 
       CONFIG.HOTKEYS[hotkeyName] = defaultValue;
-      saveHotkeysToStorage();
+      void saveHotkeysToStorage();
 
       const item = resetBtn.closest(".hotkey-item");
       if (item) {
@@ -7309,6 +10541,9 @@ function showHotkeysModal() {
   const categoryToggles = modal.querySelectorAll(".hotkey-category-toggle");
   let searchMode = "name";
   const collapsedCategories = new Set();
+  UIPreferences.getStringArray("hotkeysCollapsedCategories").forEach((key) => {
+    collapsedCategories.add(key);
+  });
   const categoryTransitionDurationMs = 240;
   const categoryTransitionState = new WeakMap();
 
@@ -7324,7 +10559,12 @@ function showHotkeysModal() {
     categoryTransitionState.delete(listEl);
   };
 
-  const setCategoryCollapsed = (categoryEl, collapsed, persist = true, animate = true) => {
+  const setCategoryCollapsed = (
+    categoryEl,
+    collapsed,
+    persist = true,
+    animate = true,
+  ) => {
     if (!categoryEl) return;
     const key = categoryEl.dataset.category;
     const listEl = categoryEl.querySelector(".hotkey-list");
@@ -7340,6 +10580,10 @@ function showHotkeysModal() {
       } else {
         collapsedCategories.delete(key);
       }
+      UIPreferences.setStringArray(
+        "hotkeysCollapsedCategories",
+        Array.from(collapsedCategories),
+      );
     }
 
     if (isCollapsed === wantsCollapsed) {
@@ -7441,6 +10685,15 @@ function showHotkeysModal() {
     });
   });
 
+  modal.querySelectorAll(".hotkey-category").forEach((categoryEl) => {
+    setCategoryCollapsed(
+      categoryEl,
+      collapsedCategories.has(categoryEl.dataset.category),
+      false,
+      false,
+    );
+  });
+
   // Autofocus sur la recherche à l'ouverture du modal
   requestAnimationFrame(() => {
     if (searchInput && document.body.contains(searchInput)) {
@@ -7454,7 +10707,7 @@ function showHotkeysModal() {
     const items = modal.querySelectorAll(".hotkey-item");
     const categories = modal.querySelectorAll(".hotkey-category");
 
-    items.forEach(item => {
+    items.forEach((item) => {
       if (!query) {
         item.style.display = "";
         return;
@@ -7463,24 +10716,31 @@ function showHotkeysModal() {
         const kbd = item.querySelector("kbd").textContent.toLowerCase();
         item.style.display = kbd.includes(query) ? "" : "none";
       } else {
-        const desc = item.querySelector(".hotkey-description").textContent.toLowerCase();
+        const desc = item
+          .querySelector(".hotkey-description")
+          .textContent.toLowerCase();
         item.style.display = desc.includes(query) ? "" : "none";
       }
     });
 
     // Masquer les catégories vides
     let totalVisible = 0;
-    categories.forEach(cat => {
-      const visibleCount = Array.from(cat.querySelectorAll(".hotkey-item")).filter(
-        item => item.style.display !== "none"
-      ).length;
+    categories.forEach((cat) => {
+      const visibleCount = Array.from(
+        cat.querySelectorAll(".hotkey-item"),
+      ).filter((item) => item.style.display !== "none").length;
       totalVisible += visibleCount;
       cat.style.display = visibleCount > 0 ? "" : "none";
 
       if (query && visibleCount > 0) {
         setCategoryCollapsed(cat, false, false, false);
       } else if (!query) {
-        setCategoryCollapsed(cat, collapsedCategories.has(cat.dataset.category), false, false);
+        setCategoryCollapsed(
+          cat,
+          collapsedCategories.has(cat.dataset.category),
+          false,
+          false,
+        );
       }
     });
 
@@ -7491,9 +10751,9 @@ function showHotkeysModal() {
     }
   };
 
-  toggleBtns.forEach(btn => {
+  toggleBtns.forEach((btn) => {
     btn.addEventListener("click", () => {
-      toggleBtns.forEach(b => b.classList.remove("active"));
+      toggleBtns.forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
       searchMode = btn.dataset.mode;
       performSearch();
@@ -7517,12 +10777,12 @@ function showHotkeysModal() {
 }
 
 /**
- * Sauvegarde les raccourcis clavier personnalisés dans localStorage
+ * Sauvegarde les raccourcis clavier personnalisés dans IndexedDB
  */
-function saveHotkeysToStorage() {
+async function saveHotkeysToStorage() {
   try {
     const hotkeysToSave = {};
-    Object.keys(DEFAULT_HOTKEYS).forEach(key => {
+    Object.keys(DEFAULT_HOTKEYS).forEach((key) => {
       if (NON_CUSTOMIZABLE_HOTKEYS.has(key)) {
         return;
       }
@@ -7530,21 +10790,35 @@ function saveHotkeysToStorage() {
         hotkeysToSave[key] = CONFIG.HOTKEYS[key];
       }
     });
-    
-    if (Object.keys(hotkeysToSave).length > 0) {
-      localStorage.setItem(HOTKEYS_STORAGE_KEY, JSON.stringify(hotkeysToSave));
+
+    const normalized = normalizeHotkeysPayload({
+      schemaVersion: STORAGE_SCHEMA_VERSION,
+      bindings: hotkeysToSave,
+    });
+
+    if (Object.keys(normalized.bindings).length > 0) {
+      await PoseChronoStorage.setJson(
+        STORAGE_KEYS.HOTKEYS_DB,
+        normalized.payload,
+      );
+      try {
+        localStorage.removeItem(HOTKEYS_STORAGE_KEY);
+      } catch (_) {}
     } else {
-      localStorage.removeItem(HOTKEYS_STORAGE_KEY);
+      await PoseChronoStorage.remove(STORAGE_KEYS.HOTKEYS_DB);
+      try {
+        localStorage.removeItem(HOTKEYS_STORAGE_KEY);
+      } catch (_) {}
     }
   } catch (e) {
-    console.error("Error saving hotkeys to localStorage:", e);
+    console.error("Error saving hotkeys to storage:", e);
   }
 }
 
 /**
- * Charge les raccourcis clavier personnalisés depuis localStorage
+ * Charge les raccourcis clavier personnalisés (IndexedDB + migration locale)
  */
-function loadHotkeysFromStorage() {
+async function loadHotkeysFromStorage() {
   try {
     // Hotkeys internes non customisables: toujours forcés à leur valeur par défaut.
     NON_CUSTOMIZABLE_HOTKEYS.forEach((key) => {
@@ -7553,20 +10827,40 @@ function loadHotkeysFromStorage() {
       }
     });
 
-    const saved = localStorage.getItem(HOTKEYS_STORAGE_KEY);
-    if (saved) {
-      const hotkeys = JSON.parse(saved);
-      Object.keys(hotkeys).forEach(key => {
+    const stored = await PoseChronoStorage.migrateFromLocalStorage(
+      HOTKEYS_STORAGE_KEY,
+      STORAGE_KEYS.HOTKEYS_DB,
+      {},
+    );
+    const rawPayload =
+      stored && typeof stored === "object"
+        ? stored
+        : await PoseChronoStorage.getJson(STORAGE_KEYS.HOTKEYS_DB, {
+            schemaVersion: STORAGE_SCHEMA_VERSION,
+            bindings: {},
+          });
+
+    const normalized = normalizeHotkeysPayload(rawPayload);
+    if (normalized.repaired) {
+      console.warn("[Storage] Hotkeys payload repaired.");
+      await PoseChronoStorage.setJson(
+        STORAGE_KEYS.HOTKEYS_DB,
+        normalized.payload,
+      );
+    }
+
+    if (normalized.bindings && typeof normalized.bindings === "object") {
+      Object.keys(normalized.bindings).forEach((key) => {
         if (NON_CUSTOMIZABLE_HOTKEYS.has(key)) {
           return;
         }
         if (CONFIG.HOTKEYS.hasOwnProperty(key)) {
-          CONFIG.HOTKEYS[key] = hotkeys[key];
+          CONFIG.HOTKEYS[key] = normalized.bindings[key];
         }
       });
     }
   } catch (e) {
-    console.error("Error loading hotkeys from localStorage:", e);
+    console.error("Error loading hotkeys from storage:", e);
   }
 }
 
@@ -7622,7 +10916,9 @@ function editHotkey(hotkeyName, buttonElement) {
   // Obtenir la description de la fonction et la valeur actuelle
   const functionName = t(`hotkeys.descriptions.${hotkeyName}`, hotkeyName);
   const currentValue = CONFIG.HOTKEYS[hotkeyName] ?? "";
-  const currentDisplay = currentValue ? formatHotkeyDisplay(hotkeyName, currentValue) : t('hotkeys.none', '—');
+  const currentDisplay = currentValue
+    ? formatHotkeyDisplay(hotkeyName, currentValue)
+    : t("hotkeys.none", "—");
 
   // Créer un overlay temporaire pour capturer la touche
   const captureOverlay = document.createElement("div");
@@ -7662,8 +10958,14 @@ function editHotkey(hotkeyName, buttonElement) {
     if (newValue) {
       const conflictKey = findHotkeyConflict(hotkeyName, newValue);
       if (conflictKey) {
-        const conflictName = t(`hotkeys.descriptions.${conflictKey}`, conflictKey);
-        conflictMsg.textContent = t("hotkeys.conflict", `Already used by: ${conflictName}`).replace("{{action}}", conflictName);
+        const conflictName = t(
+          `hotkeys.descriptions.${conflictKey}`,
+          conflictKey,
+        );
+        conflictMsg.textContent = t(
+          "hotkeys.conflict",
+          `Already used by: ${conflictName}`,
+        ).replace("{{action}}", conflictName);
         conflictMsg.classList.remove("hidden");
         // Ne pas valider, laisser l'utilisateur réessayer
         capturedKey = null;
@@ -7677,11 +10979,14 @@ function editHotkey(hotkeyName, buttonElement) {
     const isEmpty = !newValue;
     const t2 = t; // closure
 
-    buttonElement.querySelector("kbd").textContent = newValue ? formatHotkeyDisplay(hotkeyName, newValue) : t2('hotkeys.none', '—');
+    buttonElement.querySelector("kbd").textContent = newValue
+      ? formatHotkeyDisplay(hotkeyName, newValue)
+      : t2("hotkeys.none", "—");
     buttonElement.classList.toggle("hotkey-unassigned", isEmpty);
 
     // Activer le bouton reset si on n'est plus sur la valeur par défaut
-    const resetBtn = buttonElement.parentElement.querySelector(".hotkey-reset-btn");
+    const resetBtn =
+      buttonElement.parentElement.querySelector(".hotkey-reset-btn");
     if (resetBtn) {
       resetBtn.classList.toggle("disabled", isDefault);
       resetBtn.disabled = isDefault;
@@ -7697,7 +11002,7 @@ function editHotkey(hotkeyName, buttonElement) {
       setTimeout(() => item.classList.remove("hotkey-flash"), 600);
     }
 
-    saveHotkeysToStorage();
+    void saveHotkeysToStorage();
     cleanup();
   };
 
@@ -7723,10 +11028,35 @@ function editHotkey(hotkeyName, buttonElement) {
 
     // Pour les touches simples, on stocke la casse réelle (e.key)
     // Shift n'est ajouté comme préfixe que pour les touches spéciales ou combinaisons
-    const specialKeys = ["Enter", "Escape", "Tab", "Space", "Backspace", "Delete",
-      "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
-      "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12",
-      "PageUp", "PageDown", "Home", "End", "Insert"];
+    const specialKeys = [
+      "Enter",
+      "Escape",
+      "Tab",
+      "Space",
+      "Backspace",
+      "Delete",
+      "ArrowUp",
+      "ArrowDown",
+      "ArrowLeft",
+      "ArrowRight",
+      "F1",
+      "F2",
+      "F3",
+      "F4",
+      "F5",
+      "F6",
+      "F7",
+      "F8",
+      "F9",
+      "F10",
+      "F11",
+      "F12",
+      "PageUp",
+      "PageDown",
+      "Home",
+      "End",
+      "Insert",
+    ];
 
     if (specialKeys.includes(e.key)) {
       if (e.shiftKey) keyCombo += "Shift+";
@@ -7753,8 +11083,14 @@ function editHotkey(hotkeyName, buttonElement) {
     // Vérifier immédiatement s'il y a un conflit (feedback visuel)
     const conflictKey = findHotkeyConflict(hotkeyName, capturedKey);
     if (conflictKey) {
-      const conflictName = t(`hotkeys.descriptions.${conflictKey}`, conflictKey);
-      conflictMsg.textContent = t("hotkeys.conflict", `Already used by: ${conflictName}`).replace("{{action}}", conflictName);
+      const conflictName = t(
+        `hotkeys.descriptions.${conflictKey}`,
+        conflictKey,
+      );
+      conflictMsg.textContent = t(
+        "hotkeys.conflict",
+        `Already used by: ${conflictName}`,
+      ).replace("{{action}}", conflictName);
       conflictMsg.classList.remove("hidden");
       // Ne pas auto-valider, laisser l'utilisateur réessayer une autre touche
       return;
@@ -7771,11 +11107,15 @@ function editHotkey(hotkeyName, buttonElement) {
   document.addEventListener("keydown", handleKeyDown, true);
 
   // Bouton Clear : vider le raccourci
-  captureOverlay.querySelector("#clear-hotkey-capture").addEventListener("click", () => {
-    applyHotkey("");
-  });
+  captureOverlay
+    .querySelector("#clear-hotkey-capture")
+    .addEventListener("click", () => {
+      applyHotkey("");
+    });
 
-  captureOverlay.querySelector("#cancel-hotkey-capture").addEventListener("click", cleanup);
+  captureOverlay
+    .querySelector("#cancel-hotkey-capture")
+    .addEventListener("click", cleanup);
   captureOverlay.addEventListener("click", (e) => {
     if (e.target === captureOverlay) cleanup();
   });
@@ -7799,7 +11139,7 @@ function showProgressiveBlurMenu(x, y) {
   const checkbox = document.createElement("input");
   checkbox.type = "checkbox";
   checkbox.checked = CONFIG.reverseProgressiveBlur;
-  checkbox.className = "context-menu-checkbox";
+  checkbox.className = "context-menu-checkbox checkbox-simple";
 
   const label = document.createElement("span");
   label.textContent = i18next.t("filters.reverseDirection");
@@ -8267,7 +11607,7 @@ function showProgressBarContextMenu(x, y) {
   const checkbox = document.createElement("input");
   checkbox.type = "checkbox";
   checkbox.checked = CONFIG.smoothProgress;
-  checkbox.className = "context-menu-checkbox";
+  checkbox.className = "context-menu-checkbox checkbox-simple";
 
   const label = document.createElement("span");
   label.textContent = i18next.t("timer.progressBarAnimationOption");
@@ -8306,7 +11646,7 @@ function showPauseCircleContextMenu(x, y) {
   const checkbox = document.createElement("input");
   checkbox.type = "checkbox";
   checkbox.checked = CONFIG.smoothPauseCircle;
-  checkbox.className = "context-menu-checkbox";
+  checkbox.className = "context-menu-checkbox checkbox-simple";
 
   const label = document.createElement("span");
   label.textContent = i18next.t("timer.progressBarAnimationOption");
@@ -8349,6 +11689,7 @@ function openZoomForImage(image, options = {}) {
   const {
     onClose,
     onDelete,
+    onIndexChange,
     allowNavigation = false,
     imageList = null,
     currentIndex = 0,
@@ -8424,6 +11765,22 @@ function openZoomForImage(image, options = {}) {
   window.updateZoomContent = updateZoomContent;
 
   let currentZoomIndex = currentIndex;
+  const syncZoomIndex = () => {
+    if (typeof onIndexChange === "function") {
+      try {
+        onIndexChange(currentZoomIndex, image);
+      } catch (e) {
+        console.error("[openZoomForImage] onIndexChange error:", e);
+      }
+    }
+  };
+  if (allowNavigation && imageList && imageList.length > 0) {
+    currentZoomIndex = Math.max(
+      0,
+      Math.min(currentZoomIndex, imageList.length - 1),
+    );
+    image = imageList[currentZoomIndex] || image;
+  }
 
   function updateZoomContent() {
     const overlay = document.getElementById("zoom-overlay");
@@ -8807,6 +12164,38 @@ function openZoomForImage(image, options = {}) {
       btnDelete.setAttribute("data-tooltip", i18next.t("drawing.deleteImage"));
       btnDelete.innerHTML = ICONS.DELETE;
       btnDelete.onclick = async () => {
+        const customDeleteCtx = {
+          image,
+          currentZoomIndex,
+          imageList,
+          closeZoom: closeZoomOverlay,
+          refresh: updateZoomContent,
+          setCurrentIndex: (nextIndex) => {
+            if (!allowNavigation || !imageList || imageList.length === 0)
+              return;
+            currentZoomIndex = Math.max(
+              0,
+              Math.min(nextIndex, imageList.length - 1),
+            );
+            image = imageList[currentZoomIndex] || image;
+            syncZoomIndex();
+          },
+          setImage: (nextImage) => {
+            if (!nextImage) return;
+            image = nextImage;
+          },
+        };
+
+        let customHandled = false;
+        try {
+          const customResult = await onDelete(customDeleteCtx);
+          customHandled = customResult !== false;
+        } catch (e) {
+          console.error("Erreur suppression custom:", e);
+          customHandled = true;
+        }
+        if (customHandled) return;
+
         const confirmed = await confirmImageDeletionDialog({
           image,
           container: document.body,
@@ -8826,7 +12215,6 @@ function openZoomForImage(image, options = {}) {
           console.error("Erreur suppression:", e);
           return;
         }
-        onDelete();
       };
     }
 
@@ -8853,6 +12241,13 @@ function openZoomForImage(image, options = {}) {
     window.updateZoomContent = null;
     // Marquer qu'on vient de fermer le zoom (pour empêcher le day-modal de se fermer aussi)
     window._zoomJustClosed = Date.now();
+    if (typeof onIndexChange === "function") {
+      try {
+        onIndexChange(null, null);
+      } catch (e) {
+        console.error("[openZoomForImage] onIndexChange close error:", e);
+      }
+    }
     if (onClose) onClose();
   }
 
@@ -8867,6 +12262,7 @@ function openZoomForImage(image, options = {}) {
         if (typeof closeZoomDrawingMode === "function") closeZoomDrawingMode();
         currentZoomIndex = (currentZoomIndex + 1) % imageList.length;
         image = imageList[currentZoomIndex];
+        syncZoomIndex();
         updateZoomContent();
         return;
       } else if (e.key === "ArrowLeft") {
@@ -8874,6 +12270,7 @@ function openZoomForImage(image, options = {}) {
         currentZoomIndex =
           (currentZoomIndex - 1 + imageList.length) % imageList.length;
         image = imageList[currentZoomIndex];
+        syncZoomIndex();
         updateZoomContent();
         return;
       }
@@ -8993,6 +12390,7 @@ function openZoomForImage(image, options = {}) {
   }
 
   // Initialiser
+  syncZoomIndex();
   updateZoomContent();
   document.body.style.overflow = "hidden";
   document.addEventListener("keydown", handleZoomKeyboard);
@@ -9057,8 +12455,11 @@ function showReview() {
         return {
           id: img.id,
           filePath: img.filePath,
+          path: img.path || img.filePath,
+          file: img.file || img.filePath,
           ext: img.ext,
-          thumbnailURL: img.thumbnailURL,
+          thumbnailURL: img.thumbnailURL || img.thumbnail || "",
+          thumbnail: img.thumbnail || img.thumbnailURL || "",
           url: img.url,
           name: img.name,
         };
@@ -9128,7 +12529,9 @@ function showReview() {
   const REVIEW_DURATION_HIDE_ANIM_MS = 180;
   let reviewDurationHideTimer = null;
   const animateHideReviewDurationBadges = (onDone) => {
-    const durationBadges = reviewGrid.querySelectorAll(".review-duration-badge");
+    const durationBadges = reviewGrid.querySelectorAll(
+      ".review-duration-badge",
+    );
     if (!durationBadges.length) {
       if (typeof onDone === "function") onDone();
       return;
@@ -9150,7 +12553,9 @@ function showReview() {
   };
 
   const animateShowReviewDurationBadges = () => {
-    const durationBadges = reviewGrid.querySelectorAll(".review-duration-badge");
+    const durationBadges = reviewGrid.querySelectorAll(
+      ".review-duration-badge",
+    );
     if (!durationBadges.length) return;
 
     durationBadges.forEach((badge) => {
@@ -9268,6 +12673,176 @@ function showReview() {
   function openZoom(index) {
     currentZoomIndex = index;
     window.currentZoomIndex = index;
+    const safeIndex = Math.max(0, Math.min(index, state.imagesSeen.length - 1));
+    const zoomImage = state.imagesSeen[safeIndex];
+    if (!zoomImage || typeof window.openZoomForImage !== "function") return;
+
+    window.openZoomForImage(zoomImage, {
+      allowNavigation: true,
+      imageList: state.imagesSeen,
+      currentIndex: safeIndex,
+      onIndexChange: (nextIndex) => {
+        currentZoomIndex = Number.isInteger(nextIndex) ? nextIndex : null;
+        window.currentZoomIndex = currentZoomIndex;
+      },
+      onClose: () => {
+        renderReviewGrid();
+        currentZoomIndex = null;
+        window.currentZoomIndex = null;
+      },
+      onDelete: async (ctx = {}) => {
+        const targetImage = ctx.image || state.imagesSeen[safeIndex];
+        if (!targetImage) return true;
+
+        const confirmed = await confirmImageDeletionDialog({
+          image: targetImage,
+          container: document.body,
+        });
+        if (!confirmed) return true;
+
+        const imageIdKey =
+          targetImage?.id === undefined || targetImage?.id === null
+            ? null
+            : String(targetImage.id);
+        const removedReviewIndex = Number.isInteger(ctx.currentZoomIndex)
+          ? Math.max(
+              0,
+              Math.min(
+                ctx.currentZoomIndex,
+                Math.max(0, state.imagesSeen.length - 1),
+              ),
+            )
+          : safeIndex;
+        const removedReviewImage = targetImage;
+        const originalMeta =
+          imageIdKey && state.imagesSeenMetaById
+            ? state.imagesSeenMetaById[imageIdKey]
+            : undefined;
+        const stateIndex =
+          imageIdKey === null
+            ? -1
+            : state.images.findIndex((img) => String(img.id) === imageIdKey);
+        let removedStateImage = null;
+
+        queueImageDeletionWithUndo({
+          image: targetImage,
+          actionId: `delete-image-review-${Date.now()}-${imageIdKey || "noid"}`,
+          removeLocal: () => {
+            if (
+              imageIdKey &&
+              state.imagesSeenMetaById?.[imageIdKey] !== undefined
+            ) {
+              delete state.imagesSeenMetaById[imageIdKey];
+            }
+
+            state.imagesSeen.splice(removedReviewIndex, 1);
+
+            if (stateIndex >= 0) {
+              removedStateImage = state.images.splice(stateIndex, 1)[0];
+              if (state.currentIndex >= state.images.length) {
+                state.currentIndex = Math.max(0, state.images.length - 1);
+              }
+            }
+
+            renderReviewGrid();
+
+            if (state.imagesSeen.length === 0) {
+              if (typeof ctx.closeZoom === "function") ctx.closeZoom();
+              return;
+            }
+
+            const nextIndex = Math.min(
+              removedReviewIndex,
+              state.imagesSeen.length - 1,
+            );
+            if (typeof ctx.setCurrentIndex === "function")
+              ctx.setCurrentIndex(nextIndex);
+            if (typeof ctx.setImage === "function")
+              ctx.setImage(state.imagesSeen[nextIndex]);
+            if (typeof ctx.refresh === "function") ctx.refresh();
+          },
+          restoreLocal: () => {
+            const restoreReviewAt = Math.max(
+              0,
+              Math.min(removedReviewIndex, state.imagesSeen.length),
+            );
+            const alreadyInReview = state.imagesSeen.some(
+              (img) => imageIdKey !== null && String(img.id) === imageIdKey,
+            );
+            if (!alreadyInReview) {
+              state.imagesSeen.splice(restoreReviewAt, 0, removedReviewImage);
+            }
+
+            if (removedStateImage && stateIndex >= 0) {
+              const alreadyInState = state.images.some(
+                (img) => imageIdKey !== null && String(img.id) === imageIdKey,
+              );
+              if (!alreadyInState) {
+                const restoreStateAt = Math.max(
+                  0,
+                  Math.min(stateIndex, state.images.length),
+                );
+                state.images.splice(restoreStateAt, 0, removedStateImage);
+              }
+            }
+
+            if (imageIdKey) {
+              if (
+                !state.imagesSeenMetaById ||
+                typeof state.imagesSeenMetaById !== "object"
+              ) {
+                state.imagesSeenMetaById = {};
+              }
+              if (originalMeta !== undefined) {
+                state.imagesSeenMetaById[imageIdKey] = originalMeta;
+              } else if (!state.imagesSeenMetaById[imageIdKey]) {
+                state.imagesSeenMetaById[imageIdKey] = { duration: 0 };
+              }
+            }
+
+            renderReviewGrid();
+            if (state.imagesSeen.length > 0) {
+              const restoreIndex = Math.min(
+                restoreReviewAt,
+                state.imagesSeen.length - 1,
+              );
+              if (typeof ctx.setCurrentIndex === "function")
+                ctx.setCurrentIndex(restoreIndex);
+              if (typeof ctx.setImage === "function")
+                ctx.setImage(state.imagesSeen[restoreIndex]);
+              if (typeof ctx.refresh === "function") ctx.refresh();
+            }
+          },
+          commitDelete: async () => {
+            try {
+              if (typeof targetImage.moveToTrash === "function") {
+                await targetImage.moveToTrash();
+              } else if (
+                eagle?.item?.moveToTrash &&
+                targetImage?.id !== undefined &&
+                targetImage?.id !== null
+              ) {
+                await eagle.item.moveToTrash([targetImage.id]);
+              }
+            } catch (e) {
+              console.error("Erreur suppression:", e);
+              try {
+                if (
+                  eagle?.item?.moveToTrash &&
+                  targetImage?.id !== undefined &&
+                  targetImage?.id !== null
+                ) {
+                  await eagle.item.moveToTrash([targetImage.id]);
+                }
+              } catch (_) {}
+            }
+          },
+        });
+
+        return true;
+      },
+    });
+    return;
 
     let overlay = document.getElementById("zoom-overlay");
     if (!overlay) {
@@ -9691,7 +13266,10 @@ function showReview() {
         image,
         actionId: `delete-image-review-${Date.now()}-${imageIdKey || "noid"}`,
         removeLocal: () => {
-          if (imageIdKey && state.imagesSeenMetaById?.[imageIdKey] !== undefined) {
+          if (
+            imageIdKey &&
+            state.imagesSeenMetaById?.[imageIdKey] !== undefined
+          ) {
             delete state.imagesSeenMetaById[imageIdKey];
           }
 
@@ -9722,8 +13300,7 @@ function showReview() {
             Math.min(removedReviewIndex, state.imagesSeen.length),
           );
           const alreadyInReview = state.imagesSeen.some(
-            (img) =>
-              imageIdKey !== null && String(img.id) === imageIdKey,
+            (img) => imageIdKey !== null && String(img.id) === imageIdKey,
           );
           if (!alreadyInReview) {
             state.imagesSeen.splice(restoreReviewAt, 0, removedReviewImage);
@@ -9743,7 +13320,10 @@ function showReview() {
           }
 
           if (imageIdKey) {
-            if (!state.imagesSeenMetaById || typeof state.imagesSeenMetaById !== "object") {
+            if (
+              !state.imagesSeenMetaById ||
+              typeof state.imagesSeenMetaById !== "object"
+            ) {
               state.imagesSeenMetaById = {};
             }
             if (originalMeta !== undefined) {
@@ -9755,7 +13335,10 @@ function showReview() {
 
           renderReviewGrid();
           if (currentZoomIndex !== null && state.imagesSeen.length > 0) {
-            currentZoomIndex = Math.min(restoreReviewAt, state.imagesSeen.length - 1);
+            currentZoomIndex = Math.min(
+              restoreReviewAt,
+              state.imagesSeen.length - 1,
+            );
             updateZoomContent();
           }
         },
@@ -10212,17 +13795,17 @@ function toggleImageInfo() {
     <div class="info-grid">
       <div>
         <div class="info-label">Nom</div>
-        <div class="info-value">${image.name || "N/A"}</div>
+        <div class="info-value">${escapeHtml(image.name || "N/A")}</div>
       </div>
       <div>
         <div class="info-label">Dimensions</div>
-        <div class="info-value">${dimensions}</div>
+        <div class="info-value">${escapeHtml(dimensions)}</div>
       </div>
       <div>
         <div class="info-label">Taille</div>
-        <div class="info-value">${
-          image.size ? formatFileSize(image.size) : "N/A"
-        }</div>
+        <div class="info-value">${escapeHtml(
+          image.size ? formatFileSize(image.size) : "N/A",
+        )}</div>
       </div>
       
       ${
@@ -10238,8 +13821,8 @@ function toggleImageInfo() {
             .map(
               (tag) => `
             <span class="tag-badge">
-              ${tag}
-              <button class="tag-remove-btn" data-tag="${tag}" aria-label="${i18next.t("tags.remove")}">×</button>
+              ${escapeHtml(tag)}
+              <button class="tag-remove-btn" data-tag="${encodeDataToken(tag)}" aria-label="${i18next.t("tags.remove")}">×</button>
             </span>
           `,
             )
@@ -10282,7 +13865,7 @@ function toggleImageInfo() {
   overlay.querySelectorAll(".tag-remove-btn").forEach((btn) => {
     btn.addEventListener("click", async (e) => {
       e.stopPropagation();
-      const tagName = btn.dataset.tag;
+      const tagName = decodeDataToken(btn.dataset.tag);
 
       try {
         // Récupérer l'item Eagle
@@ -10304,7 +13887,7 @@ function toggleImageInfo() {
         toggleImageInfo();
       } catch (err) {
         console.error("Erreur lors de la suppression du tag:", err);
-        alert(i18next.t("errors.tagError"));
+        showPoseChronoErrorMessage(i18next.t("errors.tagError"));
       }
     });
   });
@@ -10355,15 +13938,7 @@ async function openTagsModal(reviewIndex = null, explicitImage = null) {
 
   if (!currentImage) return;
   if (!currentImage.id) {
-    if (typeof window.showPoseChronoToast === "function") {
-      window.showPoseChronoToast({
-        type: "error",
-        message: i18next.t("errors.tagError"),
-        duration: 2500,
-      });
-    } else {
-      alert(i18next.t("errors.tagError"));
-    }
+    showPoseChronoErrorMessage(i18next.t("errors.tagError"));
     return;
   }
 
@@ -10442,8 +14017,8 @@ async function openTagsModal(reviewIndex = null, explicitImage = null) {
             : "group-count";
 
           return `
-          <div class="group-item" data-group="${group.id}">
-            <span class="group-name">${group.name}</span>
+          <div class="group-item" data-group="${encodeDataToken(group.id)}">
+            <span class="group-name">${escapeHtml(group.name)}</span>
             <span class="${countClass}">${count}</span>
           </div>
         `;
@@ -10459,7 +14034,7 @@ async function openTagsModal(reviewIndex = null, explicitImage = null) {
             .forEach((el) => el.classList.remove("active"));
           // Activer le groupe cliqué
           item.classList.add("active");
-          selectedGroup = item.dataset.group;
+          selectedGroup = decodeDataToken(item.dataset.group);
           // Recharger les tags avec le filtre
           loadAvailableTags();
         });
@@ -10532,13 +14107,13 @@ async function openTagsModal(reviewIndex = null, explicitImage = null) {
           return `
           <div class="tag-item ${
             isActive ? "active" : ""
-          }" data-tag="${tagName}">
+          }" data-tag="${encodeDataToken(tagName)}">
             ${
               isActive
                 ? '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -960 960 960" fill="currentColor"><path d="M382-240 154-468l57-57 171 171 367-367 57 57-424 424Z"/></svg>'
                 : ""
             }
-            ${tagName}
+            ${escapeHtml(tagName)}
           </div>
         `;
         })
@@ -10547,7 +14122,7 @@ async function openTagsModal(reviewIndex = null, explicitImage = null) {
       // Gérer les clics sur les tags
       availableTagsList.querySelectorAll(".tag-item").forEach((tagItem) => {
         tagItem.addEventListener("click", async () => {
-          const tagName = tagItem.dataset.tag;
+          const tagName = decodeDataToken(tagItem.dataset.tag);
           const isActive = tagItem.classList.contains("active");
 
           try {
@@ -10572,7 +14147,7 @@ async function openTagsModal(reviewIndex = null, explicitImage = null) {
             currentImage.tags = item.tags;
           } catch (e) {
             console.error("Erreur lors de la modification du tag:", e);
-            alert(i18next.t("errors.tagError"));
+            showPoseChronoErrorMessage(i18next.t("errors.tagError"));
             return;
           }
 
@@ -10630,7 +14205,7 @@ async function openTagsModal(reviewIndex = null, explicitImage = null) {
       }
     } catch (e) {
       console.error("Erreur lors de la création du tag:", e);
-      alert(i18next.t("errors.creationError"));
+      showPoseChronoErrorMessage(i18next.t("errors.creationError"));
     }
   }
 
@@ -10659,7 +14234,7 @@ async function openTagsModal(reviewIndex = null, explicitImage = null) {
         // Highlight du terme recherché
         const tagLower = tag.toLowerCase();
         const startIndex = tagLower.indexOf(searchTerm);
-        let displayTag = tag;
+        let displayTag = escapeHtml(tag);
 
         if (startIndex !== -1 && searchTerm) {
           const before = tag.substring(0, startIndex);
@@ -10668,10 +14243,10 @@ async function openTagsModal(reviewIndex = null, explicitImage = null) {
             startIndex + searchTerm.length,
           );
           const after = tag.substring(startIndex + searchTerm.length);
-          displayTag = `${before}<span class="highlight">${match}</span>${after}`;
+          displayTag = `${escapeHtml(before)}<span class="highlight">${escapeHtml(match)}</span>${escapeHtml(after)}`;
         }
 
-        return `<div class="autocomplete-item" data-index="${index}" data-tag="${tag}">${displayTag}</div>`;
+        return `<div class="autocomplete-item" data-index="${index}" data-tag="${encodeDataToken(tag)}">${displayTag}</div>`;
       })
       .join("");
 
@@ -10681,7 +14256,7 @@ async function openTagsModal(reviewIndex = null, explicitImage = null) {
     // Event listeners pour les clics
     autocompleteEl.querySelectorAll(".autocomplete-item").forEach((item) => {
       item.addEventListener("click", async () => {
-        newTagInput.value = item.dataset.tag;
+        newTagInput.value = decodeDataToken(item.dataset.tag);
         hideAutocomplete();
         // Appeler directement createNewTag pour assigner le tag
         await createNewTag();
@@ -10804,7 +14379,9 @@ async function openTagsModal(reviewIndex = null, explicitImage = null) {
       if (autocompleteVisible && selectedAutocompleteIndex >= 0) {
         const items = autocompleteEl.querySelectorAll(".autocomplete-item");
         if (items[selectedAutocompleteIndex]) {
-          newTagInput.value = items[selectedAutocompleteIndex].dataset.tag;
+          newTagInput.value = decodeDataToken(
+            items[selectedAutocompleteIndex].dataset.tag,
+          );
           hideAutocomplete();
           return;
         }
@@ -11115,7 +14692,10 @@ async function deleteImage() {
       updateDisplay();
     },
     restoreLocal: () => {
-      const restoreAt = Math.max(0, Math.min(originalIndex, state.images.length));
+      const restoreAt = Math.max(
+        0,
+        Math.min(originalIndex, state.images.length),
+      );
       state.images.splice(restoreAt, 0, image);
 
       if (originalSeenImage) {
@@ -11132,7 +14712,10 @@ async function deleteImage() {
       }
 
       if (imageIdKey) {
-        if (!state.imagesSeenMetaById || typeof state.imagesSeenMetaById !== "object") {
+        if (
+          !state.imagesSeenMetaById ||
+          typeof state.imagesSeenMetaById !== "object"
+        ) {
           state.imagesSeenMetaById = {};
         }
         if (originalMeta !== undefined) {
@@ -11160,20 +14743,28 @@ async function deleteImage() {
       try {
         if (typeof image.moveToTrash === "function") {
           await image.moveToTrash();
-        } else if (eagle?.item?.moveToTrash && imageId !== undefined && imageId !== null) {
+        } else if (
+          eagle?.item?.moveToTrash &&
+          imageId !== undefined &&
+          imageId !== null
+        ) {
           await eagle.item.moveToTrash([imageId]);
         }
       } catch (e) {
         console.error("Erreur suppression:", e);
         try {
-          if (eagle?.item?.moveToTrash && imageId !== undefined && imageId !== null) {
+          if (
+            eagle?.item?.moveToTrash &&
+            imageId !== undefined &&
+            imageId !== null
+          ) {
             await eagle.item.moveToTrash([imageId]);
           }
         } catch (err) {}
       }
 
       if (state.images.length === 0) {
-        alert(i18next.t("settings.noImagesFound"));
+        showPoseChronoErrorMessage(i18next.t("settings.noImagesFound"));
         location.reload();
       }
     },
@@ -12190,10 +15781,11 @@ window.handleDragEnd = function () {
 };
 
 document.addEventListener("DOMContentLoaded", () => {
-  // Initialisation de la grille d'arrière-plan
-  if (typeof CONFIG !== "undefined" && CONFIG?.backgroundGrid) {
-    document.body.classList.add("grid-enabled");
-  }
+  const isGridEnabled = UIPreferences.get(
+    "backgroundGridEnabled",
+    typeof CONFIG !== "undefined" ? !!(CONFIG?.backgroundGrid ?? false) : false,
+  );
+  document.body.classList.toggle("grid-enabled", !!isGridEnabled);
 
   const topTimeInputs = document.querySelectorAll(
     "#custom-h-input, #custom-m-input, #custom-s-input",

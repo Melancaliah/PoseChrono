@@ -75,34 +75,27 @@ function addMenuToggleOption(menu, options) {
   const { id, label, checked, onChange, labelClass = "" } = options;
 
   const row = document.createElement("div");
-  row.className = "context-menu-row";
+  row.className = "context-menu-row context-menu-checkbox-row";
 
-  const labelEl = document.createElement("span");
-  labelEl.className = `context-menu-label ${labelClass}`.trim();
-  labelEl.textContent = label;
+  const toggleLabel = document.createElement("label");
+  toggleLabel.className = "checkbox-simple-label";
+  toggleLabel.setAttribute("for", id);
 
-  const toggle = document.createElement("label");
-  toggle.className = "proportion-checkbox";
-  toggle.innerHTML = `
-    <input type="checkbox" id="${id}" ${checked ? "checked" : ""}>
-    <span class="proportion-slider"></span>
-  `;
-
-  const input = toggle.querySelector("input");
+  const input = document.createElement("input");
+  input.type = "checkbox";
+  input.id = id;
+  input.checked = !!checked;
+  input.className = "context-menu-checkbox checkbox-simple";
   input.addEventListener("change", () => onChange(input.checked));
 
-  row.appendChild(labelEl);
-  row.appendChild(toggle);
-  menu.appendChild(row);
+  const labelEl = document.createElement("span");
+  labelEl.className = `context-menu-label context-menu-label-normal checkbox-simple-text ${labelClass}`.trim();
+  labelEl.textContent = label;
 
-  row.addEventListener("click", (e) => {
-    // Ne pas déclencher si on clique sur la checkbox ou son label parent
-    if (e.target === input || e.target.closest(".proportion-checkbox")) {
-      return;
-    }
-    input.checked = !input.checked;
-    onChange(input.checked);
-  });
+  toggleLabel.appendChild(input);
+  toggleLabel.appendChild(labelEl);
+  row.appendChild(toggleLabel);
+  menu.appendChild(row);
 }
 
 /**
@@ -237,10 +230,7 @@ function createToggleRow(label, id, checked, onChange, marginTop = null) {
   if (marginTop) row.style.marginTop = marginTop;
   row.innerHTML = `
     <span class="config-label">${label}</span>
-    <label class="proportion-checkbox">
-      <input type="checkbox" id="${id}" ${checked ? "checked" : ""}>
-      <span class="proportion-slider"></span>
-    </label>
+    <input type="checkbox" class="checkbox-simple config-checkbox-simple" id="${id}" ${checked ? "checked" : ""}>
   `;
   const input = row.querySelector("input");
   input.addEventListener("change", (e) => onChange(e.target.checked));
@@ -372,10 +362,7 @@ function createProportionOption(
       <input type="color" class="color-picker-mini" id="${colorId}" value="${color}">
       ${label}
     </span>
-    <label class="proportion-checkbox">
-      <input type="checkbox" id="${checkboxId}" ${checked ? "checked" : ""}>
-      <span class="proportion-slider"></span>
-    </label>
+    <input type="checkbox" class="checkbox-simple config-checkbox-simple" id="${checkboxId}" ${checked ? "checked" : ""}>
   `;
 
   option
@@ -1448,8 +1435,7 @@ function makeMeasureConfigDraggable(popup) {
       e.target.closest("button") ||
       e.target.closest("input") ||
       e.target.closest("select") ||
-      e.target.closest("label") ||
-      e.target.closest(".proportion-checkbox")
+      e.target.closest("label")
     ) {
       return;
     }

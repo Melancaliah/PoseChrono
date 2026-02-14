@@ -12,6 +12,7 @@
     "description": "Herramienta de cronometraje para sesiones de dibujo con modelo"
   },
   "titlebar": {
+    "settingsTooltip": "Settings (Ctrl + K)",
     "pinTooltip": "Anclar encima (Shift+T)",
     "minimize": "Minimizar",
     "maximize": "Maximizar",
@@ -43,7 +44,51 @@
     "loadedFromSession": "{{count}} cargada(s) desde la sesión",
     "posesLabel": "POSES",
     "durationLabelShort": "TIEMPO",
-    "timerLabel": "CRONO"
+    "timerLabel": "CRONO",
+    "repairStorage": "Repair storage",
+    "repairStorageTooltip": "Repair timeline/plans/hotkeys storage",
+    "global": {
+      "title": "Global settings",
+      "appearance": "Appearance",
+      "history": "History",
+      "drawing": "Drawing",
+      "general": "General",
+      "showBackgroundGrid": "Show background grid",
+      "hideBackgroundGrid": "Hide background grid",
+      "titlebarAlwaysVisible": "Titlebar always visible",
+      "changeTheme": "Change theme",
+      "openTimeline": "Open timeline",
+      "repairStorage": "Repair storage",
+      "openHotkeys": "Configure hotkeys",
+      "exportPreferences": "Export preferences",
+      "importPreferences": "Import preferences",
+      "preferencesPackageExportMessage": "Choose what to include in the backup file.",
+      "preferencesPackageImportMessage": "Choose what to import from this backup file.",
+      "packageSectionUi": "UI preferences",
+      "packageSectionHotkeys": "Keyboard shortcuts",
+      "packageSectionPlans": "Session plans",
+      "packageSectionTimeline": "Timeline history",
+      "preferencesExportDone": "Preferences exported.",
+      "preferencesExportError": "Preferences export failed.",
+      "preferencesImportDone": "Preferences imported: {{targets}}",
+      "preferencesImportError": "Preferences import failed.",
+      "preferencesImportInvalid": "Invalid backup file.",
+      "storageStatusReady": "Storage backend: IndexedDB (normal mode).",
+      "storageStatusFallback": "Storage backend: localStorage fallback active.",
+      "maintenance": "Maintenance",
+      "preferencesHint": "Export creates one JSON backup. Import applies only selected sections.",
+      "maintenanceHint": "Maintenance actions may remove local data. Consider exporting a backup first.",
+      "storageDiagDays": "Days",
+      "storageDiagSessions": "Sessions",
+      "storageDiagPlans": "Plans",
+      "storageDiagCustomHotkeys": "Custom hotkeys",
+      "resetSettings": "Restablecer ajustes",
+      "resetSettingsConfirm": "¿Restablecer todos los ajustes a sus valores predeterminados? (tema, preferencias de UI, atajos personalizados)",
+      "resetSettingsDone": "Todos los ajustes se han restablecido.",
+      "defaultSessionMode": "Modo de sesión predeterminado",
+      "preferencesSection": "Preferencias",
+      "dataSection": "Datos"
+    }
   },
   "modes": {
     "classic": {
@@ -436,7 +481,15 @@
     }
   },
   "timeline": {
-    "dayLabels": ["L", "M", "X", "J", "V", "S", "D"],
+    "dayLabels": [
+      "L",
+      "M",
+      "X",
+      "J",
+      "V",
+      "S",
+      "D"
+    ],
     "monthLabels": [
       "ene",
       "feb",
@@ -499,11 +552,21 @@
     "posesLabel": "Poses",
     "sessionsLabel": "sesiones",
     "history": "Historial de sesiones"
+  },
+  "storage": {
+    "fallbackActive": "Storage fallback enabled: IndexedDB unavailable, using local storage.",
+    "repairTitle": "Repair storage",
+    "repairMessage": "Choose what to reset. This action cannot be undone.",
+    "repairConfirm": "Repair",
+    "targetTimeline": "Timeline history",
+    "targetPlans": "Session plans",
+    "targetHotkeys": "Keyboard shortcuts",
+    "repairDone": "Storage repaired: {{targets}}",
+    "nothingSelected": "No storage section selected.",
+    "repairError": "Storage repair failed.",
+    "repairMessageDetailed": "Choose what to reset. Selected data will be deleted locally and cannot be recovered automatically.",
+    "repairImpactTimeline": "Timeline: removes day/session history and related image references.",
+    "repairImpactPlans": "Plans: removes saved session plans.",
+    "repairImpactHotkeys": "Hotkeys: restores default shortcuts."
   }
 }
-
-
-
-
-
-

@@ -485,7 +485,7 @@ function renderMeasureLine(ctx, line, scaleFactor, hoverPoint, hoverThreshold) {
       ? isShapeEdgeSelected(line)
       : isIndividualShapeSelected(line);
   const ctrlShapeMode = isShapeEditingTool(currentTool) && !!keysState.ctrl;
-  const draggingSameShape =
+  const endpointDragOnThisShape =
     isDraggingEndpoint &&
     selectedMeasurement &&
     ((selectedMeasurement.type === "shape-edge" &&
@@ -493,7 +493,13 @@ function renderMeasureLine(ctx, line, scaleFactor, hoverPoint, hoverThreshold) {
       selectedMeasurement.shapeGroup &&
       line.shapeGroup === selectedMeasurement.shapeGroup) ||
       selectedMeasurement.id === line.id);
-  const suppressShapeHandles = ctrlShapeMode && !draggingSameShape;
+  const draggingAnyShapeEndpoint =
+    isDraggingEndpoint &&
+    selectedMeasurement &&
+    isEditableShape(selectedMeasurement);
+  const suppressShapeHandles =
+    (ctrlShapeMode && !endpointDragOnThisShape) ||
+    (draggingAnyShapeEndpoint && !endpointDragOnThisShape);
   const color =
     line.type === "calibrate"
       ? (line.config?.color ?? "#10b981")
@@ -669,7 +675,7 @@ function renderMeasureLine(ctx, line, scaleFactor, hoverPoint, hoverThreshold) {
   // Bornes
   const scaledThreshold = hoverThreshold * scaleFactor;
   let hoveredEndpoint = null;
-  if (hoverPoint) {
+  if (hoverPoint && (!draggingAnyShapeEndpoint || endpointDragOnThisShape)) {
     if (isShapeCircle) {
       const distEnd = getDistance(hoverPoint, line.end);
       if (distEnd < scaledThreshold) hoveredEndpoint = "end";
@@ -694,10 +700,6 @@ function renderMeasureLine(ctx, line, scaleFactor, hoverPoint, hoverThreshold) {
         (isShapeEdge && currentTool === "rectangle") ||
         (isShapeCircle && currentTool === "circle");
       if (rectangleEditMode && isShapeToolContext) {
-        const endpointDragOnThisShape =
-          isDraggingEndpoint &&
-          selectedMeasurement &&
-          selectedMeasurement.id === line.id;
         if (isShapeCircle) {
           if (hoveredEndpoint === "end" || endpointDragOnThisShape || shapeSelected) {
             drawEndpoint(ctx, line.end.x, line.end.y, color, scaleFactor);
@@ -727,22 +729,23 @@ function renderMeasureLine(ctx, line, scaleFactor, hoverPoint, hoverThreshold) {
       }
     } else {
       // Ligne: bornes visibles si selectionnee, ou au survol.
-      const endpointDragOnThisShape =
-        isDraggingEndpoint &&
-        selectedMeasurement &&
-        selectedMeasurement.id === line.id;
       const ctrlSnapSingleEndpoint =
         !!keysState.ctrl &&
         endpointDragOnThisShape &&
         (draggedEndpoint === "start" || draggedEndpoint === "end");
-      const showStart =
-        hoveredEndpoint === "start" ||
-        (endpointDragOnThisShape &&
-          (!ctrlSnapSingleEndpoint || draggedEndpoint === "start"));
-      const showEnd =
-        hoveredEndpoint === "end" ||
-        (endpointDragOnThisShape &&
-          (!ctrlSnapSingleEndpoint || draggedEndpoint === "end"));
+      const draggingSpecificEndpoint =
+        endpointDragOnThisShape &&
+        (draggedEndpoint === "start" || draggedEndpoint === "end");
+      const showStart = draggingSpecificEndpoint
+        ? draggedEndpoint === "start"
+        : hoveredEndpoint === "start" ||
+          (endpointDragOnThisShape &&
+            (!ctrlSnapSingleEndpoint || draggedEndpoint === "start"));
+      const showEnd = draggingSpecificEndpoint
+        ? draggedEndpoint === "end"
+        : hoveredEndpoint === "end" ||
+          (endpointDragOnThisShape &&
+            (!ctrlSnapSingleEndpoint || draggedEndpoint === "end"));
       if (showStart) {
         drawEndpoint(ctx, line.start.x, line.start.y, color, scaleFactor);
       }
@@ -770,7 +773,9 @@ function renderMeasureLine(ctx, line, scaleFactor, hoverPoint, hoverThreshold) {
         isDraggingEndpoint &&
         selectedMeasurement &&
         selectedMeasurement.id === line.id;
-      if (hideControlDuringCtrlEndpointSnap) {
+      const hideControlDuringEndpointDrag =
+        isDraggingEndpoint && endpointDragOnThisShape;
+      if (hideControlDuringCtrlEndpointSnap || hideControlDuringEndpointDrag) {
         // En snap endpoint (Ctrl), on masque le handle de courbure.
       } else if (!controlHover && !controlActive) {
         // Handle discret: visible uniquement au survol / drag actif.

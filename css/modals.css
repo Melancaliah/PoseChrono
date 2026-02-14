@@ -250,6 +250,12 @@
   border-color: var(--color-primary);
 }
 
+#session-plans-modal #plan-name-input:focus-visible {
+  outline: none !important;
+  outline-offset: 0 !important;
+  box-shadow: none !important;
+}
+
 .saved-plans-list {
   display: flex;
   flex-direction: column;
@@ -298,6 +304,421 @@
 .plan-actions {
   display: flex;
   gap: 8px;
+}
+
+/* ============================================
+   MODAL PARAMÈTRES GLOBAUX
+   ============================================ */
+
+#global-settings-modal .global-settings-modal-content {
+  max-width: 560px;
+}
+
+.global-settings-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+  scrollbar-gutter: stable both-edges;
+}
+
+#global-settings-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.global-settings-section {
+  margin-bottom: 0;
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.01);
+}
+
+.global-settings-actions {
+  display: grid;
+  grid-template-columns: repeat(var(--gs-columns, 2), minmax(0, 1fr));
+  gap: 8px;
+}
+
+.global-settings-actions > :only-child {
+  grid-column: 1 / -1;
+}
+
+.global-settings-actions.is-align-start {
+  justify-items: start;
+}
+
+.global-settings-actions.is-align-center {
+  justify-items: center;
+}
+
+.global-settings-actions.is-align-end {
+  justify-items: end;
+}
+
+.global-settings-actions.is-align-start .option-toggle-btn,
+.global-settings-actions.is-align-center .option-toggle-btn,
+.global-settings-actions.is-align-end .option-toggle-btn {
+  width: auto;
+}
+
+.global-settings-actions.is-align-start .option-toggle-btn {
+  justify-self: start;
+}
+
+.global-settings-actions.is-align-center .option-toggle-btn {
+  justify-self: center;
+}
+
+.global-settings-actions.is-align-end .option-toggle-btn {
+  justify-self: end;
+}
+
+.global-settings-actions.is-align-start .global-settings-checkbox-item,
+.global-settings-actions.is-align-center .global-settings-checkbox-item,
+.global-settings-actions.is-align-end .global-settings-checkbox-item {
+  width: 100%;
+}
+
+.global-settings-actions .option-toggle-btn {
+  min-height: 36px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  gap: 8px;
+  transition: all 0.18s ease;
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.global-settings-btn-icon {
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: currentColor;
+  opacity: 0.9;
+  flex-shrink: 0;
+}
+
+.global-settings-btn-text {
+  min-width: 0;
+}
+
+.global-settings-checkbox-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 6px 2px;
+  color: var(--text-primary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.global-settings-checkbox-input {
+  cursor: pointer;
+}
+
+.global-settings-checkbox-icon {
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: currentColor;
+  opacity: 0.9;
+  flex-shrink: 0;
+}
+
+.global-settings-checkbox-item .hotkey-description {
+  margin-right: 0;
+  min-width: 0;
+}
+
+.global-settings-mode-toggle-row {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: nowrap;
+  width: 100%;
+}
+
+.global-settings-mode-label {
+  margin-right: 0;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.global-settings-mode-toggle {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+}
+
+.global-settings-mode-toggle .search-toggle-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  text-align: center;
+}
+
+.global-settings-actions .option-toggle-btn.active {
+  transform: none;
+  box-shadow: 0 0 0 1px rgba(102, 126, 234, 0.28);
+}
+
+.global-settings-actions-inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.global-settings-actions-inline .global-settings-action-label,
+.global-settings-actions-inline .global-settings-action-separator {
+  flex: 0 0 100%;
+  margin: 0 0 10px 0;
+}
+
+.global-settings-actions-segmented {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0;
+}
+
+.global-settings-actions-segmented .global-settings-action-label,
+.global-settings-actions-segmented .global-settings-action-separator {
+  flex: 0 0 100%;
+}
+
+.global-settings-actions-segmented .option-toggle-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  border-radius: 0;
+  margin-left: -1px;
+  justify-content: center;
+  text-align: center;
+}
+
+.global-settings-actions-segmented .option-toggle-btn:first-of-type {
+  margin-left: 0;
+  border-top-left-radius: 8px;
+  border-bottom-left-radius: 8px;
+}
+
+.global-settings-actions-segmented .option-toggle-btn:last-of-type {
+  border-top-right-radius: 8px;
+  border-bottom-right-radius: 8px;
+}
+
+.global-settings-category-toggle {
+  margin-bottom: 6px;
+  border-radius: 10px;
+  padding: 8px 8px 8px 10px;
+}
+
+.global-settings-category-toggle:focus,
+.global-settings-category-toggle:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+.global-settings-category-toggle .hotkey-category-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.global-settings-section-icon {
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.72);
+  flex-shrink: 0;
+}
+
+#global-settings-toggle-grid-btn {
+  grid-column: 1 / -1;
+}
+
+.global-settings-list {
+  gap: 8px;
+  padding: 4px 2px 2px 2px;
+}
+
+.global-settings-action-separator {
+  grid-column: 1 / -1;
+  height: 1px;
+  margin: 2px 0;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.04),
+    rgba(255, 255, 255, 0.16),
+    rgba(255, 255, 255, 0.04)
+  );
+}
+
+.global-settings-action-break {
+  grid-column: 1 / -1;
+  height: 0;
+}
+
+.global-settings-action-label {
+  grid-column: 1 / -1;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 18px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.56);
+}
+
+.global-settings-action-label-icon {
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.global-settings-action-label-muted {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.global-settings-btn {
+  position: relative;
+}
+
+.global-settings-btn-primary {
+  border-color: rgba(102, 126, 234, 0.42);
+  background: rgba(102, 126, 234, 0.13);
+}
+
+.global-settings-btn-primary:hover {
+  border-color: rgba(102, 126, 234, 0.62);
+  background: rgba(102, 126, 234, 0.2);
+}
+
+.global-settings-btn-nav {
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.global-settings-btn-toggle {
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+.global-settings-btn-danger {
+  border-color: rgba(247, 176, 127, 0.32);
+  background: rgba(247, 176, 127, 0.09);
+}
+
+.global-settings-btn-danger:hover {
+  border-color: rgba(247, 176, 127, 0.5);
+  background: rgba(247, 176, 127, 0.16);
+}
+
+.global-settings-section-maintenance {
+  border-color: rgba(247, 176, 127, 0.22);
+  background: rgba(247, 176, 127, 0.05);
+}
+
+.global-settings-section-maintenance .global-settings-actions {
+  justify-items: start;
+}
+
+.global-settings-section-maintenance
+  .global-settings-actions
+  .option-toggle-btn {
+  width: auto;
+}
+
+.global-settings-section-maintenance
+  .global-settings-list
+  > .global-settings-actions
+  + .global-settings-actions {
+  margin-top: 12px;
+}
+
+.global-settings-hint,
+.global-settings-maintenance-note {
+  margin-top: 2px;
+  padding: 9px 11px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.58);
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+}
+
+.global-settings-maintenance-note {
+  color: rgba(247, 176, 127, 0.92);
+  border-color: rgba(247, 176, 127, 0.34);
+}
+
+.global-settings-storage-status {
+  margin-top: 2px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.7);
+  border: 1px solid var(--border-lighter);
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 8px;
+  padding: 10px 11px;
+  display: grid;
+  gap: 8px;
+}
+
+.global-settings-storage-line {
+  font-size: 12px;
+}
+
+.global-settings-storage-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 12px;
+}
+
+.global-settings-storage-metric {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  color: rgba(255, 255, 255, 0.74);
+}
+
+.global-settings-storage-label {
+  opacity: 0.7;
+}
+
+.global-settings-storage-value {
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.global-settings-storage-status.is-fallback {
+  color: #f7b07f;
+  border-color: rgba(247, 176, 127, 0.35);
+  background: rgba(247, 176, 127, 0.08);
+}
+
+#global-settings-modal .global-settings-modal-content:focus-visible {
+  outline: 1px solid rgba(102, 126, 234, 0.58);
+  outline-offset: 1px;
+}
+
+#global-settings-modal button:focus-visible,
+#global-settings-modal input:focus-visible,
+#global-settings-modal [tabindex]:focus-visible {
+  outline: none !important;
+  outline-offset: 0 !important;
+  box-shadow: none !important;
 }
 
 /* ============================================
@@ -1007,10 +1428,52 @@
 }
 
 .context-menu-checkbox {
+  cursor: pointer;
+}
+
+.checkbox-simple {
+  appearance: none;
   width: 16px;
   height: 16px;
-  accent-color: var(--color-primary);
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.08);
+  display: inline-block;
+  position: relative;
+  margin: 0;
+  flex-shrink: 0;
   cursor: pointer;
+  transition: all 0.16s ease;
+}
+
+.checkbox-simple:checked {
+  border-color: rgba(102, 126, 234, 0.9);
+  background: rgba(102, 126, 234, 0.88);
+}
+
+.checkbox-simple:checked::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 4px;
+  height: 9px;
+  border: solid rgba(255, 255, 255, 0.96);
+  border-width: 0 2px 2px 0;
+  transform: translate(-50%, -56%) rotate(45deg);
+}
+
+.checkbox-simple-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+  width: 100%;
+}
+
+.checkbox-simple-text {
+  min-width: 0;
 }
 
 .context-menu-separator {
@@ -2095,8 +2558,6 @@
   margin-bottom: 12px;
 }
 
-
-
 #shape-individual-config-popup .config-row-inline {
   margin: 0 0 10px 0;
 }
@@ -2340,6 +2801,10 @@
   color: #ccc;
 }
 
+.config-checkbox-simple {
+  margin-left: 12px;
+}
+
 /* Divider dans les options */
 .config-divider {
   height: 1px;
@@ -2533,6 +2998,25 @@
 
 .context-menu-row:hover {
   background: rgba(255, 255, 255, 0.05);
+}
+
+.proportion-option .config-checkbox-simple {
+  margin-left: 10px;
+}
+
+.context-menu-checkbox-row {
+  padding: 8px 12px;
+}
+
+.context-menu-checkbox-row .checkbox-simple-label {
+  justify-content: flex-start;
+}
+
+.context-menu-checkbox-row .context-menu-label.context-menu-label-normal {
+  padding: 0;
+  margin: 0;
+  line-height: 1.35;
+  pointer-events: auto;
 }
 
 /* Row avec slider (direction colonne) */
@@ -2766,6 +3250,7 @@
   gap: 10px;
   background: transparent;
   border: none;
+  border-radius: 0;
   cursor: pointer;
   padding: 0;
   margin: 0 0 10px 0;
@@ -2791,6 +3276,18 @@
 
 .hotkey-category.collapsed .hotkey-category-chevron {
   transform: rotate(-90deg);
+}
+
+.hotkey-category.collapsed .hotkey-category-toggle {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom-color: transparent;
+}
+
+.hotkey-category.collapsed .global-settings-category-toggle {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom-color: transparent;
 }
 
 .hotkey-list {
@@ -2967,10 +3464,8 @@
 }
 
 .hotkeys-warning-checkbox-input {
-  width: 14px;
-  height: 14px;
   margin: 0;
-  accent-color: #5ea4ff;
+  cursor: pointer;
 }
 
 .hotkeys-warning-dialog .action {
@@ -2978,6 +3473,30 @@
   display: grid;
   grid-template-columns: 1fr 1.5fr;
   gap: 10px;
+}
+
+.storage-repair-options {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.storage-repair-impact {
+  margin: 8px 0 0 16px;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.74);
+}
+
+.storage-repair-impact li {
+  line-height: 1.35;
+}
+
+.storage-repair-dialog .hotkeys-warning-checkbox {
+  margin-top: 0;
 }
 
 .hotkeys-warning-btn {
@@ -3183,7 +3702,7 @@
 }
 
 .search-toggle-btn.active {
-  background: var(--color-primary, #8b5cf6);
+  background: var(--color-primary-elegant);
   color: white;
 }
 
@@ -3263,7 +3782,7 @@
 /* Footer discret du modal hotkeys */
 .hotkeys-footer {
   display: flex;
-  justify-content: flex-end;
+  justify-content: flex-start;
   align-items: center;
   gap: 8px;
   padding: 10px 20px;
@@ -3334,7 +3853,7 @@
 }
 
 .modal-title svg {
-  color: var(--color-primary, #8b5cf6);
+  color: #5e5e5e;
 }
 
 .modal-close-btn {

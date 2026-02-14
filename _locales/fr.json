@@ -12,6 +12,7 @@
     "description": "Outil de chronométrage pour les séances de dessin d'après modèle"
   },
   "titlebar": {
+    "settingsTooltip": "Paramètres (Ctrl + K)",
     "pinTooltip": "Garder la fenêtre au premier plan (Shift+T)",
     "minimize": "Minimiser",
     "maximize": "Maximiser",
@@ -43,7 +44,51 @@
     "loadedFromSession": "{{count}} chargée(s) depuis la session",
     "posesLabel": "POSES",
     "durationLabelShort": "DURÉE",
-    "timerLabel": "CHRONO"
+    "timerLabel": "CHRONO",
+    "repairStorage": "Reparer le stockage",
+    "repairStorageTooltip": "Reparer le stockage timeline/plans/raccourcis",
+    "global": {
+      "title": "Paramètres globaux",
+      "appearance": "Apparence",
+      "history": "Historique",
+      "drawing": "Dessin",
+      "general": "Général",
+      "showBackgroundGrid": "Afficher la grille de fond",
+      "hideBackgroundGrid": "Masquer la grille de fond",
+      "titlebarAlwaysVisible": "Barre de titre toujours visible",
+      "changeTheme": "Changer le thème",
+      "openTimeline": "Ouvrir l'historique",
+      "repairStorage": "Réparer le stockage",
+      "openHotkeys": "Configurer les raccourcis",
+      "exportPreferences": "Exporter les préférences",
+      "importPreferences": "Importer les préférences",
+      "preferencesPackageExportMessage": "Choisis ce que tu veux inclure dans le fichier de sauvegarde.",
+      "preferencesPackageImportMessage": "Choisis ce que tu veux importer depuis ce fichier de sauvegarde.",
+      "packageSectionUi": "Préférences UI",
+      "packageSectionHotkeys": "Raccourcis clavier",
+      "packageSectionPlans": "Plans de session",
+      "packageSectionTimeline": "Historique timeline",
+      "preferencesExportDone": "Préférences exportées.",
+      "preferencesExportError": "Échec de l'export des préférences.",
+      "preferencesImportDone": "Préférences importées : {{targets}}",
+      "preferencesImportError": "Échec de l'import des préférences.",
+      "preferencesImportInvalid": "Fichier de sauvegarde invalide.",
+      "storageStatusReady": "Backend stockage : IndexedDB (mode normal).",
+      "storageStatusFallback": "Backend stockage : fallback localStorage actif.",
+      "maintenance": "Maintenance",
+      "preferencesHint": "L'export cree un JSON unique. L'import applique seulement les sections selectionnees.",
+      "maintenanceHint": "Les actions de maintenance peuvent supprimer des donnees locales. Pense a exporter une sauvegarde avant.",
+      "storageDiagDays": "Jours",
+      "storageDiagSessions": "Sessions",
+      "storageDiagPlans": "Plans",
+      "storageDiagCustomHotkeys": "Raccourcis perso",
+      "resetSettings": "Réinitialiser les paramètres",
+      "resetSettingsConfirm": "Réinitialiser tous les paramètres par défaut ? (thème, préférences UI, raccourcis personnalisés)",
+      "resetSettingsDone": "Tous les paramètres ont été réinitialisés.",
+      "defaultSessionMode": "Mode de session par défaut",
+      "preferencesSection": "Préférences",
+      "dataSection": "Données"
+    }
   },
   "modes": {
     "classic": {
@@ -436,7 +481,15 @@
     }
   },
   "timeline": {
-    "dayLabels": ["L", "M", "M", "J", "V", "S", "D"],
+    "dayLabels": [
+      "L",
+      "M",
+      "M",
+      "J",
+      "V",
+      "S",
+      "D"
+    ],
     "monthLabels": [
       "Jan",
       "Fév",
@@ -499,11 +552,21 @@
     "posesLabel": "Poses",
     "sessionsLabel": "sessions",
     "history": "Historique des sessions"
+  },
+  "storage": {
+    "fallbackActive": "Mode de secours active: IndexedDB indisponible, utilisation du stockage local.",
+    "repairTitle": "Reparer le stockage",
+    "repairMessage": "Choisis ce que tu veux reinitialiser. Cette action est irreversible.",
+    "repairConfirm": "Reparer",
+    "targetTimeline": "Historique timeline",
+    "targetPlans": "Plans de session",
+    "targetHotkeys": "Raccourcis clavier",
+    "repairDone": "Stockage repare: {{targets}}",
+    "nothingSelected": "Aucune section de stockage selectionnee.",
+    "repairError": "La reparation du stockage a echoue.",
+    "repairMessageDetailed": "Choisis ce que tu veux reinitialiser. Les donnees cochees seront supprimees localement et ne pourront pas etre recuperees automatiquement.",
+    "repairImpactTimeline": "Timeline : supprime l'historique des jours/sessions et les references d'images associees.",
+    "repairImpactPlans": "Plans : supprime les plans de session sauvegardes.",
+    "repairImpactHotkeys": "Raccourcis : restaure les raccourcis par defaut."
   }
 }
-
-
-
-
-
-

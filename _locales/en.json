@@ -12,6 +12,7 @@
     "description": "Timer tool for figure drawing sessions"
   },
   "titlebar": {
+    "settingsTooltip": "Settings (Ctrl + K)",
     "pinTooltip": "Always on top (Shift+T)",
     "minimize": "Minimize",
     "maximize": "Maximize",
@@ -43,7 +44,51 @@
     "loadedFromSession": "{{count}} loaded from session",
     "posesLabel": "POSES",
     "durationLabelShort": "DURATION",
-    "timerLabel": "TIMER"
+    "timerLabel": "TIMER",
+    "repairStorage": "Repair storage",
+    "repairStorageTooltip": "Repair timeline/plans/hotkeys storage",
+    "global": {
+      "title": "Global settings",
+      "appearance": "Appearance",
+      "history": "History",
+      "drawing": "Drawing",
+      "general": "General",
+      "showBackgroundGrid": "Show background grid",
+      "hideBackgroundGrid": "Hide background grid",
+      "titlebarAlwaysVisible": "Titlebar always visible",
+      "changeTheme": "Change theme",
+      "openTimeline": "Open timeline",
+      "repairStorage": "Repair storage",
+      "openHotkeys": "Configure hotkeys",
+      "exportPreferences": "Export preferences",
+      "importPreferences": "Import preferences",
+      "preferencesPackageExportMessage": "Choose what to include in the backup file.",
+      "preferencesPackageImportMessage": "Choose what to import from this backup file.",
+      "packageSectionUi": "UI preferences",
+      "packageSectionHotkeys": "Keyboard shortcuts",
+      "packageSectionPlans": "Session plans",
+      "packageSectionTimeline": "Timeline history",
+      "preferencesExportDone": "Preferences exported.",
+      "preferencesExportError": "Preferences export failed.",
+      "preferencesImportDone": "Preferences imported: {{targets}}",
+      "preferencesImportError": "Preferences import failed.",
+      "preferencesImportInvalid": "Invalid backup file.",
+      "storageStatusReady": "Storage backend: IndexedDB (normal mode).",
+      "storageStatusFallback": "Storage backend: localStorage fallback active.",
+      "maintenance": "Maintenance",
+      "preferencesHint": "Export creates one JSON backup. Import applies only selected sections.",
+      "maintenanceHint": "Maintenance actions may remove local data. Consider exporting a backup first.",
+      "storageDiagDays": "Days",
+      "storageDiagSessions": "Sessions",
+      "storageDiagPlans": "Plans",
+      "storageDiagCustomHotkeys": "Custom hotkeys",
+      "resetSettings": "Reset settings",
+      "resetSettingsConfirm": "Reset all settings to defaults? (theme, UI preferences, custom hotkeys)",
+      "resetSettingsDone": "All settings reset to defaults.",
+      "defaultSessionMode": "Default session mode",
+      "preferencesSection": "Preferences",
+      "dataSection": "Data"
+    }
   },
   "modes": {
     "classic": {
@@ -436,7 +481,15 @@
     }
   },
   "timeline": {
-    "dayLabels": ["M", "T", "W", "T", "F", "S", "S"],
+    "dayLabels": [
+      "M",
+      "T",
+      "W",
+      "T",
+      "F",
+      "S",
+      "S"
+    ],
     "monthLabels": [
       "Jan",
       "Feb",
@@ -499,11 +552,21 @@
     "posesLabel": "Poses",
     "sessionsLabel": "sessions",
     "history": "Session history"
+  },
+  "storage": {
+    "fallbackActive": "Storage fallback enabled: IndexedDB unavailable, using local storage.",
+    "repairTitle": "Repair storage",
+    "repairMessage": "Choose what to reset. This action cannot be undone.",
+    "repairConfirm": "Repair",
+    "targetTimeline": "Timeline history",
+    "targetPlans": "Session plans",
+    "targetHotkeys": "Keyboard shortcuts",
+    "repairDone": "Storage repaired: {{targets}}",
+    "nothingSelected": "No storage section selected.",
+    "repairError": "Storage repair failed.",
+    "repairMessageDetailed": "Choose what to reset. Selected data will be deleted locally and cannot be recovered automatically.",
+    "repairImpactTimeline": "Timeline: removes day/session history and related image references.",
+    "repairImpactPlans": "Plans: removes saved session plans.",
+    "repairImpactHotkeys": "Hotkeys: restores default shortcuts."
   }
 }
-
-
-
-
-
-

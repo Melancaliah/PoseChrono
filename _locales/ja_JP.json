@@ -12,6 +12,7 @@
     "description": "クロッキー練習タイマーツール"
   },
   "titlebar": {
+    "settingsTooltip": "Settings (Ctrl + K)",
     "pinTooltip": "最前面に固定 (Shift+T)",
     "minimize": "最小化",
     "maximize": "最大化",
@@ -43,7 +44,51 @@
     "loadedFromSession": "セッションから {{count}} 枚読み込み",
     "posesLabel": "ポーズ",
     "durationLabelShort": "時間",
-    "timerLabel": "タイマー"
+    "timerLabel": "タイマー",
+    "repairStorage": "Repair storage",
+    "repairStorageTooltip": "Repair timeline/plans/hotkeys storage",
+    "global": {
+      "title": "Global settings",
+      "appearance": "Appearance",
+      "history": "History",
+      "drawing": "Drawing",
+      "general": "General",
+      "showBackgroundGrid": "Show background grid",
+      "hideBackgroundGrid": "Hide background grid",
+      "titlebarAlwaysVisible": "Titlebar always visible",
+      "changeTheme": "Change theme",
+      "openTimeline": "Open timeline",
+      "repairStorage": "Repair storage",
+      "openHotkeys": "Configure hotkeys",
+      "exportPreferences": "Export preferences",
+      "importPreferences": "Import preferences",
+      "preferencesPackageExportMessage": "Choose what to include in the backup file.",
+      "preferencesPackageImportMessage": "Choose what to import from this backup file.",
+      "packageSectionUi": "UI preferences",
+      "packageSectionHotkeys": "Keyboard shortcuts",
+      "packageSectionPlans": "Session plans",
+      "packageSectionTimeline": "Timeline history",
+      "preferencesExportDone": "Preferences exported.",
+      "preferencesExportError": "Preferences export failed.",
+      "preferencesImportDone": "Preferences imported: {{targets}}",
+      "preferencesImportError": "Preferences import failed.",
+      "preferencesImportInvalid": "Invalid backup file.",
+      "storageStatusReady": "Storage backend: IndexedDB (normal mode).",
+      "storageStatusFallback": "Storage backend: localStorage fallback active.",
+      "maintenance": "Maintenance",
+      "preferencesHint": "Export creates one JSON backup. Import applies only selected sections.",
+      "maintenanceHint": "Maintenance actions may remove local data. Consider exporting a backup first.",
+      "storageDiagDays": "Days",
+      "storageDiagSessions": "Sessions",
+      "storageDiagPlans": "Plans",
+      "storageDiagCustomHotkeys": "Custom hotkeys",
+      "resetSettings": "設定をリセット",
+      "resetSettingsConfirm": "すべての設定を既定値に戻しますか？（テーマ、UI設定、カスタムショートカット）",
+      "resetSettingsDone": "すべての設定を既定値に戻しました。",
+      "defaultSessionMode": "デフォルトのセッションモード",
+      "preferencesSection": "環境設定",
+      "dataSection": "データ"
+    }
   },
   "modes": {
     "classic": {
@@ -436,7 +481,15 @@
     }
   },
   "timeline": {
-    "dayLabels": ["月", "火", "水", "木", "金", "土", "日"],
+    "dayLabels": [
+      "月",
+      "火",
+      "水",
+      "木",
+      "金",
+      "土",
+      "日"
+    ],
     "monthLabels": [
       "1月",
       "2月",
@@ -499,11 +552,21 @@
     "posesLabel": "ポーズ",
     "sessionsLabel": "練習",
     "history": "練習履歴"
+  },
+  "storage": {
+    "fallbackActive": "Storage fallback enabled: IndexedDB unavailable, using local storage.",
+    "repairTitle": "Repair storage",
+    "repairMessage": "Choose what to reset. This action cannot be undone.",
+    "repairConfirm": "Repair",
+    "targetTimeline": "Timeline history",
+    "targetPlans": "Session plans",
+    "targetHotkeys": "Keyboard shortcuts",
+    "repairDone": "Storage repaired: {{targets}}",
+    "nothingSelected": "No storage section selected.",
+    "repairError": "Storage repair failed.",
+    "repairMessageDetailed": "Choose what to reset. Selected data will be deleted locally and cannot be recovered automatically.",
+    "repairImpactTimeline": "Timeline: removes day/session history and related image references.",
+    "repairImpactPlans": "Plans: removes saved session plans.",
+    "repairImpactHotkeys": "Hotkeys: restores default shortcuts."
   }
 }
-
-
-
-
-
-

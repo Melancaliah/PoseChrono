@@ -1,5 +1,5 @@
 // PoseChrono Drawing Module - Bundled from js/draw/
-// Generated: 2026-02-14T14:32:35.953Z
+// Generated: 2026-02-14T23:10:37.217Z
 
 // ================================================================
 // MODULE: utils.js
@@ -4256,7 +4256,7 @@ function renderMeasureLine(ctx, line, scaleFactor, hoverPoint, hoverThreshold) {
       ? isShapeEdgeSelected(line)
       : isIndividualShapeSelected(line);
   const ctrlShapeMode = isShapeEditingTool(currentTool) && !!keysState.ctrl;
-  const draggingSameShape =
+  const endpointDragOnThisShape =
     isDraggingEndpoint &&
     selectedMeasurement &&
     ((selectedMeasurement.type === "shape-edge" &&
@@ -4264,7 +4264,13 @@ function renderMeasureLine(ctx, line, scaleFactor, hoverPoint, hoverThreshold) {
       selectedMeasurement.shapeGroup &&
       line.shapeGroup === selectedMeasurement.shapeGroup) ||
       selectedMeasurement.id === line.id);
-  const suppressShapeHandles = ctrlShapeMode && !draggingSameShape;
+  const draggingAnyShapeEndpoint =
+    isDraggingEndpoint &&
+    selectedMeasurement &&
+    isEditableShape(selectedMeasurement);
+  const suppressShapeHandles =
+    (ctrlShapeMode && !endpointDragOnThisShape) ||
+    (draggingAnyShapeEndpoint && !endpointDragOnThisShape);
   const color =
     line.type === "calibrate"
       ? (line.config?.color ?? "#10b981")
@@ -4440,7 +4446,7 @@ function renderMeasureLine(ctx, line, scaleFactor, hoverPoint, hoverThreshold) {
   // Bornes
   const scaledThreshold = hoverThreshold * scaleFactor;
   let hoveredEndpoint = null;
-  if (hoverPoint) {
+  if (hoverPoint && (!draggingAnyShapeEndpoint || endpointDragOnThisShape)) {
     if (isShapeCircle) {
       const distEnd = getDistance(hoverPoint, line.end);
       if (distEnd < scaledThreshold) hoveredEndpoint = "end";
@@ -4465,10 +4471,6 @@ function renderMeasureLine(ctx, line, scaleFactor, hoverPoint, hoverThreshold) {
         (isShapeEdge && currentTool === "rectangle") ||
         (isShapeCircle && currentTool === "circle");
       if (rectangleEditMode && isShapeToolContext) {
-        const endpointDragOnThisShape =
-          isDraggingEndpoint &&
-          selectedMeasurement &&
-          selectedMeasurement.id === line.id;
         if (isShapeCircle) {
           if (hoveredEndpoint === "end" || endpointDragOnThisShape || shapeSelected) {
             drawEndpoint(ctx, line.end.x, line.end.y, color, scaleFactor);
@@ -4498,22 +4500,23 @@ function renderMeasureLine(ctx, line, scaleFactor, hoverPoint, hoverThreshold) {
       }
     } else {
       // Ligne: bornes visibles si selectionnee, ou au survol.
-      const endpointDragOnThisShape =
-        isDraggingEndpoint &&
-        selectedMeasurement &&
-        selectedMeasurement.id === line.id;
       const ctrlSnapSingleEndpoint =
         !!keysState.ctrl &&
         endpointDragOnThisShape &&
         (draggedEndpoint === "start" || draggedEndpoint === "end");
-      const showStart =
-        hoveredEndpoint === "start" ||
-        (endpointDragOnThisShape &&
-          (!ctrlSnapSingleEndpoint || draggedEndpoint === "start"));
-      const showEnd =
-        hoveredEndpoint === "end" ||
-        (endpointDragOnThisShape &&
-          (!ctrlSnapSingleEndpoint || draggedEndpoint === "end"));
+      const draggingSpecificEndpoint =
+        endpointDragOnThisShape &&
+        (draggedEndpoint === "start" || draggedEndpoint === "end");
+      const showStart = draggingSpecificEndpoint
+        ? draggedEndpoint === "start"
+        : hoveredEndpoint === "start" ||
+          (endpointDragOnThisShape &&
+            (!ctrlSnapSingleEndpoint || draggedEndpoint === "start"));
+      const showEnd = draggingSpecificEndpoint
+        ? draggedEndpoint === "end"
+        : hoveredEndpoint === "end" ||
+          (endpointDragOnThisShape &&
+            (!ctrlSnapSingleEndpoint || draggedEndpoint === "end"));
       if (showStart) {
         drawEndpoint(ctx, line.start.x, line.start.y, color, scaleFactor);
       }
@@ -4541,7 +4544,9 @@ function renderMeasureLine(ctx, line, scaleFactor, hoverPoint, hoverThreshold) {
         isDraggingEndpoint &&
         selectedMeasurement &&
         selectedMeasurement.id === line.id;
-      if (hideControlDuringCtrlEndpointSnap) {
+      const hideControlDuringEndpointDrag =
+        isDraggingEndpoint && endpointDragOnThisShape;
+      if (hideControlDuringCtrlEndpointSnap || hideControlDuringEndpointDrag) {
         // En snap endpoint (Ctrl), on masque le handle de courbure.
       } else if (!controlHover && !controlActive) {
         // Handle discret: visible uniquement au survol / drag actif.
@@ -5813,34 +5818,27 @@ function addMenuToggleOption(menu, options) {
   const { id, label, checked, onChange, labelClass = "" } = options;
 
   const row = document.createElement("div");
-  row.className = "context-menu-row";
+  row.className = "context-menu-row context-menu-checkbox-row";
 
-  const labelEl = document.createElement("span");
-  labelEl.className = `context-menu-label ${labelClass}`.trim();
-  labelEl.textContent = label;
+  const toggleLabel = document.createElement("label");
+  toggleLabel.className = "checkbox-simple-label";
+  toggleLabel.setAttribute("for", id);
 
-  const toggle = document.createElement("label");
-  toggle.className = "proportion-checkbox";
-  toggle.innerHTML = `
-    <input type="checkbox" id="${id}" ${checked ? "checked" : ""}>
-    <span class="proportion-slider"></span>
-  `;
-
-  const input = toggle.querySelector("input");
+  const input = document.createElement("input");
+  input.type = "checkbox";
+  input.id = id;
+  input.checked = !!checked;
+  input.className = "context-menu-checkbox checkbox-simple";
   input.addEventListener("change", () => onChange(input.checked));
 
-  row.appendChild(labelEl);
-  row.appendChild(toggle);
-  menu.appendChild(row);
+  const labelEl = document.createElement("span");
+  labelEl.className = `context-menu-label context-menu-label-normal checkbox-simple-text ${labelClass}`.trim();
+  labelEl.textContent = label;
 
-  row.addEventListener("click", (e) => {
-    // Ne pas déclencher si on clique sur la checkbox ou son label parent
-    if (e.target === input || e.target.closest(".proportion-checkbox")) {
-      return;
-    }
-    input.checked = !input.checked;
-    onChange(input.checked);
-  });
+  toggleLabel.appendChild(input);
+  toggleLabel.appendChild(labelEl);
+  row.appendChild(toggleLabel);
+  menu.appendChild(row);
 }
 
 /**
@@ -5975,10 +5973,7 @@ function createToggleRow(label, id, checked, onChange, marginTop = null) {
   if (marginTop) row.style.marginTop = marginTop;
   row.innerHTML = `
     <span class="config-label">${label}</span>
-    <label class="proportion-checkbox">
-      <input type="checkbox" id="${id}" ${checked ? "checked" : ""}>
-      <span class="proportion-slider"></span>
-    </label>
+    <input type="checkbox" class="checkbox-simple config-checkbox-simple" id="${id}" ${checked ? "checked" : ""}>
   `;
   const input = row.querySelector("input");
   input.addEventListener("change", (e) => onChange(e.target.checked));
@@ -6110,10 +6105,7 @@ function createProportionOption(
       <input type="color" class="color-picker-mini" id="${colorId}" value="${color}">
       ${label}
     </span>
-    <label class="proportion-checkbox">
-      <input type="checkbox" id="${checkboxId}" ${checked ? "checked" : ""}>
-      <span class="proportion-slider"></span>
-    </label>
+    <input type="checkbox" class="checkbox-simple config-checkbox-simple" id="${checkboxId}" ${checked ? "checked" : ""}>
   `;
 
   option
@@ -7186,8 +7178,7 @@ function makeMeasureConfigDraggable(popup) {
       e.target.closest("button") ||
       e.target.closest("input") ||
       e.target.closest("select") ||
-      e.target.closest("label") ||
-      e.target.closest(".proportion-checkbox")
+      e.target.closest("label")
     ) {
       return;
     }

@@ -12,6 +12,7 @@
     "description": "专为人体速写设计的计时与练习辅助工具"
   },
   "titlebar": {
+    "settingsTooltip": "Settings (Ctrl + K)",
     "pinTooltip": "置顶 (Shift+T)",
     "minimize": "最小化",
     "maximize": "最大化",
@@ -43,7 +44,51 @@
     "loadedFromSession": "已从练习加载 {{count}} 张",
     "posesLabel": "姿势",
     "durationLabelShort": "时长",
-    "timerLabel": "计时器"
+    "timerLabel": "计时器",
+    "repairStorage": "Repair storage",
+    "repairStorageTooltip": "Repair timeline/plans/hotkeys storage",
+    "global": {
+      "title": "Global settings",
+      "appearance": "Appearance",
+      "history": "History",
+      "drawing": "Drawing",
+      "general": "General",
+      "showBackgroundGrid": "Show background grid",
+      "hideBackgroundGrid": "Hide background grid",
+      "titlebarAlwaysVisible": "Titlebar always visible",
+      "changeTheme": "Change theme",
+      "openTimeline": "Open timeline",
+      "repairStorage": "Repair storage",
+      "openHotkeys": "Configure hotkeys",
+      "exportPreferences": "Export preferences",
+      "importPreferences": "Import preferences",
+      "preferencesPackageExportMessage": "Choose what to include in the backup file.",
+      "preferencesPackageImportMessage": "Choose what to import from this backup file.",
+      "packageSectionUi": "UI preferences",
+      "packageSectionHotkeys": "Keyboard shortcuts",
+      "packageSectionPlans": "Session plans",
+      "packageSectionTimeline": "Timeline history",
+      "preferencesExportDone": "Preferences exported.",
+      "preferencesExportError": "Preferences export failed.",
+      "preferencesImportDone": "Preferences imported: {{targets}}",
+      "preferencesImportError": "Preferences import failed.",
+      "preferencesImportInvalid": "Invalid backup file.",
+      "storageStatusReady": "Storage backend: IndexedDB (normal mode).",
+      "storageStatusFallback": "Storage backend: localStorage fallback active.",
+      "maintenance": "Maintenance",
+      "preferencesHint": "Export creates one JSON backup. Import applies only selected sections.",
+      "maintenanceHint": "Maintenance actions may remove local data. Consider exporting a backup first.",
+      "storageDiagDays": "Days",
+      "storageDiagSessions": "Sessions",
+      "storageDiagPlans": "Plans",
+      "storageDiagCustomHotkeys": "Custom hotkeys",
+      "resetSettings": "重置设置",
+      "resetSettingsConfirm": "要将所有设置重置为默认值吗？（主题、界面偏好、自定义快捷键）",
+      "resetSettingsDone": "所有设置已重置为默认值。",
+      "defaultSessionMode": "默认会话模式",
+      "preferencesSection": "偏好设置",
+      "dataSection": "数据"
+    }
   },
   "modes": {
     "classic": {
@@ -436,7 +481,15 @@
     }
   },
   "timeline": {
-    "dayLabels": ["一", "二", "三", "四", "五", "六", "日"],
+    "dayLabels": [
+      "一",
+      "二",
+      "三",
+      "四",
+      "五",
+      "六",
+      "日"
+    ],
     "monthLabels": [
       "1月",
       "2月",
@@ -499,11 +552,21 @@
     "posesLabel": "姿势",
     "sessionsLabel": "练习",
     "history": "练习历史"
+  },
+  "storage": {
+    "fallbackActive": "Storage fallback enabled: IndexedDB unavailable, using local storage.",
+    "repairTitle": "Repair storage",
+    "repairMessage": "Choose what to reset. This action cannot be undone.",
+    "repairConfirm": "Repair",
+    "targetTimeline": "Timeline history",
+    "targetPlans": "Session plans",
+    "targetHotkeys": "Keyboard shortcuts",
+    "repairDone": "Storage repaired: {{targets}}",
+    "nothingSelected": "No storage section selected.",
+    "repairError": "Storage repair failed.",
+    "repairMessageDetailed": "Choose what to reset. Selected data will be deleted locally and cannot be recovered automatically.",
+    "repairImpactTimeline": "Timeline: removes day/session history and related image references.",
+    "repairImpactPlans": "Plans: removes saved session plans.",
+    "repairImpactHotkeys": "Hotkeys: restores default shortcuts."
   }
 }
-
-
-
-
-
-

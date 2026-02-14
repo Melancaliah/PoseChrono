@@ -9,11 +9,27 @@
 // ================================================================
 
 const TIMELINE_STORAGE_KEY = "posechrono-timeline-data";
+const TIMELINE_DB_KEY = "timeline_data";
+const TIMELINE_FALLBACK_LOCAL_KEY = "posechrono-db:timeline_data";
+const TIMELINE_SCHEMA_VERSION = 2;
+const TIMELINE_SAVE_DEBOUNCE_MS = 220;
 const DAYS_IN_WEEK = 7;
 const WEEKS_TO_SHOW = 53; // ~1 an
 const MIN_YEAR = 2024;
 const MAX_FUTURE_WEEKS = 8; // Limite de navigation dans le futur
-const YEARS_TO_KEEP = 3; // Nombre d'années à conserver dans localStorage
+const YEARS_TO_KEEP = 3; // Nombre d'années à conserver
+
+function getTimelineStorage() {
+  if (
+    typeof window !== "undefined" &&
+    window.PoseChronoStorage &&
+    typeof window.PoseChronoStorage.getJson === "function" &&
+    typeof window.PoseChronoStorage.setJson === "function"
+  ) {
+    return window.PoseChronoStorage;
+  }
+  return null;
+}
 
 // Validation des sessions
 const SESSION_VALIDATION = {
@@ -62,6 +78,44 @@ function tl(key, options = {}, fallback = "") {
     return result !== key ? result : fallback;
   }
   return fallback;
+}
+
+function toFileUrl(path) {
+  if (typeof path !== "string") return "";
+  const raw = path.trim();
+  if (!raw) return "";
+  if (/^(https?:|file:|data:|blob:)/i.test(raw)) return raw;
+
+  const normalized = raw.replace(/\\/g, "/");
+  if (/^[a-zA-Z]:\//.test(normalized)) {
+    return `file:///${normalized}`;
+  }
+  if (normalized.startsWith("//")) {
+    return `file:${normalized}`;
+  }
+  if (normalized.startsWith("/")) {
+    return `file://${normalized}`;
+  }
+  return normalized;
+}
+
+function resolveTimelineImageSrc(image) {
+  if (typeof image === "string") {
+    return toFileUrl(image);
+  }
+  if (!image || typeof image !== "object") return "";
+
+  const direct = [
+    image.thumbnailURL,
+    image.thumbnail,
+    image.url,
+  ].find((v) => typeof v === "string" && v.trim().length > 0);
+  if (direct) return toFileUrl(direct);
+
+  const fromPath = [image.filePath, image.path, image.file].find(
+    (v) => typeof v === "string" && v.trim().length > 0,
+  );
+  return toFileUrl(fromPath || "");
 }
 
 /**
@@ -442,6 +496,11 @@ const FormatUtils = {
 
 const TimelineData = {
   _data: null,
+  _persistPromise: Promise.resolve(),
+  _hydratePromise: null,
+  _hydrated: false,
+  _saveDebounceTimer: null,
+  _pendingPersistData: null,
 
   /**
    * Structure de données par défaut
@@ -460,33 +519,414 @@ const TimelineData = {
     };
   },
 
+  _sanitizeSessionEntry(session) {
+    if (!session || typeof session !== "object") return null;
+    const poses = Math.max(0, Math.round(Number(session.poses) || 0));
+    const time = Math.max(0, Math.min(SESSION_VALIDATION.MAX_TIME_PER_SESSION, Math.round(Number(session.time) || 0)));
+    if (poses < SESSION_VALIDATION.MIN_POSES || time < SESSION_VALIDATION.MIN_TIME_SECONDS) {
+      return null;
+    }
+    const hour = Math.max(0, Math.min(23, Math.round(Number(session.hour) || 0)));
+    const minute = Math.max(0, Math.min(59, Math.round(Number(session.minute) || 0)));
+    const timestamp =
+      typeof session.timestamp === "string" && !Number.isNaN(Date.parse(session.timestamp))
+        ? session.timestamp
+        : new Date().toISOString();
+    const mode = typeof session.mode === "string" ? session.mode.slice(0, 32) : "classique";
+    const memoryType =
+      session.memoryType === "flash" || session.memoryType === "progressive"
+        ? session.memoryType
+        : null;
+    const customQueue = Array.isArray(session.customQueue) ? session.customQueue : null;
+    const images = Array.isArray(session.images)
+      ? session.images
+          .map((img) => this._sanitizeSessionImageEntry(img))
+          .filter(Boolean)
+          .slice(0, 1000)
+      : [];
+
+    return {
+      timestamp,
+      hour,
+      minute,
+      poses,
+      time,
+      mode,
+      memoryType,
+      customQueue,
+      images,
+    };
+  },
+
+  _sanitizeSessionImageEntry(image) {
+    if (typeof image === "string") {
+      const value = image.trim();
+      if (!value) return null;
+      return value.slice(0, 4096);
+    }
+
+    if (!image || typeof image !== "object") return null;
+
+    const out = {};
+
+    if (
+      image.id !== undefined &&
+      image.id !== null &&
+      (typeof image.id === "string" || typeof image.id === "number")
+    ) {
+      out.id = image.id;
+    }
+
+    const copyString = (key, maxLen = 4096) => {
+      if (typeof image[key] !== "string") return;
+      const value = image[key].trim();
+      if (!value) return;
+      out[key] = value.slice(0, maxLen);
+    };
+
+    copyString("filePath");
+    copyString("path");
+    copyString("file");
+    copyString("thumbnailURL");
+    copyString("thumbnail");
+    copyString("url");
+    copyString("name", 256);
+    copyString("ext", 32);
+
+    if (Object.keys(out).length === 0) return null;
+    return out;
+  },
+
+  _sanitizeData(candidate) {
+    const base = this._getDefaultData();
+    const raw = candidate && typeof candidate === "object" ? candidate : {};
+    let repaired = false;
+
+    const rawDays = raw.days && typeof raw.days === "object" ? raw.days : {};
+    if (!raw.days || typeof raw.days !== "object") repaired = true;
+
+    for (const [dateKey, dayValue] of Object.entries(rawDays)) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
+        repaired = true;
+        continue;
+      }
+      const day = dayValue && typeof dayValue === "object" ? dayValue : {};
+      if (!dayValue || typeof dayValue !== "object") repaired = true;
+
+      const sessionsRaw = Array.isArray(day.sessions) ? day.sessions : [];
+      if (!Array.isArray(day.sessions)) repaired = true;
+      const sessions = sessionsRaw
+        .map((s) => this._sanitizeSessionEntry(s))
+        .filter(Boolean)
+        .slice(-50);
+      if (sessions.length !== sessionsRaw.length) repaired = true;
+
+      const posesFromSessions = sessions.reduce((sum, s) => sum + (s.poses || 0), 0);
+      const timeFromSessions = sessions.reduce((sum, s) => sum + (s.time || 0), 0);
+      const posesRaw = Math.max(0, Math.round(Number(day.poses) || 0));
+      const timeRaw = Math.max(0, Math.round(Number(day.time) || 0));
+      const poses = sessions.length > 0 ? posesFromSessions : posesRaw;
+      const time = sessions.length > 0 ? timeFromSessions : timeRaw;
+
+      if (poses !== posesRaw || time !== timeRaw) repaired = true;
+
+      base.days[dateKey] = { poses, time, sessions };
+    }
+
+    base.stats = {
+      totalPoses: Math.max(0, Math.round(Number(raw.stats?.totalPoses) || 0)),
+      totalTime: Math.max(0, Math.round(Number(raw.stats?.totalTime) || 0)),
+      currentStreak: Math.max(0, Math.round(Number(raw.stats?.currentStreak) || 0)),
+      bestStreak: Math.max(0, Math.round(Number(raw.stats?.bestStreak) || 0)),
+      lastSessionDate:
+        typeof raw.stats?.lastSessionDate === "string" &&
+        /^\d{4}-\d{2}-\d{2}$/.test(raw.stats.lastSessionDate)
+          ? raw.stats.lastSessionDate
+          : null,
+    };
+
+    const computedPoses = Object.values(base.days).reduce(
+      (sum, day) => sum + (day.poses || 0),
+      0,
+    );
+    const computedTime = Object.values(base.days).reduce(
+      (sum, day) => sum + (day.time || 0),
+      0,
+    );
+
+    if (base.stats.totalPoses !== computedPoses || base.stats.totalTime !== computedTime) {
+      repaired = true;
+      base.stats.totalPoses = computedPoses;
+      base.stats.totalTime = computedTime;
+    }
+
+    return { data: base, repaired };
+  },
+
+  _normalizePayload(rawPayload) {
+    if (!rawPayload || typeof rawPayload !== "object") {
+      const sanitized = this._sanitizeData(null);
+      return {
+        payload: {
+          schemaVersion: TIMELINE_SCHEMA_VERSION,
+          data: sanitized.data,
+        },
+        data: sanitized.data,
+        repaired: true,
+      };
+    }
+
+    const sourceData =
+      rawPayload.schemaVersion === TIMELINE_SCHEMA_VERSION && rawPayload.data
+        ? rawPayload.data
+        : rawPayload;
+    const sanitized = this._sanitizeData(sourceData);
+    const payload = {
+      schemaVersion: TIMELINE_SCHEMA_VERSION,
+      data: sanitized.data,
+    };
+
+    const repaired =
+      sanitized.repaired ||
+      rawPayload.schemaVersion !== TIMELINE_SCHEMA_VERSION ||
+      !rawPayload.data;
+
+    return { payload, data: sanitized.data, repaired };
+  },
+
+  _mergeDayEntries(existingDay, incomingDay) {
+    const base = existingDay && typeof existingDay === "object" ? existingDay : {};
+    const next =
+      incomingDay && typeof incomingDay === "object" ? incomingDay : {};
+
+    const existingSessions = Array.isArray(base.sessions) ? base.sessions : [];
+    const incomingSessions = Array.isArray(next.sessions) ? next.sessions : [];
+    const mergedSessions = [];
+    const seen = new Set();
+
+    [...existingSessions, ...incomingSessions].forEach((session) => {
+      if (!session || typeof session !== "object") return;
+      const signature = [
+        session.timestamp || "",
+        session.hour ?? "",
+        session.minute ?? "",
+        session.poses ?? "",
+        session.time ?? "",
+        session.mode || "",
+        session.memoryType || "",
+        Array.isArray(session.images) ? session.images.length : 0,
+      ].join("|");
+      if (seen.has(signature)) return;
+      seen.add(signature);
+      mergedSessions.push(session);
+    });
+
+    mergedSessions.sort((a, b) => {
+      const at = Date.parse(a?.timestamp || "") || 0;
+      const bt = Date.parse(b?.timestamp || "") || 0;
+      return at - bt;
+    });
+
+    const limitedSessions = mergedSessions.slice(-50);
+    const posesFromSessions = limitedSessions.reduce(
+      (sum, s) => sum + (Number(s?.poses) || 0),
+      0,
+    );
+    const timeFromSessions = limitedSessions.reduce(
+      (sum, s) => sum + (Number(s?.time) || 0),
+      0,
+    );
+
+    return {
+      poses:
+        limitedSessions.length > 0
+          ? posesFromSessions
+          : Math.max(Number(base.poses) || 0, Number(next.poses) || 0),
+      time:
+        limitedSessions.length > 0
+          ? timeFromSessions
+          : Math.max(Number(base.time) || 0, Number(next.time) || 0),
+      sessions: limitedSessions,
+    };
+  },
+
+  _mergeTimelineDatas(datasets) {
+    const merged = this._getDefaultData();
+    const sources = Array.isArray(datasets) ? datasets : [];
+    sources.forEach((data) => {
+      if (!data || typeof data !== "object" || !data.days) return;
+      Object.entries(data.days).forEach(([dateKey, day]) => {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) return;
+        if (!merged.days[dateKey]) {
+          merged.days[dateKey] = this._mergeDayEntries(null, day);
+          return;
+        }
+        merged.days[dateKey] = this._mergeDayEntries(merged.days[dateKey], day);
+      });
+    });
+    return merged;
+  },
+
+  _loadFromLocalStorageKey(storageKey) {
+    try {
+      const stored = localStorage.getItem(storageKey);
+      if (!stored) return null;
+      const parsed = JSON.parse(stored);
+      const normalized = this._normalizePayload(parsed);
+      if (normalized.repaired) {
+        console.warn(`[Timeline] Local data repaired during load (${storageKey}).`);
+      }
+      return normalized.data;
+    } catch (e) {
+      console.error(`[Timeline] Erreur chargement localStorage (${storageKey}):`, e);
+      return null;
+    }
+  },
+
+  _listLocalCandidateKeys() {
+    const keys = new Set([TIMELINE_STORAGE_KEY, TIMELINE_FALLBACK_LOCAL_KEY]);
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (!key) continue;
+        if (
+          key.startsWith("posechrono-timeline-backup:") ||
+          key.startsWith("posechrono-db:timeline_data:backup:")
+        ) {
+          keys.add(key);
+        }
+      }
+    } catch (_) {}
+    return Array.from(keys);
+  },
+
+  _loadLocalCandidates() {
+    const candidates = [];
+    const candidateKeys = this._listLocalCandidateKeys();
+    for (const key of candidateKeys) {
+      const data = this._loadFromLocalStorageKey(key);
+      if (!data) continue;
+      candidates.push(data);
+    }
+    return candidates;
+  },
+
+  _loadFromLocalStorage() {
+    const candidates = this._loadLocalCandidates();
+    if (candidates.length === 0) {
+      return this._getDefaultData();
+    }
+    return this._mergeTimelineDatas(candidates);
+  },
+
+  _writeTimelineBackup(payload, prefix = "posechrono-timeline-backup:") {
+    try {
+      const key = `${prefix}${Date.now()}`;
+      localStorage.setItem(key, JSON.stringify(payload));
+
+      const backupKeys = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const existingKey = localStorage.key(i);
+        if (existingKey && existingKey.startsWith(prefix)) {
+          backupKeys.push(existingKey);
+        }
+      }
+      backupKeys.sort();
+      while (backupKeys.length > 3) {
+        const oldest = backupKeys.shift();
+        if (oldest) localStorage.removeItem(oldest);
+      }
+    } catch (_) {}
+  },
+
+  _cloneData(data) {
+    try {
+      if (typeof structuredClone === "function") {
+        return structuredClone(data);
+      }
+    } catch (_) {}
+    return JSON.parse(JSON.stringify(data));
+  },
+
+  _scheduleHydrateFromIndexedDB() {
+    if (this._hydrated || this._hydratePromise) return;
+    const storage = getTimelineStorage();
+    if (!storage) {
+      this._hydrated = true;
+      return;
+    }
+
+    this._hydratePromise = (async () => {
+      try {
+        const localCandidates = this._loadLocalCandidates();
+        const idbPayload = await storage.getJson(TIMELINE_DB_KEY, undefined);
+        if (idbPayload !== undefined) {
+          const normalized = this._normalizePayload(idbPayload);
+          if (normalized.repaired) {
+            this._writeTimelineBackup(
+              idbPayload,
+              "posechrono-db:timeline_data:backup:",
+            );
+          }
+          const merged = this._mergeTimelineDatas([
+            normalized.data,
+            ...localCandidates,
+          ]);
+          this._data = merged;
+          this._recalculateStats();
+          this._cleanupOldData();
+          this.save({ immediate: true });
+          if (normalized.repaired) {
+            console.warn("[Timeline] IndexedDB data repaired during hydration.");
+          }
+          this._notifyHydrated();
+          return;
+        }
+
+        const localData =
+          localCandidates.length > 0
+            ? this._mergeTimelineDatas(localCandidates)
+            : this._getDefaultData();
+        this._data = localData;
+        this._recalculateStats();
+        const normalizedLocal = this._normalizePayload(this._data);
+        await storage.setJson(TIMELINE_DB_KEY, normalizedLocal.payload);
+        this._notifyHydrated();
+      } catch (e) {
+        console.error("[Timeline] Erreur migration IndexedDB:", e);
+      } finally {
+        this._hydrated = true;
+        this._hydratePromise = null;
+      }
+    })();
+  },
+
+  _notifyHydrated() {
+    if (timelineRendererSettings && timelineRendererSettings.container) {
+      timelineRendererSettings._debouncedRender();
+    }
+    if (timelineRendererReview && timelineRendererReview.container) {
+      timelineRendererReview._debouncedRender();
+    }
+  },
+
   /**
-   * Charge les données depuis localStorage
+   * Charge les données (sync immédiat + hydrate IndexedDB en arrière-plan)
    * @returns {Object}
    */
   load() {
-    try {
-      const stored = localStorage.getItem(TIMELINE_STORAGE_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        // Validation basique de la structure
-        if (
-          parsed &&
-          typeof parsed === "object" &&
-          parsed.days &&
-          parsed.stats
-        ) {
-          this._data = parsed;
-        } else {
-          console.warn("[Timeline] Données corrompues, réinitialisation");
-          this._data = this._getDefaultData();
-        }
-      } else {
-        this._data = this._getDefaultData();
-      }
-    } catch (e) {
-      console.error("[Timeline] Erreur chargement données:", e);
-      this._data = this._getDefaultData();
+    if (this._data) return this._data;
+    this._data = this._loadFromLocalStorage();
+    this._scheduleHydrateFromIndexedDB();
+    return this._data;
+  },
+
+  async ensureHydrated() {
+    this.load();
+    if (this._hydratePromise) {
+      try {
+        await this._hydratePromise;
+      } catch (_) {}
     }
     return this._data;
   },
@@ -496,6 +936,10 @@ const TimelineData = {
    * Garde seulement les YEARS_TO_KEEP dernières années
    */
   _cleanupOldData() {
+    if (!this._data || !this._data.days || typeof this._data.days !== "object") {
+      this._data = this._getDefaultData();
+      return;
+    }
     const cutoff = new Date();
     cutoff.setFullYear(cutoff.getFullYear() - YEARS_TO_KEEP);
     cutoff.setMonth(0, 1); // 1er janvier de l'année limite
@@ -621,38 +1065,79 @@ const TimelineData = {
     return bestStreak;
   },
 
-  /**
-   * Sauvegarde les données dans localStorage
-   */
-  save() {
-    try {
-      localStorage.setItem(TIMELINE_STORAGE_KEY, JSON.stringify(this._data));
-    } catch (e) {
-      if (
-        e.name === "QuotaExceededError" ||
-        (e.message && e.message.includes("quota"))
-      ) {
-        console.warn(
-          "[Timeline] Quota localStorage dépassé, nettoyage des anciennes données...",
+  _persistNow(dataToPersist) {
+    const storage = getTimelineStorage();
+    const normalized = this._normalizePayload(dataToPersist);
+    this._writeTimelineBackup(normalized.payload, "posechrono-timeline-backup:");
+
+    if (!storage) {
+      try {
+        localStorage.setItem(
+          TIMELINE_STORAGE_KEY,
+          JSON.stringify(normalized.payload),
         );
-        this._cleanupOldData();
-        // Retry une fois
-        try {
-          localStorage.setItem(
-            TIMELINE_STORAGE_KEY,
-            JSON.stringify(this._data),
-          );
-          console.log("[Timeline] Sauvegarde réussie après nettoyage");
-        } catch (e2) {
-          console.error(
-            "[Timeline] Échec sauvegarde même après nettoyage:",
-            e2,
-          );
-        }
-      } else {
-        console.error("[Timeline] Erreur sauvegarde données:", e);
+      } catch (e) {
+        console.error("[Timeline] Erreur sauvegarde fallback localStorage:", e);
       }
+      return Promise.resolve();
     }
+
+    return storage
+      .setJson(TIMELINE_DB_KEY, normalized.payload)
+      .then(() => {
+        try {
+          localStorage.removeItem(TIMELINE_STORAGE_KEY);
+        } catch (_) {}
+      })
+      .catch((e) => {
+        console.error("[Timeline] Erreur sauvegarde IndexedDB:", e);
+      });
+  },
+
+  /**
+   * Sauvegarde les données (debounce + IndexedDB)
+   */
+  save(options = {}) {
+    const { immediate = false } = options;
+    this._cleanupOldData();
+    this._pendingPersistData = this._data
+      ? this._cloneData(this._data)
+      : this._getDefaultData();
+
+    if (immediate) {
+      this.flushPersist();
+      return;
+    }
+
+    if (this._saveDebounceTimer) {
+      clearTimeout(this._saveDebounceTimer);
+    }
+    this._saveDebounceTimer = setTimeout(() => {
+      this._saveDebounceTimer = null;
+      this.flushPersist();
+    }, TIMELINE_SAVE_DEBOUNCE_MS);
+  },
+
+  flushPersist() {
+    if (this._saveDebounceTimer) {
+      clearTimeout(this._saveDebounceTimer);
+      this._saveDebounceTimer = null;
+    }
+
+    const toPersist = this._pendingPersistData
+      ? this._cloneData(this._pendingPersistData)
+      : this._data
+        ? this._cloneData(this._data)
+        : this._getDefaultData();
+    this._pendingPersistData = null;
+
+    this._persistPromise = this._persistPromise
+      .then(() => this._persistNow(toPersist))
+      .catch((e) => {
+        console.error("[Timeline] flush queue error:", e);
+      });
+
+    return this._persistPromise;
   },
 
   /**
@@ -1068,7 +1553,8 @@ const TimelineTemplates = {
                   // Gérer à la fois l'ancien format (string URL) et le nouveau format (objet)
                   const imgData =
                     typeof img === "object" ? img : { id: null, url: img };
-                  const imgSrc = imgData.thumbnailURL || imgData.url || img;
+                  const imgSrc = resolveTimelineImageSrc(imgData);
+                  if (!imgSrc) return "";
                   const imgId = imgData.id || "";
                   const isVideo = VIDEO_EXTENSIONS.includes(
                     (imgData.ext || "").toLowerCase(),
@@ -2104,7 +2590,8 @@ class TimelineRenderer {
           remainingImages.forEach((img, idx) => {
             const imgData =
               typeof img === "object" ? img : { id: null, url: img };
-            const imgSrc = imgData.thumbnailURL || imgData.url || img;
+            const imgSrc = resolveTimelineImageSrc(imgData);
+            if (!imgSrc) return;
             const imgId = imgData.id || "";
             const isVideo = VIDEO_EXTENSIONS.includes(
               (imgData.ext || "").toLowerCase(),
@@ -2616,13 +3103,13 @@ let timelineRendererReview = null;
  * Initialise le module timeline (écran settings)
  * @param {boolean} forceShow - Si true, affiche immédiatement
  */
-function initTimeline(forceShow = false) {
+async function initTimeline(forceShow = false) {
   if (typeof CONFIG !== "undefined" && CONFIG.enableTimeline === false) {
     console.log("[Timeline] Module désactivé via CONFIG.enableTimeline");
     return;
   }
 
-  TimelineData.load();
+  await TimelineData.ensureHydrated();
 
   timelineRendererSettings = new TimelineRenderer("timeline-container", "year");
 
@@ -2671,7 +3158,7 @@ function initTimeline(forceShow = false) {
 /**
  * Initialise le timeline pour l'écran review
  */
-function initTimelineReview() {
+async function initTimelineReview() {
   if (typeof CONFIG !== "undefined" && CONFIG.enableTimeline === false) {
     return;
   }
@@ -2683,7 +3170,7 @@ function initTimelineReview() {
     return;
   }
 
-  TimelineData.load();
+  await TimelineData.ensureHydrated();
 
   timelineRendererReview = new TimelineRenderer(
     "timeline-container-review",
@@ -2706,7 +3193,32 @@ function refreshTimelineReview() {
   if (timelineRendererReview && timelineRendererReview.container) {
     timelineRendererReview.render();
   } else {
-    initTimelineReview();
+    void initTimelineReview();
+  }
+}
+
+function refreshTimelineSettings() {
+  if (typeof CONFIG !== "undefined" && CONFIG.enableTimeline === false) {
+    return;
+  }
+
+  if (timelineRendererSettings && timelineRendererSettings.container) {
+    timelineRendererSettings.render();
+  } else {
+    void initTimeline();
+  }
+}
+
+async function flushTimelineStorage() {
+  if (
+    window.TimelineData &&
+    typeof window.TimelineData.flushPersist === "function"
+  ) {
+    try {
+      await window.TimelineData.flushPersist();
+    } catch (e) {
+      console.error("[Timeline] flush error:", e);
+    }
   }
 }
 
@@ -2750,6 +3262,8 @@ window.getLocale = getLocale;
 window.initTimeline = initTimeline;
 window.initTimelineReview = initTimelineReview;
 window.refreshTimelineReview = refreshTimelineReview;
+window.refreshTimelineSettings = refreshTimelineSettings;
+window.flushTimelineStorage = flushTimelineStorage;
 window.recordSession = recordSession;
 window.getTimelineStats = getTimelineStats;
 window.TimelineData = TimelineData;
