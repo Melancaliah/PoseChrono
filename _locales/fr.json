@@ -131,7 +131,7 @@
     "previousImage": "Image précédente",
     "hints": {
       "ignoreOtherShapes": "Ignorer les autres formes (Ctrl)",
-      "snapMode": "Aimantation (Ctrl)",
+      "snapMode": "Snap (Ctrl)",
       "rotateShape": "Rotation de forme (Q)",
       "selectionCount": "{{count}} sélectionné(s)"
     }
@@ -399,7 +399,7 @@
       "exportFull": "Dessin et photo fusionnées",
       "exportTransparent": "Dessin sur fond transparent",
       "exportWhite": "Dessin sur fond blanc",
-      "dockHorizontal": "Dock horizontal"
+      "dockHorizontal": "Ancrer horizontalement"
     },
     "help": {
       "duplicateMeasure": "glisser une mesure pour la dupliquer",

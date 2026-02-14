@@ -1586,7 +1586,7 @@ function handleShapeMove(coords) {
   if (keysState.ctrl && (currentTool === "line" || currentTool === "rectangle")) {
     const snapText =
       typeof i18next !== "undefined"
-        ? i18next.t("draw.hints.snapMode", { defaultValue: "Snap (Ctrl)" })
+        ? i18next.t("drawing.hints.snapMode", { defaultValue: "Snap (Ctrl)" })
         : "Snap (Ctrl)";
     showDrawingModeHint(snapText);
   }

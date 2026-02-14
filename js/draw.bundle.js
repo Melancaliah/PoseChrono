@@ -1,5 +1,5 @@
 // PoseChrono Drawing Module - Bundled from js/draw/
-// Generated: 2026-02-14T14:19:41.406Z
+// Generated: 2026-02-14T14:32:35.953Z
 
 // ================================================================
 // MODULE: utils.js
@@ -3176,7 +3176,7 @@ function updateDrawingSelectionHud() {
   const hud = ensureDrawingSelectionHud();
   const text =
     typeof i18next !== "undefined"
-      ? i18next.t("draw.hints.selectionCount", {
+      ? i18next.t("drawing.hints.selectionCount", {
           count,
           defaultValue: "{{count}} selected",
         })
@@ -9242,7 +9242,7 @@ function handleShapeMove(coords) {
   if (keysState.ctrl && (currentTool === "line" || currentTool === "rectangle")) {
     const snapText =
       typeof i18next !== "undefined"
-        ? i18next.t("draw.hints.snapMode", { defaultValue: "Snap (Ctrl)" })
+        ? i18next.t("drawing.hints.snapMode", { defaultValue: "Snap (Ctrl)" })
         : "Snap (Ctrl)";
     showDrawingModeHint(snapText);
   }
@@ -12330,7 +12330,7 @@ function handleModifierKeyDown(e) {
       scheduleDrawingMeasurementsRedraw();
       const modeText =
         typeof i18next !== "undefined"
-          ? i18next.t("draw.hints.ignoreOtherShapes", { defaultValue: "Ignore other shapes (Ctrl)" })
+          ? i18next.t("drawing.hints.ignoreOtherShapes", { defaultValue: "Ignore other shapes (Ctrl)" })
           : "Ignore other shapes (Ctrl)";
       showDrawingModeHint(modeText);
     } else if (
@@ -12339,13 +12339,13 @@ function handleModifierKeyDown(e) {
     ) {
       const snapText =
         typeof i18next !== "undefined"
-          ? i18next.t("draw.hints.snapMode", { defaultValue: "Snap (Ctrl)" })
+          ? i18next.t("drawing.hints.snapMode", { defaultValue: "Snap (Ctrl)" })
           : "Snap (Ctrl)";
       showDrawingModeHint(snapText);
     } else if (isDraggingEndpoint && selectedMeasurement) {
       const snapText =
         typeof i18next !== "undefined"
-          ? i18next.t("draw.hints.snapMode", { defaultValue: "Snap (Ctrl)" })
+          ? i18next.t("drawing.hints.snapMode", { defaultValue: "Snap (Ctrl)" })
           : "Snap (Ctrl)";
       showDrawingModeHint(snapText);
     }
@@ -12374,7 +12374,7 @@ function handleModifierKeyDown(e) {
     if (isDraggingMeasurement && selectedMeasurement && isEditableShape(selectedMeasurement.type)) {
       const rotateText =
         typeof i18next !== "undefined"
-          ? i18next.t("draw.hints.rotateShape", { defaultValue: "Rotate shape (Q)" })
+          ? i18next.t("drawing.hints.rotateShape", { defaultValue: "Rotate shape (Q)" })
           : "Rotate shape (Q)";
       showDrawingModeHint(rotateText);
     }

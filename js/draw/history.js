@@ -212,7 +212,7 @@ function updateDrawingSelectionHud() {
   const hud = ensureDrawingSelectionHud();
   const text =
     typeof i18next !== "undefined"
-      ? i18next.t("draw.hints.selectionCount", {
+      ? i18next.t("drawing.hints.selectionCount", {
           count,
           defaultValue: "{{count}} selected",
         })
