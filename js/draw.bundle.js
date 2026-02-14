@@ -1,5 +1,5 @@
 // PoseChrono Drawing Module - Bundled from js/draw/
-// Generated: 2026-02-14T04:07:20.371Z
+// Generated: 2026-02-14T14:19:41.406Z
 
 // ================================================================
 // MODULE: utils.js
@@ -535,6 +535,57 @@ function drawShapeOnCanvas(ctx, start, end, tool) {
  * @param {Object} start - Point de départ {x, y}
  * @param {Object} end - Point d'arrivée {x, y}
  */
+function buildShapeEdgeGroupPath(ctx, edgeLineOrGroupId) {
+  if (!ctx) return false;
+  const shapeGroupId =
+    typeof edgeLineOrGroupId === "string"
+      ? edgeLineOrGroupId
+      : edgeLineOrGroupId?.shapeGroup;
+  if (!shapeGroupId) return false;
+
+  const groupLines = measurementLines.filter(
+    (line) => line.type === "shape-edge" && line.shapeGroup === shapeGroupId,
+  );
+  if (groupLines.length === 0) return false;
+
+  const corners = ["a", "b", "c", "d", "a"];
+  const getEdge = (fromCorner, toCorner) =>
+    groupLines.find(
+      (line) =>
+        (line.startCorner === fromCorner && line.endCorner === toCorner) ||
+        (line.startCorner === toCorner && line.endCorner === fromCorner),
+    );
+
+  const segments = [];
+  for (let i = 0; i < corners.length - 1; i++) {
+    const fromCorner = corners[i];
+    const toCorner = corners[i + 1];
+    const edge = getEdge(fromCorner, toCorner);
+    if (!edge) return false;
+    const forward =
+      edge.startCorner === fromCorner && edge.endCorner === toCorner;
+    segments.push({
+      edge,
+      start: forward ? edge.start : edge.end,
+      end: forward ? edge.end : edge.start,
+    });
+  }
+
+  if (segments.length === 0) return false;
+
+  ctx.beginPath();
+  ctx.moveTo(segments[0].start.x, segments[0].start.y);
+  segments.forEach(({ edge, end }) => {
+    if (edge.control) {
+      ctx.quadraticCurveTo(edge.control.x, edge.control.y, end.x, end.y);
+    } else {
+      ctx.lineTo(end.x, end.y);
+    }
+  });
+  ctx.closePath();
+  return true;
+}
+
 function drawArrowOnCanvas(ctx, start, end, headScale = 1, doubleHead = false) {
   const headLength = Math.max(4, DRAWING_CONSTANTS.ARROW_HEAD_LENGTH * headScale);
   const angle = Math.atan2(end.y - start.y, end.x - start.x);
@@ -649,27 +700,52 @@ function calculateLaserStabilizedPoint() {
 function findEndpointAt(
   coords,
   threshold = DRAWING_CONSTANTS.ENDPOINT_THRESHOLD,
+  options = {},
 ) {
+  const prioritizeSelected = options.prioritizeSelected !== false;
+  const selectionBiasPx =
+    Number.isFinite(options.selectionBiasPx) ? Math.max(0, options.selectionBiasPx) : 3;
+  let bestSelected = null;
+  let bestSelectedDist = threshold;
+  let bestAny = null;
+  let bestAnyDist = threshold;
+
+  const isLineSelected = (line) => {
+    if (!line || !isEditableShape(line)) return false;
+    if (shapeHasCapability(line, "grouped")) {
+      return typeof isShapeEdgeSelected === "function" && isShapeEdgeSelected(line);
+    }
+    return typeof isIndividualShapeSelected === "function" && isIndividualShapeSelected(line);
+  };
+
+  const registerHit = (line, endpointKey, dist) => {
+    if (!(dist < threshold)) return;
+    if (dist < bestAnyDist) {
+      bestAnyDist = dist;
+      bestAny = { line, endpoint: endpointKey };
+    }
+    if (prioritizeSelected && isLineSelected(line) && dist < bestSelectedDist) {
+      bestSelectedDist = dist;
+      bestSelected = { line, endpoint: endpointKey };
+    }
+  };
+
   for (const line of measurementLines) {
     if (!line || !line.start || !line.end) continue;
     const caps = getShapeCapabilities(line.type);
 
     // Cercle editable: une seule poignée (endpoint "end")
     if (caps?.endpointMode === "single-end") {
-      if (getDistance(coords, line.end) < threshold) {
-        return { line, endpoint: "end" };
-      }
+      registerHit(line, "end", getDistance(coords, line.end));
       continue;
     }
 
-    if (getDistance(coords, line.start) < threshold) {
-      return { line, endpoint: "start" };
-    }
-    if (getDistance(coords, line.end) < threshold) {
-      return { line, endpoint: "end" };
-    }
+    registerHit(line, "start", getDistance(coords, line.start));
+    registerHit(line, "end", getDistance(coords, line.end));
   }
-  return null;
+  if (!prioritizeSelected || !bestSelected) return bestAny;
+  if (!bestAny) return bestSelected;
+  return bestSelectedDist <= bestAnyDist + selectionBiasPx ? bestSelected : bestAny;
 }
 
 function findEditableShapeControlAt(
@@ -678,23 +754,37 @@ function findEditableShapeControlAt(
   options = {},
 ) {
   const selectedOnly = options.selectedOnly !== false;
+  const prioritizeSelected = options.prioritizeSelected !== false;
+  const selectionBiasPx =
+    Number.isFinite(options.selectionBiasPx) ? Math.max(0, options.selectionBiasPx) : 3;
+  let bestSelected = null;
+  let bestSelectedDist = threshold;
+  let bestAny = null;
+  let bestAnyDist = threshold;
   for (const line of measurementLines) {
     if (!line || !line.control || !shapeHasCapability(line, "hasControlPoint")) {
       continue;
     }
-    if (selectedOnly && typeof isIndividualShapeSelected === "function") {
-      const isSelected =
-        shapeHasCapability(line, "grouped")
-          ? (typeof isShapeEdgeSelected === "function" && isShapeEdgeSelected(line))
-          : isIndividualShapeSelected(line);
-      if (!isSelected) continue;
-    }
+    const isSelected =
+      shapeHasCapability(line, "grouped")
+        ? (typeof isShapeEdgeSelected === "function" && isShapeEdgeSelected(line))
+        : (typeof isIndividualShapeSelected === "function" && isIndividualShapeSelected(line));
+    if (selectedOnly && !isSelected) continue;
     const handlePoint = getShapeCurveHandlePoint(line);
-    if (handlePoint && getDistance(coords, handlePoint) < threshold) {
-      return line;
+    const dist = handlePoint ? getDistance(coords, handlePoint) : Infinity;
+    if (!(dist < threshold)) continue;
+    if (dist < bestAnyDist) {
+      bestAnyDist = dist;
+      bestAny = line;
+    }
+    if (prioritizeSelected && isSelected && dist < bestSelectedDist) {
+      bestSelectedDist = dist;
+      bestSelected = line;
     }
   }
-  return null;
+  if (!prioritizeSelected || !bestSelected) return bestAny;
+  if (!bestAny) return bestSelected;
+  return bestSelectedDist <= bestAnyDist + selectionBiasPx ? bestSelected : bestAny;
 }
 
 /**
@@ -816,7 +906,9 @@ function findDrawingHitTarget(
   }
 
   if (includeEndpoints) {
-    const endpointHit = findEndpointAt(coords, endpointThreshold);
+    const endpointHit = findEndpointAt(coords, endpointThreshold, {
+      prioritizeSelected: true,
+    });
     if (endpointHit) {
       result = {
         kind: "endpoint",
@@ -1017,11 +1109,14 @@ class DrawingManager {
       shapeSelection: {
         id: null,
         groupId: null,
+        ids: [],
+        groupIds: [],
       },
       shapeEditSession: {
         scaleSnapshot: null,
         circleSpaceBase: null,
         rotateSnapshot: null,
+        multiSelectionSnapshot: null,
       },
     };
     
@@ -2946,7 +3041,15 @@ let dragShapeControlLine = null;
 let dragShapeAspectRatio = null;
 const shapeSelectionState =
   drawState.shapeSelection ||
-  (drawState.shapeSelection = { id: null, groupId: null });
+  (drawState.shapeSelection = { id: null, groupId: null, ids: [], groupIds: [] });
+if (!Array.isArray(shapeSelectionState.ids)) {
+  shapeSelectionState.ids = shapeSelectionState.id ? [shapeSelectionState.id] : [];
+}
+if (!Array.isArray(shapeSelectionState.groupIds)) {
+  shapeSelectionState.groupIds = shapeSelectionState.groupId ? [shapeSelectionState.groupId] : [];
+}
+let selectedShapeIds = new Set(shapeSelectionState.ids);
+let selectedShapeGroupIds = new Set(shapeSelectionState.groupIds);
 let selectedShapeId = shapeSelectionState.id ?? null;
 let selectedShapeGroupId = shapeSelectionState.groupId ?? null;
 let drawingEditHud = null;
@@ -2956,20 +3059,157 @@ const dragShapeSession =
     scaleSnapshot: null,
     circleSpaceBase: null,
     rotateSnapshot: null,
+    multiSelectionSnapshot: null,
   });
 let drawingModeHint = null;
+let drawingSelectionHud = null;
+let drawingHudStack = null;
+let drawingHudStackResizeBound = false;
+let drawingHudSidebarObserver = null;
 
 function resetDragShapeSession() {
   dragShapeSession.scaleSnapshot = null;
   dragShapeSession.circleSpaceBase = null;
   dragShapeSession.rotateSnapshot = null;
+  dragShapeSession.multiSelectionSnapshot = null;
+}
+
+function getDrawingHudRightOffsetPx() {
+  const baseOffset = 18;
+  const sidebarVisible = typeof state !== "undefined" ? !!state.showSidebar : false;
+  const sidebarWidth = sidebarVisible
+    ? Number(DRAWING_CONSTANTS?.ZOOM_SIDEBAR_WIDTH || 95)
+    : 0;
+  return `${baseOffset + sidebarWidth}px`;
+}
+
+function updateDrawingHudStackOffset() {
+  const stack =
+    (drawingHudStack && document.body.contains(drawingHudStack)
+      ? drawingHudStack
+      : document.getElementById("drawing-hud-stack"));
+  if (!stack) return;
+  stack.style.setProperty("--drawing-hud-right-offset", getDrawingHudRightOffsetPx());
+}
+
+function ensureDrawingHudStack() {
+  if (drawingHudStack && document.body.contains(drawingHudStack)) {
+    updateDrawingHudStackOffset();
+    return drawingHudStack;
+  }
+  drawingHudStack = document.createElement("div");
+  drawingHudStack.id = "drawing-hud-stack";
+  drawingHudStack.className = "drawing-hud-stack";
+  document.body.appendChild(drawingHudStack);
+  updateDrawingHudStackOffset();
+
+  if (!drawingHudStackResizeBound) {
+    drawingHudStackResizeBound = true;
+    window.addEventListener("resize", updateDrawingHudStackOffset);
+  }
+
+  if (!drawingHudSidebarObserver) {
+    const sidebarEl = document.querySelector(".sidebar");
+    if (sidebarEl && typeof MutationObserver !== "undefined") {
+      drawingHudSidebarObserver = new MutationObserver(() => {
+        updateDrawingHudStackOffset();
+      });
+      drawingHudSidebarObserver.observe(sidebarEl, {
+        attributes: true,
+        attributeFilter: ["class", "style"],
+      });
+    }
+  }
+
+  return drawingHudStack;
+}
+
+function ensureDrawingHudChip(currentNode, id, variantClass) {
+  if (currentNode && document.body.contains(currentNode)) {
+    ensureDrawingHudStack();
+    updateDrawingHudStackOffset();
+    return currentNode;
+  }
+  const stack = ensureDrawingHudStack();
+  const node = document.createElement("div");
+  node.id = id;
+  node.className = `drawing-hud-chip ${variantClass}`;
+  stack.appendChild(node);
+  return node;
+}
+
+function ensureDrawingSelectionHud() {
+  drawingSelectionHud = ensureDrawingHudChip(
+    drawingSelectionHud,
+    "drawing-selection-hud",
+    "drawing-hud-chip--selection",
+  );
+  return drawingSelectionHud;
+}
+
+function hideDrawingSelectionHud() {
+  if (drawingSelectionHud) drawingSelectionHud.classList.remove("is-visible");
+}
+
+function getSelectedEditableShapeLines() {
+  const lines = [];
+  const seenIds = new Set();
+  measurementLines.forEach((line) => {
+    if (!isEditableShape(line)) return;
+    const isSelected =
+      shapeHasCapability(line, "grouped")
+        ? !!line.shapeGroup && selectedShapeGroupIds.has(line.shapeGroup)
+        : selectedShapeIds.has(line.id);
+    if (!isSelected || seenIds.has(line.id)) return;
+    seenIds.add(line.id);
+    lines.push(line);
+  });
+  return lines;
+}
+
+function updateDrawingSelectionHud() {
+  const count = selectedShapeIds.size + selectedShapeGroupIds.size;
+  if (count <= 0) {
+    hideDrawingSelectionHud();
+    return;
+  }
+  const hud = ensureDrawingSelectionHud();
+  const text =
+    typeof i18next !== "undefined"
+      ? i18next.t("draw.hints.selectionCount", {
+          count,
+          defaultValue: "{{count}} selected",
+        })
+      : `${count} selected`;
+  hud.textContent = text;
+  updateDrawingHudStackOffset();
+  hud.classList.add("is-visible");
+}
+
+function syncEditableShapeSelectionState() {
+  shapeSelectionState.ids = Array.from(selectedShapeIds);
+  shapeSelectionState.groupIds = Array.from(selectedShapeGroupIds);
+  selectedShapeId =
+    selectedShapeIds.size === 1 && selectedShapeGroupIds.size === 0
+      ? shapeSelectionState.ids[0]
+      : null;
+  selectedShapeGroupId =
+    selectedShapeGroupIds.size === 1 && selectedShapeIds.size === 0
+      ? shapeSelectionState.groupIds[0]
+      : null;
+  shapeSelectionState.id = selectedShapeId;
+  shapeSelectionState.groupId = selectedShapeGroupId;
+  updateDrawingSelectionHud();
+}
+
+function hasEditableShapeSelection() {
+  return selectedShapeIds.size > 0 || selectedShapeGroupIds.size > 0;
 }
 
 function clearEditableShapeSelection() {
-  selectedShapeId = null;
-  selectedShapeGroupId = null;
-  shapeSelectionState.id = null;
-  shapeSelectionState.groupId = null;
+  selectedShapeIds.clear();
+  selectedShapeGroupIds.clear();
+  syncEditableShapeSelectionState();
   resetDragShapeSession();
 }
 
@@ -2977,7 +3217,7 @@ function isShapeLineSelected(line) {
   return (
     !!line &&
     line.type === "shape-line" &&
-    selectedShapeId === line.id
+    selectedShapeIds.has(line.id)
   );
 }
 
@@ -2985,7 +3225,7 @@ function isShapeCircleSelected(line) {
   return (
     !!line &&
     line.type === "shape-circle" &&
-    selectedShapeId === line.id
+    selectedShapeIds.has(line.id)
   );
 }
 
@@ -2993,7 +3233,7 @@ function isShapeArrowSelected(line) {
   return (
     !!line &&
     line.type === "shape-arrow" &&
-    selectedShapeId === line.id
+    selectedShapeIds.has(line.id)
   );
 }
 
@@ -3002,7 +3242,7 @@ function isIndividualShapeSelected(line) {
     !!line &&
     isEditableShape(line) &&
     !shapeHasCapability(line, "grouped") &&
-    selectedShapeId === line.id
+    selectedShapeIds.has(line.id)
   );
 }
 
@@ -3011,25 +3251,30 @@ function isShapeEdgeSelected(line) {
     !!line &&
     shapeHasCapability(line, "grouped") &&
     !!line.shapeGroup &&
-    selectedShapeGroupId === line.shapeGroup
+    selectedShapeGroupIds.has(line.shapeGroup)
   );
 }
 
-function selectEditableShape(line) {
+function selectEditableShape(line, options = {}) {
+  const add = !!options.add;
   if (!line) return false;
   if (isEditableShape(line) && !shapeHasCapability(line, "grouped")) {
-    selectedShapeId = line.id;
-    selectedShapeGroupId = null;
-    shapeSelectionState.id = selectedShapeId;
-    shapeSelectionState.groupId = selectedShapeGroupId;
+    if (!add) {
+      selectedShapeIds.clear();
+      selectedShapeGroupIds.clear();
+    }
+    selectedShapeIds.add(line.id);
+    syncEditableShapeSelectionState();
     redrawDrawingMeasurements();
     return true;
   }
   if (shapeHasCapability(line, "grouped") && line.shapeGroup) {
-    selectedShapeGroupId = line.shapeGroup;
-    selectedShapeId = null;
-    shapeSelectionState.id = selectedShapeId;
-    shapeSelectionState.groupId = selectedShapeGroupId;
+    if (!add) {
+      selectedShapeIds.clear();
+      selectedShapeGroupIds.clear();
+    }
+    selectedShapeGroupIds.add(line.shapeGroup);
+    syncEditableShapeSelectionState();
     redrawDrawingMeasurements();
     return true;
   }
@@ -3037,29 +3282,59 @@ function selectEditableShape(line) {
 }
 
 function syncEditableShapeSelection() {
-  if (
-    selectedShapeId &&
-    !measurementLines.some(
-      (line) =>
-        isEditableShape(line) &&
-        !shapeHasCapability(line, "grouped") &&
-        line.id === selectedShapeId,
-    )
-  ) {
-    selectedShapeId = null;
-    shapeSelectionState.id = null;
-  }
-  if (
-    selectedShapeGroupId &&
-    !measurementLines.some(
-      (line) =>
-        shapeHasCapability(line, "grouped") &&
-        line.shapeGroup === selectedShapeGroupId,
-    )
-  ) {
-    selectedShapeGroupId = null;
-    shapeSelectionState.groupId = null;
-  }
+  const availableShapeIds = new Set();
+  const availableShapeGroupIds = new Set();
+  measurementLines.forEach((line) => {
+    if (!isEditableShape(line)) return;
+    if (shapeHasCapability(line, "grouped") && line.shapeGroup) {
+      availableShapeGroupIds.add(line.shapeGroup);
+      return;
+    }
+    if (!shapeHasCapability(line, "grouped") && line.id) {
+      availableShapeIds.add(line.id);
+    }
+  });
+
+  selectedShapeIds = new Set(
+    Array.from(selectedShapeIds).filter((id) => availableShapeIds.has(id)),
+  );
+  selectedShapeGroupIds = new Set(
+    Array.from(selectedShapeGroupIds).filter((groupId) =>
+      availableShapeGroupIds.has(groupId),
+    ),
+  );
+  syncEditableShapeSelectionState();
+}
+
+function invertEditableShapeSelection() {
+  const availableShapeIds = new Set();
+  const availableShapeGroupIds = new Set();
+  measurementLines.forEach((line) => {
+    if (!isEditableShape(line)) return;
+    if (shapeHasCapability(line, "grouped") && line.shapeGroup) {
+      availableShapeGroupIds.add(line.shapeGroup);
+      return;
+    }
+    if (!shapeHasCapability(line, "grouped") && line.id) {
+      availableShapeIds.add(line.id);
+    }
+  });
+
+  const nextIds = new Set();
+  const nextGroups = new Set();
+  availableShapeIds.forEach((id) => {
+    if (!selectedShapeIds.has(id)) nextIds.add(id);
+  });
+  availableShapeGroupIds.forEach((groupId) => {
+    if (!selectedShapeGroupIds.has(groupId)) nextGroups.add(groupId);
+  });
+
+  selectedShapeIds = nextIds;
+  selectedShapeGroupIds = nextGroups;
+  syncEditableShapeSelectionState();
+  resetDragShapeSession();
+  redrawDrawingMeasurements();
+  return hasEditableShapeSelection();
 }
 
 function ensureDrawingEditHud() {
@@ -3104,24 +3379,11 @@ function hideDrawingEditHud() {
 }
 
 function ensureDrawingModeHint() {
-  if (drawingModeHint && document.body.contains(drawingModeHint)) return drawingModeHint;
-  drawingModeHint = document.createElement("div");
-  drawingModeHint.id = "drawing-mode-hint";
-  drawingModeHint.style.position = "fixed";
-  drawingModeHint.style.zIndex = "11060";
-  drawingModeHint.style.right = "18px";
-  drawingModeHint.style.bottom = "14px";
-  drawingModeHint.style.padding = "6px 10px";
-  drawingModeHint.style.borderRadius = "8px";
-  drawingModeHint.style.border = "1px solid rgba(255,255,255,0.16)";
-  drawingModeHint.style.background = "rgba(10, 14, 20, 0.88)";
-  drawingModeHint.style.color = "#e6ecff";
-  drawingModeHint.style.fontSize = "12px";
-  drawingModeHint.style.fontWeight = "600";
-  drawingModeHint.style.letterSpacing = "0.2px";
-  drawingModeHint.style.pointerEvents = "none";
-  drawingModeHint.style.display = "none";
-  document.body.appendChild(drawingModeHint);
+  drawingModeHint = ensureDrawingHudChip(
+    drawingModeHint,
+    "drawing-mode-hint",
+    "drawing-hud-chip--hint",
+  );
   return drawingModeHint;
 }
 
@@ -3129,11 +3391,12 @@ function showDrawingModeHint(text) {
   if (!text) return;
   const hint = ensureDrawingModeHint();
   hint.textContent = text;
-  hint.style.display = "block";
+  updateDrawingHudStackOffset();
+  hint.classList.add("is-visible");
 }
 
 function hideDrawingModeHint() {
-  if (drawingModeHint) drawingModeHint.style.display = "none";
+  if (drawingModeHint) drawingModeHint.classList.remove("is-visible");
 }
 
 // ================================================================
@@ -3956,24 +4219,6 @@ function getShapeGroupBoundsFromEdge(edgeLine) {
   };
 }
 
-function getShapeGroupCornersFromEdge(edgeLine) {
-  if (!edgeLine?.shapeGroup) return null;
-  const groupLines = measurementLines.filter(
-    (line) => line.type === "shape-edge" && line.shapeGroup === edgeLine.shapeGroup,
-  );
-  if (groupLines.length === 0) return null;
-
-  const pointsByCorner = {};
-  groupLines.forEach((line) => {
-    if (line.startCorner) pointsByCorner[line.startCorner] = { ...line.start };
-    if (line.endCorner) pointsByCorner[line.endCorner] = { ...line.end };
-  });
-  if (!pointsByCorner.a || !pointsByCorner.b || !pointsByCorner.c || !pointsByCorner.d) {
-    return null;
-  }
-  return pointsByCorner;
-}
-
 function getShapeFillStyle(shapeConfig, fallbackStroke) {
   if (!shapeConfig?.fillEnabled) return null;
   const fillOpacity = Math.min(0.9, Math.max(0.05, shapeConfig.fillOpacity ?? 0.2));
@@ -4032,7 +4277,11 @@ function renderMeasureLine(ctx, line, scaleFactor, hoverPoint, hoverThreshold) {
       : isShape
         ? (line.config?.lineWidth ?? annotationStyle.size)
         : (line.config?.lineWidth ?? measureState.lineWidth);
-  const selectedOpacity = shapeSelected && isShape ? 0.62 : 1;
+  const hasShapeSelection =
+    typeof hasEditableShapeSelection === "function" &&
+    hasEditableShapeSelection();
+  const selectedOpacity =
+    isShape && hasShapeSelection && !shapeSelected ? 0.42 : 1;
   const fillStyle = getShapeFillStyle(line.config, color);
 
   if (isShape) {
@@ -4046,17 +4295,10 @@ function renderMeasureLine(ctx, line, scaleFactor, hoverPoint, hoverThreshold) {
     line.endCorner === "b" &&
     fillStyle
   ) {
-    const corners = getShapeGroupCornersFromEdge(line);
-    if (corners) {
+    if (buildShapeEdgeGroupPath(ctx, line)) {
       ctx.save();
       ctx.fillStyle = fillStyle.color;
       ctx.globalAlpha = fillStyle.opacity;
-      ctx.beginPath();
-      ctx.moveTo(corners.a.x, corners.a.y);
-      ctx.lineTo(corners.b.x, corners.b.y);
-      ctx.lineTo(corners.c.x, corners.c.y);
-      ctx.lineTo(corners.d.x, corners.d.y);
-      ctx.closePath();
       ctx.fill();
       ctx.restore();
     }
@@ -8033,9 +8275,9 @@ function handleCtrlClickCycle(coords) {
   return false;
 }
 
-function ensureEditableShapeSelected(line) {
+function ensureEditableShapeSelected(line, options = {}) {
   if (!needsEditableShapeSelection(line)) return false;
-  return selectEditableShape(line);
+  return selectEditableShape(line, options);
 }
 
 function needsEditableShapeSelection(line) {
@@ -8058,7 +8300,8 @@ function getShapeInteractionModeFromEvent(e) {
  * @param {Object} coords - Coordonnées du clic
  * @returns {boolean} true si on a commencé à éditer une borne
  */
-function handleEndpointClick(coords) {
+function handleEndpointClick(coords, options = {}) {
+  const addToSelection = !!options.addToSelection;
   const target = findDrawingHitTarget(coords, {
     includeControl: false,
     includeEndpoints: true,
@@ -8076,10 +8319,18 @@ function handleEndpointClick(coords) {
     isEditableShape(hit.line.type) &&
     needsEditableShapeSelection(hit.line)
   ) {
-    selectEditableShape(hit.line);
+    selectEditableShape(hit.line, { add: addToSelection });
     return true;
   }
-  ensureEditableShapeSelected(hit.line);
+  if (
+    addToSelection &&
+    isEditableShape(hit.line.type) &&
+    needsEditableShapeSelection(hit.line)
+  ) {
+    selectEditableShape(hit.line, { add: true });
+    return true;
+  }
+  ensureEditableShapeSelected(hit.line, { add: addToSelection });
 
   isDraggingEndpoint = true;
   resetDragShapeSession();
@@ -8144,7 +8395,8 @@ function handleLabelClick(coords) {
  * @param {Object} coords - Coordonnées du clic
  * @returns {boolean} true si on a commencé à déplacer une mesure
  */
-function handleMeasurementClick(coords) {
+function handleMeasurementClick(coords, options = {}) {
+  const addToSelection = !!options.addToSelection;
   const target = findDrawingHitTarget(coords, {
     includeControl: false,
     includeEndpoints: false,
@@ -8162,10 +8414,18 @@ function handleMeasurementClick(coords) {
     isEditableShape(lineHit.type) &&
     needsEditableShapeSelection(lineHit)
   ) {
-    selectEditableShape(lineHit);
+    selectEditableShape(lineHit, { add: addToSelection });
     return true;
   }
-  ensureEditableShapeSelected(lineHit);
+  if (
+    addToSelection &&
+    isEditableShape(lineHit.type) &&
+    needsEditableShapeSelection(lineHit)
+  ) {
+    selectEditableShape(lineHit, { add: true });
+    return true;
+  }
+  ensureEditableShapeSelected(lineHit, { add: addToSelection });
 
   // Calculer le centre de la mesure
   let centerX, centerY;
@@ -8189,8 +8449,31 @@ function handleMeasurementClick(coords) {
   isDraggingMeasurement = true;
   resetDragShapeSession();
   selectedMeasurement = lineHit;
-  dragShapeSession.scaleSnapshot = createShapeScaleSnapshot(lineHit);
-  dragShapeSession.rotateSnapshot = createShapeRotateSnapshot(lineHit, coords);
+  const selectedLines =
+    typeof getSelectedEditableShapeLines === "function"
+      ? getSelectedEditableShapeLines()
+      : [];
+  const canTransformSelectionAsGroup =
+    isEditableShape(lineHit.type) &&
+    selectedLines.length > 1 &&
+    (shapeHasCapability(lineHit, "grouped")
+      ? isShapeEdgeSelected(lineHit)
+      : isIndividualShapeSelected(lineHit));
+
+  if (canTransformSelectionAsGroup) {
+    const multiSnapshot = createMultiShapeTransformSnapshot(selectedLines, coords);
+    dragShapeSession.multiSelectionSnapshot = multiSnapshot;
+    dragShapeSession.scaleSnapshot = multiSnapshot;
+    dragShapeSession.rotateSnapshot = multiSnapshot;
+    if (multiSnapshot?.center) {
+      centerX = multiSnapshot.center.x;
+      centerY = multiSnapshot.center.y;
+    }
+  } else {
+    dragShapeSession.multiSelectionSnapshot = null;
+    dragShapeSession.scaleSnapshot = createShapeScaleSnapshot(lineHit);
+    dragShapeSession.rotateSnapshot = createShapeRotateSnapshot(lineHit, coords);
+  }
   dragMeasurementOffset = {
     x: coords.x - centerX,
     y: coords.y - centerY,
@@ -8288,6 +8571,7 @@ function handleDrawingMouseDown(e) {
       // Démarrer le drag de la mesure dupliquée
       isDraggingMeasurement = true;
       selectedMeasurement = duplicated;
+      dragShapeSession.multiSelectionSnapshot = null;
       dragShapeSession.scaleSnapshot = createShapeScaleSnapshot(duplicated);
       dragShapeSession.rotateSnapshot = createShapeRotateSnapshot(duplicated, coords);
       // L'offset est calculé par rapport au centre (comme pour le drag normal)
@@ -8320,25 +8604,22 @@ function handleDrawingMouseDown(e) {
     (shapeEditingActive && !forceCreateShape)
   ) {
     // Point de flexion (shape-line / shape-arrow / shape-edge)
-    if (controlEditingActive && handleShapeControlClick(coords)) return;
+    if (controlEditingActive && handleShapeControlClick(coords, { addToSelection: e.shiftKey })) return;
 
     // Borne de mesure
-    if (handleEndpointClick(coords)) return;
+    if (handleEndpointClick(coords, { addToSelection: e.shiftKey })) return;
 
     // Label de mesure (pas pour protractor ni rectangle)
     if (currentTool !== "protractor" && currentTool !== "rectangle" && handleLabelClick(coords)) return;
 
     // Segment de mesure entier
-    if (handleMeasurementClick(coords)) return;
+    if (handleMeasurementClick(coords, { addToSelection: e.shiftKey })) return;
   }
 
   if (
     rectangleEditMode &&
     ["line", "rectangle", "circle", "arrow"].includes(currentTool) &&
-    (
-      !!drawState?.shapeSelection?.id ||
-      !!drawState?.shapeSelection?.groupId
-    )
+    hasEditableShapeSelection()
   ) {
     clearEditableShapeSelection();
     redrawDrawingMeasurements();
@@ -8728,18 +9009,6 @@ function drawArrowHeadLocal(ctx, from, to, headLength) {
   ctx.stroke();
 }
 
-function getShapeEdgeGroupCorners(groupLines) {
-  const pointsByCorner = {};
-  groupLines.forEach((line) => {
-    if (line.startCorner) pointsByCorner[line.startCorner] = { ...line.start };
-    if (line.endCorner) pointsByCorner[line.endCorner] = { ...line.end };
-  });
-  if (!pointsByCorner.a || !pointsByCorner.b || !pointsByCorner.c || !pointsByCorner.d) {
-    return null;
-  }
-  return pointsByCorner;
-}
-
 function rasterizeEditableShapeLineToCanvas(line, ctx) {
   if (!line || !ctx || !isEditableShape(line)) return false;
 
@@ -8821,19 +9090,12 @@ function rasterizeEditableShapeLineToCanvas(line, ctx) {
 
     const baseCfg = line.config || {};
     if (baseCfg.fillEnabled) {
-      const corners = getShapeEdgeGroupCorners(groupLines);
-      if (corners) {
+      if (buildShapeEdgeGroupPath(ctx, line)) {
         const fillColor = baseCfg.fillColor || color;
         const fillOpacity = Math.min(0.9, Math.max(0.05, baseCfg.fillOpacity ?? 0.2));
         ctx.save();
         ctx.fillStyle = fillColor;
         ctx.globalAlpha = fillOpacity;
-        ctx.beginPath();
-        ctx.moveTo(corners.a.x, corners.a.y);
-        ctx.lineTo(corners.b.x, corners.b.y);
-        ctx.lineTo(corners.c.x, corners.c.y);
-        ctx.lineTo(corners.d.x, corners.d.y);
-        ctx.closePath();
         ctx.fill();
         ctx.restore();
       }
@@ -8956,16 +9218,34 @@ function handleLaserMove(coords) {
 /**
  * Gère le mouvement pour les formes (rectangle, circle, line, arrow)
  */
+function getShapeCreationEndpoint(start, rawEnd, tool, isShift, isCtrl) {
+  if (!start || !rawEnd) return rawEnd;
+  if (tool === "line") {
+    return getSmartLineEndpoint(start, rawEnd, !!isShift, !!isCtrl);
+  }
+  if (tool === "rectangle" && isCtrl) {
+    const snap = findNearbyEndpointSnap(rawEnd, 14);
+    if (snap) return snap;
+  }
+  return rawEnd;
+}
+
 function handleShapeMove(coords) {
-  const previewCoords =
-    currentTool === "line"
-      ? getSmartLineEndpoint(
-          startPoint,
-          coords,
-          !!keysState.shift,
-          !!keysState.ctrl,
-        )
-      : coords;
+  const previewCoords = getShapeCreationEndpoint(
+    startPoint,
+    coords,
+    currentTool,
+    !!keysState.shift,
+    !!keysState.ctrl,
+  );
+
+  if (keysState.ctrl && (currentTool === "line" || currentTool === "rectangle")) {
+    const snapText =
+      typeof i18next !== "undefined"
+        ? i18next.t("draw.hints.snapMode", { defaultValue: "Snap (Ctrl)" })
+        : "Snap (Ctrl)";
+    showDrawingModeHint(snapText);
+  }
 
   if (keysState.space && originalStartPoint) {
     // Déplacement avec Espace
@@ -9467,6 +9747,49 @@ function createShapeScaleSnapshot(line) {
   };
 }
 
+function createMultiShapeTransformSnapshot(lines, pointerStart = null) {
+  const uniqueLines = [];
+  const seen = new Set();
+  (lines || []).forEach((line) => {
+    if (!line || !isEditableShape(line.type) || seen.has(line.id)) return;
+    seen.add(line.id);
+    uniqueLines.push(line);
+  });
+  if (uniqueLines.length === 0) return null;
+
+  const xs = [];
+  const ys = [];
+  uniqueLines.forEach((line) => {
+    xs.push(line.start.x, line.end.x);
+    ys.push(line.start.y, line.end.y);
+    if (line.control) {
+      xs.push(line.control.x);
+      ys.push(line.control.y);
+    }
+  });
+  if (xs.length === 0 || ys.length === 0) return null;
+  const center = {
+    x: (Math.min(...xs) + Math.max(...xs)) / 2,
+    y: (Math.min(...ys) + Math.max(...ys)) / 2,
+  };
+
+  const items = uniqueLines.map((line) => ({
+    line,
+    start: { ...line.start },
+    end: { ...line.end },
+    control: line.control ? { ...line.control } : null,
+  }));
+
+  const pointer = pointerStart || startPoint || null;
+  return {
+    type: "multi-shape",
+    center,
+    startMouseAngle:
+      pointer ? Math.atan2(pointer.y - center.y, pointer.x - center.x) : 0,
+    items,
+  };
+}
+
 function createShapeRotateSnapshot(line, pointerStart = null) {
   if (!line || !isEditableShape(line.type)) return null;
   const pointer = pointerStart || startPoint || null;
@@ -9519,7 +9842,7 @@ function applyShapeRotateFromSnapshot(snapshot, pointerCoords) {
   const deltaAngle = currentMouseAngle - (snapshot.startMouseAngle || 0);
   if (!Number.isFinite(deltaAngle)) return false;
 
-  if (snapshot.type === "shape-edge-group") {
+  if (snapshot.type === "shape-edge-group" || snapshot.type === "multi-shape") {
     snapshot.items.forEach((item) => {
       item.line.start = rotatePointAround(item.start, snapshot.center, deltaAngle);
       item.line.end = rotatePointAround(item.end, snapshot.center, deltaAngle);
@@ -9546,7 +9869,7 @@ function applyShapeScaleFromSnapshot(snapshot, factor) {
     y: center.y + (point.y - center.y) * f,
   });
 
-  if (snapshot.type === "shape-edge-group") {
+  if (snapshot.type === "shape-edge-group" || snapshot.type === "multi-shape") {
     snapshot.items.forEach((item) => {
       item.line.start = scalePoint(item.start, snapshot.center);
       item.line.end = scalePoint(item.end, snapshot.center);
@@ -9654,10 +9977,13 @@ function handleShapeEdgeCornerDrag(coords, e) {
 }
 
 function findShapeControlAt(coords, threshold = 14) {
-  return findEditableShapeControlAt(coords, threshold, { selectedOnly: true });
+  return findEditableShapeControlAt(coords, threshold, {
+    selectedOnly: shapeSafeSelectMode,
+  });
 }
 
-function handleShapeControlClick(coords) {
+function handleShapeControlClick(coords, options = {}) {
+  const addToSelection = !!options.addToSelection;
   const controlEditingActive =
     isCurveEditingTool(currentTool) ||
     (rectangleEditMode && currentTool === "rectangle");
@@ -9669,7 +9995,15 @@ function handleShapeControlClick(coords) {
     isEditableShape(hit.type) &&
     needsEditableShapeSelection(hit)
   ) {
-    selectEditableShape(hit);
+    selectEditableShape(hit, { add: addToSelection });
+    return true;
+  }
+  if (
+    addToSelection &&
+    isEditableShape(hit.type) &&
+    needsEditableShapeSelection(hit)
+  ) {
+    selectEditableShape(hit, { add: true });
     return true;
   }
   isDraggingShapeControl = true;
@@ -9682,7 +10016,13 @@ function handleShapeControlClick(coords) {
 function handleShapeControlDrag(coords) {
   if (!isDraggingShapeControl || !dragShapeControlLine) return false;
   if (dragShapeControlLine.type === "shape-edge") {
-    dragShapeControlLine.control = { x: coords.x, y: coords.y };
+    const nextControl = getQuadraticControlFromMidpoint(
+      dragShapeControlLine.start,
+      { x: coords.x, y: coords.y },
+      dragShapeControlLine.end,
+    );
+    if (!nextControl) return false;
+    dragShapeControlLine.control = nextControl;
     scheduleDrawingMeasurementsRedraw();
     return true;
   }
@@ -9740,6 +10080,34 @@ function handleMeasurementDrag(coords) {
 
   const newCenterX = coords.x - dragMeasurementOffset.x;
   const newCenterY = coords.y - dragMeasurementOffset.y;
+  const multiSnapshot = dragShapeSession.multiSelectionSnapshot;
+
+  if (multiSnapshot && multiSnapshot.items?.length > 1) {
+    if (keysState.s && dragShapeSession.scaleSnapshot) {
+      const factor = 1 + (coords.x - startPoint.x) / 180;
+      if (applyShapeScaleFromSnapshot(dragShapeSession.scaleSnapshot, factor)) {
+        scheduleDrawingMeasurementsRedraw();
+        return true;
+      }
+    }
+
+    const center = multiSnapshot.center;
+    if (!center) return false;
+    const deltaX = newCenterX - center.x;
+    const deltaY = newCenterY - center.y;
+    multiSnapshot.items.forEach((item) => {
+      item.line.start.x = item.start.x + deltaX;
+      item.line.start.y = item.start.y + deltaY;
+      item.line.end.x = item.end.x + deltaX;
+      item.line.end.y = item.end.y + deltaY;
+      if (item.control) {
+        item.line.control.x = item.control.x + deltaX;
+        item.line.control.y = item.control.y + deltaY;
+      }
+    });
+    scheduleDrawingMeasurementsRedraw();
+    return true;
+  }
 
   let oldCenterX, oldCenterY;
   if (
@@ -10260,10 +10628,13 @@ function handleDrawingMouseUp(e = null) {
     ["rectangle", "circle", "line", "arrow"].includes(currentTool) &&
     startPoint
   ) {
-    const finalShapeEnd =
-      currentTool === "line"
-        ? getSmartLineEndpoint(startPoint, endPoint, !!keysState.shift, !!keysState.ctrl)
-        : endPoint;
+    const finalShapeEnd = getShapeCreationEndpoint(
+      startPoint,
+      endPoint,
+      currentTool,
+      !!keysState.shift,
+      !!keysState.ctrl,
+    );
     // Dessiner la forme finale avec les contraintes
     drawFinalShapeConstrained(
       startPoint,
@@ -11552,6 +11923,10 @@ function closeDrawingMode() {
 
   // Fermer tous les menus/modals de dessin ouverts
   closeAllDrawingMenus();
+  hideDrawingEditHud();
+  if (typeof hideDrawingSelectionHud === "function") {
+    hideDrawingSelectionHud();
+  }
 
   // Réinitialiser l'état (sans effacer le cache)
   isDrawingModeActive = false;
@@ -11958,6 +12333,15 @@ function handleModifierKeyDown(e) {
           ? i18next.t("draw.hints.ignoreOtherShapes", { defaultValue: "Ignore other shapes (Ctrl)" })
           : "Ignore other shapes (Ctrl)";
       showDrawingModeHint(modeText);
+    } else if (
+      isDrawing &&
+      (currentTool === "line" || currentTool === "rectangle")
+    ) {
+      const snapText =
+        typeof i18next !== "undefined"
+          ? i18next.t("draw.hints.snapMode", { defaultValue: "Snap (Ctrl)" })
+          : "Snap (Ctrl)";
+      showDrawingModeHint(snapText);
     } else if (isDraggingEndpoint && selectedMeasurement) {
       const snapText =
         typeof i18next !== "undefined"
@@ -12098,6 +12482,15 @@ function handleCommonDrawingKeydown(e, options) {
     return true;
   }
 
+  // Ctrl+I : inverser la selection des shapes editables
+  if ((e.ctrlKey || e.metaKey) && key === "i") {
+    e.preventDefault();
+    if (typeof invertEditableShapeSelection === "function") {
+      invertEditableShapeSelection();
+    }
+    return true;
+  }
+
   // Ctrl+touche configurable pour export
   if ((e.ctrlKey || e.metaKey) && key === CONFIG.HOTKEYS.DRAWING_EXPORT.toLowerCase()) {
     e.preventDefault();
@@ -12223,6 +12616,9 @@ function handleDrawingModeKeydown(e) {
     e.preventDefault();
     if (typeof toggleSidebar === "function") {
       toggleSidebar();
+      if (typeof updateDrawingHudStackOffset === "function") {
+        updateDrawingHudStackOffset();
+      }
     }
     return;
   }

@@ -619,9 +619,9 @@ function handleCtrlClickCycle(coords) {
   return false;
 }
 
-function ensureEditableShapeSelected(line) {
+function ensureEditableShapeSelected(line, options = {}) {
   if (!needsEditableShapeSelection(line)) return false;
-  return selectEditableShape(line);
+  return selectEditableShape(line, options);
 }
 
 function needsEditableShapeSelection(line) {
@@ -644,7 +644,8 @@ function getShapeInteractionModeFromEvent(e) {
  * @param {Object} coords - Coordonnées du clic
  * @returns {boolean} true si on a commencé à éditer une borne
  */
-function handleEndpointClick(coords) {
+function handleEndpointClick(coords, options = {}) {
+  const addToSelection = !!options.addToSelection;
   const target = findDrawingHitTarget(coords, {
     includeControl: false,
     includeEndpoints: true,
@@ -662,10 +663,18 @@ function handleEndpointClick(coords) {
     isEditableShape(hit.line.type) &&
     needsEditableShapeSelection(hit.line)
   ) {
-    selectEditableShape(hit.line);
+    selectEditableShape(hit.line, { add: addToSelection });
     return true;
   }
-  ensureEditableShapeSelected(hit.line);
+  if (
+    addToSelection &&
+    isEditableShape(hit.line.type) &&
+    needsEditableShapeSelection(hit.line)
+  ) {
+    selectEditableShape(hit.line, { add: true });
+    return true;
+  }
+  ensureEditableShapeSelected(hit.line, { add: addToSelection });
 
   isDraggingEndpoint = true;
   resetDragShapeSession();
@@ -730,7 +739,8 @@ function handleLabelClick(coords) {
  * @param {Object} coords - Coordonnées du clic
  * @returns {boolean} true si on a commencé à déplacer une mesure
  */
-function handleMeasurementClick(coords) {
+function handleMeasurementClick(coords, options = {}) {
+  const addToSelection = !!options.addToSelection;
   const target = findDrawingHitTarget(coords, {
     includeControl: false,
     includeEndpoints: false,
@@ -748,10 +758,18 @@ function handleMeasurementClick(coords) {
     isEditableShape(lineHit.type) &&
     needsEditableShapeSelection(lineHit)
   ) {
-    selectEditableShape(lineHit);
+    selectEditableShape(lineHit, { add: addToSelection });
     return true;
   }
-  ensureEditableShapeSelected(lineHit);
+  if (
+    addToSelection &&
+    isEditableShape(lineHit.type) &&
+    needsEditableShapeSelection(lineHit)
+  ) {
+    selectEditableShape(lineHit, { add: true });
+    return true;
+  }
+  ensureEditableShapeSelected(lineHit, { add: addToSelection });
 
   // Calculer le centre de la mesure
   let centerX, centerY;
@@ -775,8 +793,31 @@ function handleMeasurementClick(coords) {
   isDraggingMeasurement = true;
   resetDragShapeSession();
   selectedMeasurement = lineHit;
-  dragShapeSession.scaleSnapshot = createShapeScaleSnapshot(lineHit);
-  dragShapeSession.rotateSnapshot = createShapeRotateSnapshot(lineHit, coords);
+  const selectedLines =
+    typeof getSelectedEditableShapeLines === "function"
+      ? getSelectedEditableShapeLines()
+      : [];
+  const canTransformSelectionAsGroup =
+    isEditableShape(lineHit.type) &&
+    selectedLines.length > 1 &&
+    (shapeHasCapability(lineHit, "grouped")
+      ? isShapeEdgeSelected(lineHit)
+      : isIndividualShapeSelected(lineHit));
+
+  if (canTransformSelectionAsGroup) {
+    const multiSnapshot = createMultiShapeTransformSnapshot(selectedLines, coords);
+    dragShapeSession.multiSelectionSnapshot = multiSnapshot;
+    dragShapeSession.scaleSnapshot = multiSnapshot;
+    dragShapeSession.rotateSnapshot = multiSnapshot;
+    if (multiSnapshot?.center) {
+      centerX = multiSnapshot.center.x;
+      centerY = multiSnapshot.center.y;
+    }
+  } else {
+    dragShapeSession.multiSelectionSnapshot = null;
+    dragShapeSession.scaleSnapshot = createShapeScaleSnapshot(lineHit);
+    dragShapeSession.rotateSnapshot = createShapeRotateSnapshot(lineHit, coords);
+  }
   dragMeasurementOffset = {
     x: coords.x - centerX,
     y: coords.y - centerY,
@@ -874,6 +915,7 @@ function handleDrawingMouseDown(e) {
       // Démarrer le drag de la mesure dupliquée
       isDraggingMeasurement = true;
       selectedMeasurement = duplicated;
+      dragShapeSession.multiSelectionSnapshot = null;
       dragShapeSession.scaleSnapshot = createShapeScaleSnapshot(duplicated);
       dragShapeSession.rotateSnapshot = createShapeRotateSnapshot(duplicated, coords);
       // L'offset est calculé par rapport au centre (comme pour le drag normal)
@@ -906,25 +948,22 @@ function handleDrawingMouseDown(e) {
     (shapeEditingActive && !forceCreateShape)
   ) {
     // Point de flexion (shape-line / shape-arrow / shape-edge)
-    if (controlEditingActive && handleShapeControlClick(coords)) return;
+    if (controlEditingActive && handleShapeControlClick(coords, { addToSelection: e.shiftKey })) return;
 
     // Borne de mesure
-    if (handleEndpointClick(coords)) return;
+    if (handleEndpointClick(coords, { addToSelection: e.shiftKey })) return;
 
     // Label de mesure (pas pour protractor ni rectangle)
     if (currentTool !== "protractor" && currentTool !== "rectangle" && handleLabelClick(coords)) return;
 
     // Segment de mesure entier
-    if (handleMeasurementClick(coords)) return;
+    if (handleMeasurementClick(coords, { addToSelection: e.shiftKey })) return;
   }
 
   if (
     rectangleEditMode &&
     ["line", "rectangle", "circle", "arrow"].includes(currentTool) &&
-    (
-      !!drawState?.shapeSelection?.id ||
-      !!drawState?.shapeSelection?.groupId
-    )
+    hasEditableShapeSelection()
   ) {
     clearEditableShapeSelection();
     redrawDrawingMeasurements();
@@ -1314,18 +1353,6 @@ function drawArrowHeadLocal(ctx, from, to, headLength) {
   ctx.stroke();
 }
 
-function getShapeEdgeGroupCorners(groupLines) {
-  const pointsByCorner = {};
-  groupLines.forEach((line) => {
-    if (line.startCorner) pointsByCorner[line.startCorner] = { ...line.start };
-    if (line.endCorner) pointsByCorner[line.endCorner] = { ...line.end };
-  });
-  if (!pointsByCorner.a || !pointsByCorner.b || !pointsByCorner.c || !pointsByCorner.d) {
-    return null;
-  }
-  return pointsByCorner;
-}
-
 function rasterizeEditableShapeLineToCanvas(line, ctx) {
   if (!line || !ctx || !isEditableShape(line)) return false;
 
@@ -1407,19 +1434,12 @@ function rasterizeEditableShapeLineToCanvas(line, ctx) {
 
     const baseCfg = line.config || {};
     if (baseCfg.fillEnabled) {
-      const corners = getShapeEdgeGroupCorners(groupLines);
-      if (corners) {
+      if (buildShapeEdgeGroupPath(ctx, line)) {
         const fillColor = baseCfg.fillColor || color;
         const fillOpacity = Math.min(0.9, Math.max(0.05, baseCfg.fillOpacity ?? 0.2));
         ctx.save();
         ctx.fillStyle = fillColor;
         ctx.globalAlpha = fillOpacity;
-        ctx.beginPath();
-        ctx.moveTo(corners.a.x, corners.a.y);
-        ctx.lineTo(corners.b.x, corners.b.y);
-        ctx.lineTo(corners.c.x, corners.c.y);
-        ctx.lineTo(corners.d.x, corners.d.y);
-        ctx.closePath();
         ctx.fill();
         ctx.restore();
       }
@@ -1542,16 +1562,34 @@ function handleLaserMove(coords) {
 /**
  * Gère le mouvement pour les formes (rectangle, circle, line, arrow)
  */
+function getShapeCreationEndpoint(start, rawEnd, tool, isShift, isCtrl) {
+  if (!start || !rawEnd) return rawEnd;
+  if (tool === "line") {
+    return getSmartLineEndpoint(start, rawEnd, !!isShift, !!isCtrl);
+  }
+  if (tool === "rectangle" && isCtrl) {
+    const snap = findNearbyEndpointSnap(rawEnd, 14);
+    if (snap) return snap;
+  }
+  return rawEnd;
+}
+
 function handleShapeMove(coords) {
-  const previewCoords =
-    currentTool === "line"
-      ? getSmartLineEndpoint(
-          startPoint,
-          coords,
-          !!keysState.shift,
-          !!keysState.ctrl,
-        )
-      : coords;
+  const previewCoords = getShapeCreationEndpoint(
+    startPoint,
+    coords,
+    currentTool,
+    !!keysState.shift,
+    !!keysState.ctrl,
+  );
+
+  if (keysState.ctrl && (currentTool === "line" || currentTool === "rectangle")) {
+    const snapText =
+      typeof i18next !== "undefined"
+        ? i18next.t("draw.hints.snapMode", { defaultValue: "Snap (Ctrl)" })
+        : "Snap (Ctrl)";
+    showDrawingModeHint(snapText);
+  }
 
   if (keysState.space && originalStartPoint) {
     // Déplacement avec Espace
@@ -2053,6 +2091,49 @@ function createShapeScaleSnapshot(line) {
   };
 }
 
+function createMultiShapeTransformSnapshot(lines, pointerStart = null) {
+  const uniqueLines = [];
+  const seen = new Set();
+  (lines || []).forEach((line) => {
+    if (!line || !isEditableShape(line.type) || seen.has(line.id)) return;
+    seen.add(line.id);
+    uniqueLines.push(line);
+  });
+  if (uniqueLines.length === 0) return null;
+
+  const xs = [];
+  const ys = [];
+  uniqueLines.forEach((line) => {
+    xs.push(line.start.x, line.end.x);
+    ys.push(line.start.y, line.end.y);
+    if (line.control) {
+      xs.push(line.control.x);
+      ys.push(line.control.y);
+    }
+  });
+  if (xs.length === 0 || ys.length === 0) return null;
+  const center = {
+    x: (Math.min(...xs) + Math.max(...xs)) / 2,
+    y: (Math.min(...ys) + Math.max(...ys)) / 2,
+  };
+
+  const items = uniqueLines.map((line) => ({
+    line,
+    start: { ...line.start },
+    end: { ...line.end },
+    control: line.control ? { ...line.control } : null,
+  }));
+
+  const pointer = pointerStart || startPoint || null;
+  return {
+    type: "multi-shape",
+    center,
+    startMouseAngle:
+      pointer ? Math.atan2(pointer.y - center.y, pointer.x - center.x) : 0,
+    items,
+  };
+}
+
 function createShapeRotateSnapshot(line, pointerStart = null) {
   if (!line || !isEditableShape(line.type)) return null;
   const pointer = pointerStart || startPoint || null;
@@ -2105,7 +2186,7 @@ function applyShapeRotateFromSnapshot(snapshot, pointerCoords) {
   const deltaAngle = currentMouseAngle - (snapshot.startMouseAngle || 0);
   if (!Number.isFinite(deltaAngle)) return false;
 
-  if (snapshot.type === "shape-edge-group") {
+  if (snapshot.type === "shape-edge-group" || snapshot.type === "multi-shape") {
     snapshot.items.forEach((item) => {
       item.line.start = rotatePointAround(item.start, snapshot.center, deltaAngle);
       item.line.end = rotatePointAround(item.end, snapshot.center, deltaAngle);
@@ -2132,7 +2213,7 @@ function applyShapeScaleFromSnapshot(snapshot, factor) {
     y: center.y + (point.y - center.y) * f,
   });
 
-  if (snapshot.type === "shape-edge-group") {
+  if (snapshot.type === "shape-edge-group" || snapshot.type === "multi-shape") {
     snapshot.items.forEach((item) => {
       item.line.start = scalePoint(item.start, snapshot.center);
       item.line.end = scalePoint(item.end, snapshot.center);
@@ -2240,10 +2321,13 @@ function handleShapeEdgeCornerDrag(coords, e) {
 }
 
 function findShapeControlAt(coords, threshold = 14) {
-  return findEditableShapeControlAt(coords, threshold, { selectedOnly: true });
+  return findEditableShapeControlAt(coords, threshold, {
+    selectedOnly: shapeSafeSelectMode,
+  });
 }
 
-function handleShapeControlClick(coords) {
+function handleShapeControlClick(coords, options = {}) {
+  const addToSelection = !!options.addToSelection;
   const controlEditingActive =
     isCurveEditingTool(currentTool) ||
     (rectangleEditMode && currentTool === "rectangle");
@@ -2255,7 +2339,15 @@ function handleShapeControlClick(coords) {
     isEditableShape(hit.type) &&
     needsEditableShapeSelection(hit)
   ) {
-    selectEditableShape(hit);
+    selectEditableShape(hit, { add: addToSelection });
+    return true;
+  }
+  if (
+    addToSelection &&
+    isEditableShape(hit.type) &&
+    needsEditableShapeSelection(hit)
+  ) {
+    selectEditableShape(hit, { add: true });
     return true;
   }
   isDraggingShapeControl = true;
@@ -2268,7 +2360,13 @@ function handleShapeControlClick(coords) {
 function handleShapeControlDrag(coords) {
   if (!isDraggingShapeControl || !dragShapeControlLine) return false;
   if (dragShapeControlLine.type === "shape-edge") {
-    dragShapeControlLine.control = { x: coords.x, y: coords.y };
+    const nextControl = getQuadraticControlFromMidpoint(
+      dragShapeControlLine.start,
+      { x: coords.x, y: coords.y },
+      dragShapeControlLine.end,
+    );
+    if (!nextControl) return false;
+    dragShapeControlLine.control = nextControl;
     scheduleDrawingMeasurementsRedraw();
     return true;
   }
@@ -2326,6 +2424,34 @@ function handleMeasurementDrag(coords) {
 
   const newCenterX = coords.x - dragMeasurementOffset.x;
   const newCenterY = coords.y - dragMeasurementOffset.y;
+  const multiSnapshot = dragShapeSession.multiSelectionSnapshot;
+
+  if (multiSnapshot && multiSnapshot.items?.length > 1) {
+    if (keysState.s && dragShapeSession.scaleSnapshot) {
+      const factor = 1 + (coords.x - startPoint.x) / 180;
+      if (applyShapeScaleFromSnapshot(dragShapeSession.scaleSnapshot, factor)) {
+        scheduleDrawingMeasurementsRedraw();
+        return true;
+      }
+    }
+
+    const center = multiSnapshot.center;
+    if (!center) return false;
+    const deltaX = newCenterX - center.x;
+    const deltaY = newCenterY - center.y;
+    multiSnapshot.items.forEach((item) => {
+      item.line.start.x = item.start.x + deltaX;
+      item.line.start.y = item.start.y + deltaY;
+      item.line.end.x = item.end.x + deltaX;
+      item.line.end.y = item.end.y + deltaY;
+      if (item.control) {
+        item.line.control.x = item.control.x + deltaX;
+        item.line.control.y = item.control.y + deltaY;
+      }
+    });
+    scheduleDrawingMeasurementsRedraw();
+    return true;
+  }
 
   let oldCenterX, oldCenterY;
   if (
@@ -2846,10 +2972,13 @@ function handleDrawingMouseUp(e = null) {
     ["rectangle", "circle", "line", "arrow"].includes(currentTool) &&
     startPoint
   ) {
-    const finalShapeEnd =
-      currentTool === "line"
-        ? getSmartLineEndpoint(startPoint, endPoint, !!keysState.shift, !!keysState.ctrl)
-        : endPoint;
+    const finalShapeEnd = getShapeCreationEndpoint(
+      startPoint,
+      endPoint,
+      currentTool,
+      !!keysState.shift,
+      !!keysState.ctrl,
+    );
     // Dessiner la forme finale avec les contraintes
     drawFinalShapeConstrained(
       startPoint,

@@ -132,7 +132,8 @@
     "hints": {
       "ignoreOtherShapes": "Ignorer les autres formes (Ctrl)",
       "snapMode": "Aimantation (Ctrl)",
-      "rotateShape": "Rotation de forme (Q)"
+      "rotateShape": "Rotation de forme (Q)",
+      "selectionCount": "{{count}} sélectionné(s)"
     }
   },
   "timer": {

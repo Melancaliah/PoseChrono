@@ -281,6 +281,10 @@ function closeDrawingMode() {
 
   // Fermer tous les menus/modals de dessin ouverts
   closeAllDrawingMenus();
+  hideDrawingEditHud();
+  if (typeof hideDrawingSelectionHud === "function") {
+    hideDrawingSelectionHud();
+  }
 
   // Réinitialiser l'état (sans effacer le cache)
   isDrawingModeActive = false;
@@ -687,6 +691,15 @@ function handleModifierKeyDown(e) {
           ? i18next.t("draw.hints.ignoreOtherShapes", { defaultValue: "Ignore other shapes (Ctrl)" })
           : "Ignore other shapes (Ctrl)";
       showDrawingModeHint(modeText);
+    } else if (
+      isDrawing &&
+      (currentTool === "line" || currentTool === "rectangle")
+    ) {
+      const snapText =
+        typeof i18next !== "undefined"
+          ? i18next.t("draw.hints.snapMode", { defaultValue: "Snap (Ctrl)" })
+          : "Snap (Ctrl)";
+      showDrawingModeHint(snapText);
     } else if (isDraggingEndpoint && selectedMeasurement) {
       const snapText =
         typeof i18next !== "undefined"
@@ -827,6 +840,15 @@ function handleCommonDrawingKeydown(e, options) {
     return true;
   }
 
+  // Ctrl+I : inverser la selection des shapes editables
+  if ((e.ctrlKey || e.metaKey) && key === "i") {
+    e.preventDefault();
+    if (typeof invertEditableShapeSelection === "function") {
+      invertEditableShapeSelection();
+    }
+    return true;
+  }
+
   // Ctrl+touche configurable pour export
   if ((e.ctrlKey || e.metaKey) && key === CONFIG.HOTKEYS.DRAWING_EXPORT.toLowerCase()) {
     e.preventDefault();
@@ -952,6 +974,9 @@ function handleDrawingModeKeydown(e) {
     e.preventDefault();
     if (typeof toggleSidebar === "function") {
       toggleSidebar();
+      if (typeof updateDrawingHudStackOffset === "function") {
+        updateDrawingHudStackOffset();
+      }
     }
     return;
   }

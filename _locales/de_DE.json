@@ -132,7 +132,8 @@
     "hints": {
       "ignoreOtherShapes": "Andere Formen ignorieren (Ctrl)",
       "snapMode": "Einrasten (Ctrl)",
-      "rotateShape": "Form drehen (Q)"
+      "rotateShape": "Form drehen (Q)",
+      "selectionCount": "{{count}} ausgewählt"
     }
   },
   "timer": {

@@ -136,7 +136,8 @@
     "hints": {
       "ignoreOtherShapes": "Игнорировать другие фигуры (Ctrl)",
       "snapMode": "Привязка (Ctrl)",
-      "rotateShape": "Поворот фигуры (Q)"
+      "rotateShape": "Поворот фигуры (Q)",
+      "selectionCount": "Выбрано: {{count}}"
     }
   },
   "timer": {

@@ -859,6 +859,44 @@ video {
   height: calc(100vh + 20px);
 }
 
+.drawing-hud-stack {
+  position: fixed;
+  right: calc(var(--drawing-hud-right-offset, 18px) + env(safe-area-inset-right));
+  bottom: calc(14px + env(safe-area-inset-bottom));
+  z-index: 11060;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.drawing-hud-chip {
+  display: none;
+  max-width: min(320px, 80vw);
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(10, 14, 20, 0.88);
+  color: #e6ecff;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.drawing-hud-chip.is-visible {
+  display: block;
+}
+
+.drawing-hud-chip--selection {
+  border-color: rgba(255, 255, 255, 0.14);
+  background: rgba(12, 16, 22, 0.9);
+  color: #e9efff;
+}
+
 .zoom-toolbar {
   position: fixed;
   bottom: 20px;

@@ -44,11 +44,14 @@ class DrawingManager {
       shapeSelection: {
         id: null,
         groupId: null,
+        ids: [],
+        groupIds: [],
       },
       shapeEditSession: {
         scaleSnapshot: null,
         circleSpaceBase: null,
         rotateSnapshot: null,
+        multiSelectionSnapshot: null,
       },
     };
     

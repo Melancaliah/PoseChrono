@@ -132,7 +132,8 @@
     "hints": {
       "ignoreOtherShapes": "忽略其他形状 (Ctrl)",
       "snapMode": "吸附 (Ctrl)",
-      "rotateShape": "旋转图形 (Q)"
+      "rotateShape": "旋转图形 (Q)",
+      "selectionCount": "已选择 {{count}} 项"
     }
   },
   "timer": {

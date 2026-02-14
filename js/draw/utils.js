@@ -528,6 +528,57 @@ function drawShapeOnCanvas(ctx, start, end, tool) {
  * @param {Object} start - Point de départ {x, y}
  * @param {Object} end - Point d'arrivée {x, y}
  */
+function buildShapeEdgeGroupPath(ctx, edgeLineOrGroupId) {
+  if (!ctx) return false;
+  const shapeGroupId =
+    typeof edgeLineOrGroupId === "string"
+      ? edgeLineOrGroupId
+      : edgeLineOrGroupId?.shapeGroup;
+  if (!shapeGroupId) return false;
+
+  const groupLines = measurementLines.filter(
+    (line) => line.type === "shape-edge" && line.shapeGroup === shapeGroupId,
+  );
+  if (groupLines.length === 0) return false;
+
+  const corners = ["a", "b", "c", "d", "a"];
+  const getEdge = (fromCorner, toCorner) =>
+    groupLines.find(
+      (line) =>
+        (line.startCorner === fromCorner && line.endCorner === toCorner) ||
+        (line.startCorner === toCorner && line.endCorner === fromCorner),
+    );
+
+  const segments = [];
+  for (let i = 0; i < corners.length - 1; i++) {
+    const fromCorner = corners[i];
+    const toCorner = corners[i + 1];
+    const edge = getEdge(fromCorner, toCorner);
+    if (!edge) return false;
+    const forward =
+      edge.startCorner === fromCorner && edge.endCorner === toCorner;
+    segments.push({
+      edge,
+      start: forward ? edge.start : edge.end,
+      end: forward ? edge.end : edge.start,
+    });
+  }
+
+  if (segments.length === 0) return false;
+
+  ctx.beginPath();
+  ctx.moveTo(segments[0].start.x, segments[0].start.y);
+  segments.forEach(({ edge, end }) => {
+    if (edge.control) {
+      ctx.quadraticCurveTo(edge.control.x, edge.control.y, end.x, end.y);
+    } else {
+      ctx.lineTo(end.x, end.y);
+    }
+  });
+  ctx.closePath();
+  return true;
+}
+
 function drawArrowOnCanvas(ctx, start, end, headScale = 1, doubleHead = false) {
   const headLength = Math.max(4, DRAWING_CONSTANTS.ARROW_HEAD_LENGTH * headScale);
   const angle = Math.atan2(end.y - start.y, end.x - start.x);
@@ -642,27 +693,52 @@ function calculateLaserStabilizedPoint() {
 function findEndpointAt(
   coords,
   threshold = DRAWING_CONSTANTS.ENDPOINT_THRESHOLD,
+  options = {},
 ) {
+  const prioritizeSelected = options.prioritizeSelected !== false;
+  const selectionBiasPx =
+    Number.isFinite(options.selectionBiasPx) ? Math.max(0, options.selectionBiasPx) : 3;
+  let bestSelected = null;
+  let bestSelectedDist = threshold;
+  let bestAny = null;
+  let bestAnyDist = threshold;
+
+  const isLineSelected = (line) => {
+    if (!line || !isEditableShape(line)) return false;
+    if (shapeHasCapability(line, "grouped")) {
+      return typeof isShapeEdgeSelected === "function" && isShapeEdgeSelected(line);
+    }
+    return typeof isIndividualShapeSelected === "function" && isIndividualShapeSelected(line);
+  };
+
+  const registerHit = (line, endpointKey, dist) => {
+    if (!(dist < threshold)) return;
+    if (dist < bestAnyDist) {
+      bestAnyDist = dist;
+      bestAny = { line, endpoint: endpointKey };
+    }
+    if (prioritizeSelected && isLineSelected(line) && dist < bestSelectedDist) {
+      bestSelectedDist = dist;
+      bestSelected = { line, endpoint: endpointKey };
+    }
+  };
+
   for (const line of measurementLines) {
     if (!line || !line.start || !line.end) continue;
     const caps = getShapeCapabilities(line.type);
 
     // Cercle editable: une seule poignée (endpoint "end")
     if (caps?.endpointMode === "single-end") {
-      if (getDistance(coords, line.end) < threshold) {
-        return { line, endpoint: "end" };
-      }
+      registerHit(line, "end", getDistance(coords, line.end));
       continue;
     }
 
-    if (getDistance(coords, line.start) < threshold) {
-      return { line, endpoint: "start" };
-    }
-    if (getDistance(coords, line.end) < threshold) {
-      return { line, endpoint: "end" };
-    }
+    registerHit(line, "start", getDistance(coords, line.start));
+    registerHit(line, "end", getDistance(coords, line.end));
   }
-  return null;
+  if (!prioritizeSelected || !bestSelected) return bestAny;
+  if (!bestAny) return bestSelected;
+  return bestSelectedDist <= bestAnyDist + selectionBiasPx ? bestSelected : bestAny;
 }
 
 function findEditableShapeControlAt(
@@ -671,23 +747,37 @@ function findEditableShapeControlAt(
   options = {},
 ) {
   const selectedOnly = options.selectedOnly !== false;
+  const prioritizeSelected = options.prioritizeSelected !== false;
+  const selectionBiasPx =
+    Number.isFinite(options.selectionBiasPx) ? Math.max(0, options.selectionBiasPx) : 3;
+  let bestSelected = null;
+  let bestSelectedDist = threshold;
+  let bestAny = null;
+  let bestAnyDist = threshold;
   for (const line of measurementLines) {
     if (!line || !line.control || !shapeHasCapability(line, "hasControlPoint")) {
       continue;
     }
-    if (selectedOnly && typeof isIndividualShapeSelected === "function") {
-      const isSelected =
-        shapeHasCapability(line, "grouped")
-          ? (typeof isShapeEdgeSelected === "function" && isShapeEdgeSelected(line))
-          : isIndividualShapeSelected(line);
-      if (!isSelected) continue;
-    }
+    const isSelected =
+      shapeHasCapability(line, "grouped")
+        ? (typeof isShapeEdgeSelected === "function" && isShapeEdgeSelected(line))
+        : (typeof isIndividualShapeSelected === "function" && isIndividualShapeSelected(line));
+    if (selectedOnly && !isSelected) continue;
     const handlePoint = getShapeCurveHandlePoint(line);
-    if (handlePoint && getDistance(coords, handlePoint) < threshold) {
-      return line;
+    const dist = handlePoint ? getDistance(coords, handlePoint) : Infinity;
+    if (!(dist < threshold)) continue;
+    if (dist < bestAnyDist) {
+      bestAnyDist = dist;
+      bestAny = line;
+    }
+    if (prioritizeSelected && isSelected && dist < bestSelectedDist) {
+      bestSelectedDist = dist;
+      bestSelected = line;
     }
   }
-  return null;
+  if (!prioritizeSelected || !bestSelected) return bestAny;
+  if (!bestAny) return bestSelected;
+  return bestSelectedDist <= bestAnyDist + selectionBiasPx ? bestSelected : bestAny;
 }
 
 /**
@@ -809,7 +899,9 @@ function findDrawingHitTarget(
   }
 
   if (includeEndpoints) {
-    const endpointHit = findEndpointAt(coords, endpointThreshold);
+    const endpointHit = findEndpointAt(coords, endpointThreshold, {
+      prioritizeSelected: true,
+    });
     if (endpointHit) {
       result = {
         kind: "endpoint",

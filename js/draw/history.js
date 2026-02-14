@@ -77,7 +77,15 @@ let dragShapeControlLine = null;
 let dragShapeAspectRatio = null;
 const shapeSelectionState =
   drawState.shapeSelection ||
-  (drawState.shapeSelection = { id: null, groupId: null });
+  (drawState.shapeSelection = { id: null, groupId: null, ids: [], groupIds: [] });
+if (!Array.isArray(shapeSelectionState.ids)) {
+  shapeSelectionState.ids = shapeSelectionState.id ? [shapeSelectionState.id] : [];
+}
+if (!Array.isArray(shapeSelectionState.groupIds)) {
+  shapeSelectionState.groupIds = shapeSelectionState.groupId ? [shapeSelectionState.groupId] : [];
+}
+let selectedShapeIds = new Set(shapeSelectionState.ids);
+let selectedShapeGroupIds = new Set(shapeSelectionState.groupIds);
 let selectedShapeId = shapeSelectionState.id ?? null;
 let selectedShapeGroupId = shapeSelectionState.groupId ?? null;
 let drawingEditHud = null;
@@ -87,20 +95,157 @@ const dragShapeSession =
     scaleSnapshot: null,
     circleSpaceBase: null,
     rotateSnapshot: null,
+    multiSelectionSnapshot: null,
   });
 let drawingModeHint = null;
+let drawingSelectionHud = null;
+let drawingHudStack = null;
+let drawingHudStackResizeBound = false;
+let drawingHudSidebarObserver = null;
 
 function resetDragShapeSession() {
   dragShapeSession.scaleSnapshot = null;
   dragShapeSession.circleSpaceBase = null;
   dragShapeSession.rotateSnapshot = null;
+  dragShapeSession.multiSelectionSnapshot = null;
+}
+
+function getDrawingHudRightOffsetPx() {
+  const baseOffset = 18;
+  const sidebarVisible = typeof state !== "undefined" ? !!state.showSidebar : false;
+  const sidebarWidth = sidebarVisible
+    ? Number(DRAWING_CONSTANTS?.ZOOM_SIDEBAR_WIDTH || 95)
+    : 0;
+  return `${baseOffset + sidebarWidth}px`;
+}
+
+function updateDrawingHudStackOffset() {
+  const stack =
+    (drawingHudStack && document.body.contains(drawingHudStack)
+      ? drawingHudStack
+      : document.getElementById("drawing-hud-stack"));
+  if (!stack) return;
+  stack.style.setProperty("--drawing-hud-right-offset", getDrawingHudRightOffsetPx());
+}
+
+function ensureDrawingHudStack() {
+  if (drawingHudStack && document.body.contains(drawingHudStack)) {
+    updateDrawingHudStackOffset();
+    return drawingHudStack;
+  }
+  drawingHudStack = document.createElement("div");
+  drawingHudStack.id = "drawing-hud-stack";
+  drawingHudStack.className = "drawing-hud-stack";
+  document.body.appendChild(drawingHudStack);
+  updateDrawingHudStackOffset();
+
+  if (!drawingHudStackResizeBound) {
+    drawingHudStackResizeBound = true;
+    window.addEventListener("resize", updateDrawingHudStackOffset);
+  }
+
+  if (!drawingHudSidebarObserver) {
+    const sidebarEl = document.querySelector(".sidebar");
+    if (sidebarEl && typeof MutationObserver !== "undefined") {
+      drawingHudSidebarObserver = new MutationObserver(() => {
+        updateDrawingHudStackOffset();
+      });
+      drawingHudSidebarObserver.observe(sidebarEl, {
+        attributes: true,
+        attributeFilter: ["class", "style"],
+      });
+    }
+  }
+
+  return drawingHudStack;
+}
+
+function ensureDrawingHudChip(currentNode, id, variantClass) {
+  if (currentNode && document.body.contains(currentNode)) {
+    ensureDrawingHudStack();
+    updateDrawingHudStackOffset();
+    return currentNode;
+  }
+  const stack = ensureDrawingHudStack();
+  const node = document.createElement("div");
+  node.id = id;
+  node.className = `drawing-hud-chip ${variantClass}`;
+  stack.appendChild(node);
+  return node;
+}
+
+function ensureDrawingSelectionHud() {
+  drawingSelectionHud = ensureDrawingHudChip(
+    drawingSelectionHud,
+    "drawing-selection-hud",
+    "drawing-hud-chip--selection",
+  );
+  return drawingSelectionHud;
+}
+
+function hideDrawingSelectionHud() {
+  if (drawingSelectionHud) drawingSelectionHud.classList.remove("is-visible");
+}
+
+function getSelectedEditableShapeLines() {
+  const lines = [];
+  const seenIds = new Set();
+  measurementLines.forEach((line) => {
+    if (!isEditableShape(line)) return;
+    const isSelected =
+      shapeHasCapability(line, "grouped")
+        ? !!line.shapeGroup && selectedShapeGroupIds.has(line.shapeGroup)
+        : selectedShapeIds.has(line.id);
+    if (!isSelected || seenIds.has(line.id)) return;
+    seenIds.add(line.id);
+    lines.push(line);
+  });
+  return lines;
+}
+
+function updateDrawingSelectionHud() {
+  const count = selectedShapeIds.size + selectedShapeGroupIds.size;
+  if (count <= 0) {
+    hideDrawingSelectionHud();
+    return;
+  }
+  const hud = ensureDrawingSelectionHud();
+  const text =
+    typeof i18next !== "undefined"
+      ? i18next.t("draw.hints.selectionCount", {
+          count,
+          defaultValue: "{{count}} selected",
+        })
+      : `${count} selected`;
+  hud.textContent = text;
+  updateDrawingHudStackOffset();
+  hud.classList.add("is-visible");
+}
+
+function syncEditableShapeSelectionState() {
+  shapeSelectionState.ids = Array.from(selectedShapeIds);
+  shapeSelectionState.groupIds = Array.from(selectedShapeGroupIds);
+  selectedShapeId =
+    selectedShapeIds.size === 1 && selectedShapeGroupIds.size === 0
+      ? shapeSelectionState.ids[0]
+      : null;
+  selectedShapeGroupId =
+    selectedShapeGroupIds.size === 1 && selectedShapeIds.size === 0
+      ? shapeSelectionState.groupIds[0]
+      : null;
+  shapeSelectionState.id = selectedShapeId;
+  shapeSelectionState.groupId = selectedShapeGroupId;
+  updateDrawingSelectionHud();
+}
+
+function hasEditableShapeSelection() {
+  return selectedShapeIds.size > 0 || selectedShapeGroupIds.size > 0;
 }
 
 function clearEditableShapeSelection() {
-  selectedShapeId = null;
-  selectedShapeGroupId = null;
-  shapeSelectionState.id = null;
-  shapeSelectionState.groupId = null;
+  selectedShapeIds.clear();
+  selectedShapeGroupIds.clear();
+  syncEditableShapeSelectionState();
   resetDragShapeSession();
 }
 
@@ -108,7 +253,7 @@ function isShapeLineSelected(line) {
   return (
     !!line &&
     line.type === "shape-line" &&
-    selectedShapeId === line.id
+    selectedShapeIds.has(line.id)
   );
 }
 
@@ -116,7 +261,7 @@ function isShapeCircleSelected(line) {
   return (
     !!line &&
     line.type === "shape-circle" &&
-    selectedShapeId === line.id
+    selectedShapeIds.has(line.id)
   );
 }
 
@@ -124,7 +269,7 @@ function isShapeArrowSelected(line) {
   return (
     !!line &&
     line.type === "shape-arrow" &&
-    selectedShapeId === line.id
+    selectedShapeIds.has(line.id)
   );
 }
 
@@ -133,7 +278,7 @@ function isIndividualShapeSelected(line) {
     !!line &&
     isEditableShape(line) &&
     !shapeHasCapability(line, "grouped") &&
-    selectedShapeId === line.id
+    selectedShapeIds.has(line.id)
   );
 }
 
@@ -142,25 +287,30 @@ function isShapeEdgeSelected(line) {
     !!line &&
     shapeHasCapability(line, "grouped") &&
     !!line.shapeGroup &&
-    selectedShapeGroupId === line.shapeGroup
+    selectedShapeGroupIds.has(line.shapeGroup)
   );
 }
 
-function selectEditableShape(line) {
+function selectEditableShape(line, options = {}) {
+  const add = !!options.add;
   if (!line) return false;
   if (isEditableShape(line) && !shapeHasCapability(line, "grouped")) {
-    selectedShapeId = line.id;
-    selectedShapeGroupId = null;
-    shapeSelectionState.id = selectedShapeId;
-    shapeSelectionState.groupId = selectedShapeGroupId;
+    if (!add) {
+      selectedShapeIds.clear();
+      selectedShapeGroupIds.clear();
+    }
+    selectedShapeIds.add(line.id);
+    syncEditableShapeSelectionState();
     redrawDrawingMeasurements();
     return true;
   }
   if (shapeHasCapability(line, "grouped") && line.shapeGroup) {
-    selectedShapeGroupId = line.shapeGroup;
-    selectedShapeId = null;
-    shapeSelectionState.id = selectedShapeId;
-    shapeSelectionState.groupId = selectedShapeGroupId;
+    if (!add) {
+      selectedShapeIds.clear();
+      selectedShapeGroupIds.clear();
+    }
+    selectedShapeGroupIds.add(line.shapeGroup);
+    syncEditableShapeSelectionState();
     redrawDrawingMeasurements();
     return true;
   }
@@ -168,29 +318,59 @@ function selectEditableShape(line) {
 }
 
 function syncEditableShapeSelection() {
-  if (
-    selectedShapeId &&
-    !measurementLines.some(
-      (line) =>
-        isEditableShape(line) &&
-        !shapeHasCapability(line, "grouped") &&
-        line.id === selectedShapeId,
-    )
-  ) {
-    selectedShapeId = null;
-    shapeSelectionState.id = null;
-  }
-  if (
-    selectedShapeGroupId &&
-    !measurementLines.some(
-      (line) =>
-        shapeHasCapability(line, "grouped") &&
-        line.shapeGroup === selectedShapeGroupId,
-    )
-  ) {
-    selectedShapeGroupId = null;
-    shapeSelectionState.groupId = null;
-  }
+  const availableShapeIds = new Set();
+  const availableShapeGroupIds = new Set();
+  measurementLines.forEach((line) => {
+    if (!isEditableShape(line)) return;
+    if (shapeHasCapability(line, "grouped") && line.shapeGroup) {
+      availableShapeGroupIds.add(line.shapeGroup);
+      return;
+    }
+    if (!shapeHasCapability(line, "grouped") && line.id) {
+      availableShapeIds.add(line.id);
+    }
+  });
+
+  selectedShapeIds = new Set(
+    Array.from(selectedShapeIds).filter((id) => availableShapeIds.has(id)),
+  );
+  selectedShapeGroupIds = new Set(
+    Array.from(selectedShapeGroupIds).filter((groupId) =>
+      availableShapeGroupIds.has(groupId),
+    ),
+  );
+  syncEditableShapeSelectionState();
+}
+
+function invertEditableShapeSelection() {
+  const availableShapeIds = new Set();
+  const availableShapeGroupIds = new Set();
+  measurementLines.forEach((line) => {
+    if (!isEditableShape(line)) return;
+    if (shapeHasCapability(line, "grouped") && line.shapeGroup) {
+      availableShapeGroupIds.add(line.shapeGroup);
+      return;
+    }
+    if (!shapeHasCapability(line, "grouped") && line.id) {
+      availableShapeIds.add(line.id);
+    }
+  });
+
+  const nextIds = new Set();
+  const nextGroups = new Set();
+  availableShapeIds.forEach((id) => {
+    if (!selectedShapeIds.has(id)) nextIds.add(id);
+  });
+  availableShapeGroupIds.forEach((groupId) => {
+    if (!selectedShapeGroupIds.has(groupId)) nextGroups.add(groupId);
+  });
+
+  selectedShapeIds = nextIds;
+  selectedShapeGroupIds = nextGroups;
+  syncEditableShapeSelectionState();
+  resetDragShapeSession();
+  redrawDrawingMeasurements();
+  return hasEditableShapeSelection();
 }
 
 function ensureDrawingEditHud() {
@@ -235,24 +415,11 @@ function hideDrawingEditHud() {
 }
 
 function ensureDrawingModeHint() {
-  if (drawingModeHint && document.body.contains(drawingModeHint)) return drawingModeHint;
-  drawingModeHint = document.createElement("div");
-  drawingModeHint.id = "drawing-mode-hint";
-  drawingModeHint.style.position = "fixed";
-  drawingModeHint.style.zIndex = "11060";
-  drawingModeHint.style.right = "18px";
-  drawingModeHint.style.bottom = "14px";
-  drawingModeHint.style.padding = "6px 10px";
-  drawingModeHint.style.borderRadius = "8px";
-  drawingModeHint.style.border = "1px solid rgba(255,255,255,0.16)";
-  drawingModeHint.style.background = "rgba(10, 14, 20, 0.88)";
-  drawingModeHint.style.color = "#e6ecff";
-  drawingModeHint.style.fontSize = "12px";
-  drawingModeHint.style.fontWeight = "600";
-  drawingModeHint.style.letterSpacing = "0.2px";
-  drawingModeHint.style.pointerEvents = "none";
-  drawingModeHint.style.display = "none";
-  document.body.appendChild(drawingModeHint);
+  drawingModeHint = ensureDrawingHudChip(
+    drawingModeHint,
+    "drawing-mode-hint",
+    "drawing-hud-chip--hint",
+  );
   return drawingModeHint;
 }
 
@@ -260,11 +427,12 @@ function showDrawingModeHint(text) {
   if (!text) return;
   const hint = ensureDrawingModeHint();
   hint.textContent = text;
-  hint.style.display = "block";
+  updateDrawingHudStackOffset();
+  hint.classList.add("is-visible");
 }
 
 function hideDrawingModeHint() {
-  if (drawingModeHint) drawingModeHint.style.display = "none";
+  if (drawingModeHint) drawingModeHint.classList.remove("is-visible");
 }
 
 // ================================================================

@@ -448,24 +448,6 @@ function getShapeGroupBoundsFromEdge(edgeLine) {
   };
 }
 
-function getShapeGroupCornersFromEdge(edgeLine) {
-  if (!edgeLine?.shapeGroup) return null;
-  const groupLines = measurementLines.filter(
-    (line) => line.type === "shape-edge" && line.shapeGroup === edgeLine.shapeGroup,
-  );
-  if (groupLines.length === 0) return null;
-
-  const pointsByCorner = {};
-  groupLines.forEach((line) => {
-    if (line.startCorner) pointsByCorner[line.startCorner] = { ...line.start };
-    if (line.endCorner) pointsByCorner[line.endCorner] = { ...line.end };
-  });
-  if (!pointsByCorner.a || !pointsByCorner.b || !pointsByCorner.c || !pointsByCorner.d) {
-    return null;
-  }
-  return pointsByCorner;
-}
-
 function getShapeFillStyle(shapeConfig, fallbackStroke) {
   if (!shapeConfig?.fillEnabled) return null;
   const fillOpacity = Math.min(0.9, Math.max(0.05, shapeConfig.fillOpacity ?? 0.2));
@@ -524,7 +506,11 @@ function renderMeasureLine(ctx, line, scaleFactor, hoverPoint, hoverThreshold) {
       : isShape
         ? (line.config?.lineWidth ?? annotationStyle.size)
         : (line.config?.lineWidth ?? measureState.lineWidth);
-  const selectedOpacity = shapeSelected && isShape ? 0.62 : 1;
+  const hasShapeSelection =
+    typeof hasEditableShapeSelection === "function" &&
+    hasEditableShapeSelection();
+  const selectedOpacity =
+    isShape && hasShapeSelection && !shapeSelected ? 0.42 : 1;
   const fillStyle = getShapeFillStyle(line.config, color);
 
   if (isShape) {
@@ -538,17 +524,10 @@ function renderMeasureLine(ctx, line, scaleFactor, hoverPoint, hoverThreshold) {
     line.endCorner === "b" &&
     fillStyle
   ) {
-    const corners = getShapeGroupCornersFromEdge(line);
-    if (corners) {
+    if (buildShapeEdgeGroupPath(ctx, line)) {
       ctx.save();
       ctx.fillStyle = fillStyle.color;
       ctx.globalAlpha = fillStyle.opacity;
-      ctx.beginPath();
-      ctx.moveTo(corners.a.x, corners.a.y);
-      ctx.lineTo(corners.b.x, corners.b.y);
-      ctx.lineTo(corners.c.x, corners.c.y);
-      ctx.lineTo(corners.d.x, corners.d.y);
-      ctx.closePath();
       ctx.fill();
       ctx.restore();
     }

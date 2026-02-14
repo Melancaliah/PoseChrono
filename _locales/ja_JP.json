@@ -132,7 +132,8 @@
     "hints": {
       "ignoreOtherShapes": "他の図形を無視 (Ctrl)",
       "snapMode": "スナップ (Ctrl)",
-      "rotateShape": "図形を回転 (Q)"
+      "rotateShape": "図形を回転 (Q)",
+      "selectionCount": "{{count}} 個を選択中"
     }
   },
   "timer": {

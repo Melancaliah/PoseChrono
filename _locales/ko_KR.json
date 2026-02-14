@@ -132,7 +132,8 @@
     "hints": {
       "ignoreOtherShapes": "다른 도형 무시 (Ctrl)",
       "snapMode": "스냅 (Ctrl)",
-      "rotateShape": "도형 회전 (Q)"
+      "rotateShape": "도형 회전 (Q)",
+      "selectionCount": "{{count}}개 선택됨"
     }
   },
   "timer": {
