@@ -3824,6 +3824,11 @@
   backdrop-filter: blur(4px);
 }
 
+/* Export modal displayed while zoom-overlay drawing is active. */
+.modal-overlay.modal-overlay--zoom {
+  z-index: 10100;
+}
+
 .modal-container {
   background: var(--bg-window, #1c1c1f);
   border: 1px solid rgba(255, 255, 255, 0.1);

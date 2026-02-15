@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PoseChrono Desktop (Scaffold)</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        font-family: Segoe UI, system-ui, sans-serif;
+        background: radial-gradient(1200px 600px at 50% 20%, #2a2f45, #13141a);
+        color: #e6e9f3;
+      }
+      .card {
+        width: min(680px, 90vw);
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 14px;
+        padding: 22px;
+        background: rgba(14, 16, 22, 0.75);
+        backdrop-filter: blur(8px);
+      }
+      h1 {
+        margin: 0 0 10px 0;
+        font-size: 24px;
+      }
+      p {
+        margin: 0;
+        color: rgba(230, 233, 243, 0.78);
+        line-height: 1.45;
+      }
+      code {
+        color: #9ab0ff;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="card">
+      <h1>PoseChrono Desktop scaffold</h1>
+      <p>
+        This shell is isolated from the Eagle plugin runtime.
+        Next step: plug shared modules and desktop platform adapters here.
+      </p>
+      <p style="margin-top: 10px">
+        Environment:
+        <code id="env"></code>
+      </p>
+    </main>
+    <script src="./renderer.js"></script>
+  </body>
+</html>
+

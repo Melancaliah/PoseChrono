@@ -41,7 +41,7 @@ const CONFIG = {
     INFO: "i", // Afficher les infos de l'image (default : i)
     SILHOUETTE: "s", // Toggle silhouette (default : s)
     SILHOUETTE_MODAL: "S", // Ouvrir modal configuration silhouette (Shift+S) (default : S)
-    THEME: "F4", // Changer de thème (default : F4)
+    THEME: "F6", // Changer de thème (default : F6)
     ANNOTATE: "b", // Ouvrir le mode dessin/annotation (default : b)
     TAGS: "t", // Ouvrir le modal des tags (default : t)
 
@@ -90,7 +90,7 @@ const DEFAULT_HOTKEYS = {
   INFO: "i",
   SILHOUETTE: "s",
   SILHOUETTE_MODAL: "S",
-  THEME: "F4",
+  THEME: "F6",
   ANNOTATE: "b",
   TAGS: "t",
   VIDEO_SLOWER: "-",

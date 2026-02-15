@@ -40,3 +40,11 @@ If you need to install it manually, follow these steps:
 3. **Deploy Files:** Download the latest release and copy all files into the folder **EXCEPT** `manifest.json`.
 4. **Update Manifest:** Copy settings (description, keywords...) from the release manifest to your local one. **Do not touch the `"id"` field.**
 5. **Finalize:** Restart Eagle and start drawing!
+
+#
+
+### 🧭 Developer Documentation
+
+Technical architecture/build/release docs are here:
+
+- `docs/README.md`

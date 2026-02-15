@@ -1,0 +1,67 @@
+{
+  "name": "posechrono-desktop",
+  "version": "1.0.2",
+  "private": true,
+  "author": "PoseChrono",
+  "description": "PoseChrono standalone desktop app (Electron)",
+  "main": "src/main.js",
+  "scripts": {
+    "prepare:icons": "node scripts/prepare-icons.js",
+    "sync:web": "npm run prepare:icons && node ../../scripts/sync-desktop-web.js",
+    "start": "npm run sync:web && electron .",
+    "dev": "npm run sync:web && electron .",
+    "build:win": "npm run build:win:unsigned",
+    "build:win:unsigned": "npm run sync:web && electron-builder --win nsis --config.win.signAndEditExecutable=false",
+    "build:dir": "npm run sync:web && electron-builder --dir"
+  },
+  "build": {
+    "appId": "com.posechrono.desktop",
+    "productName": "PoseChrono",
+    "copyright": "Copyright (c) PoseChrono",
+    "afterPack": "scripts/after-pack.js",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "web/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "build/icon.ico",
+        "to": "icon.ico"
+      }
+    ],
+    "win": {
+      "signAndEditExecutable": false,
+      "icon": "build/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "PoseChrono-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": false,
+      "createStartMenuShortcut": true,
+      "shortcutName": "PoseChrono",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico",
+      "include": "installer/installer.nsh"
+    }
+  },
+  "devDependencies": {
+    "electron": "^34.0.0",
+    "electron-builder": "^24.13.3",
+    "rcedit": "^4.0.1"
+  }
+}

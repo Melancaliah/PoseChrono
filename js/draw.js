@@ -8137,6 +8137,9 @@ function showExportModal(context = "drawing") {
   const modal = document.createElement("div");
   modal.id = "export-options-modal";
   modal.className = "modal-overlay";
+  if (context === "zoom") {
+    modal.classList.add("modal-overlay--zoom");
+  }
 
   modal.innerHTML = `
     <div class="modal-content export-modal-content">

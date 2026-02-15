@@ -10,6 +10,10 @@
       name="viewport"
       content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
     />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self' data: blob: file:; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: file:; font-src 'self' data: file:; media-src 'self' data: blob: file:; connect-src 'self' https: http: ws: wss: file: data: blob:; object-src 'none'; base-uri 'self'; form-action 'self';"
+    />
     <meta name="theme-color" content="#667eea" />
     <title>PoseChrono! - Session de modèles vivants</title>
     <link rel="stylesheet" href="css/themes.css" />
@@ -143,15 +147,34 @@
               <span id="colored-word-title">Pose</span
               ><span style="color: white">Chrono!</span>
             </h1>
-            <p class="subtitle">Session de modèles vivants pour Eagle</p>
+            <p class="subtitle">Session de modèles vivants</p>
             <div class="setting-group">
-              <p
-                id="folder-info"
-                class="info-text"
-                data-i18n="settings.loadingImages"
-              >
-                Chargement des images...
-              </p>
+              <div class="folder-info-row">
+                <p
+                  id="folder-info"
+                  class="info-text"
+                  data-i18n="settings.loadingImages"
+                >
+                  Chargement des images...
+                </p>
+                <button
+                  type="button"
+                  id="choose-media-folder-btn"
+                  class="choose-media-folder-btn"
+                  data-i18n-tooltip="controls.selectMediaFolder"
+                  data-i18n-aria-label="controls.selectMediaFolder"
+                  aria-label="Select media folders"
+                >
+                  <img
+                    src="assets/icones/choose-folderimage4.svg"
+                    alt=""
+                    aria-hidden="true"
+                  />
+                  <span data-i18n="controls.selectMediaFolder">
+                    Choisir un répertoire d'image
+                  </span>
+                </button>
+              </div>
             </div>
 
             <!-- Sélection du type de session -->
@@ -1488,31 +1511,11 @@
       </div>
     </div>
 
-    <!-- Script de détection du mode frame -->
-    <script>
-      // Détecte si la fenêtre utilise le frame natif ou personnalisé
-      // En mode frameless (frame: false), ajoute la classe "frameless" au body
-      (async function () {
-        try {
-          // Lit le manifest.json pour vérifier la valeur de frame
-          const response = await fetch("manifest.json");
-          const manifest = await response.json();
-
-          // Si frame est false, on affiche la barre de titre personnalisée
-          if (manifest.main && manifest.main.frame === false) {
-            document.body.classList.add("frameless");
-          }
-        } catch (e) {
-          console.error("Erreur lors de la détection du mode frame:", e);
-          // En cas d'erreur, on considère qu'on est en mode frameless par défaut
-          document.body.classList.add("frameless");
-        }
-      })();
-    </script>
-
     <script src="js/config.js"></script>
-    <script src="js/timeline.js"></script>
+    <script src="js/vendor/i18next-lite.js"></script>
+    <script src="packages/shared/shared.bundle.js"></script>
+    <script src="js/platform/platform-api.js"></script>
+    <script src="js/platform/eagle-adapter.js"></script>
     <script src="js/plugin.js"></script>
-    <script src="js/draw.bundle.js"></script>
   </body>
 </html>

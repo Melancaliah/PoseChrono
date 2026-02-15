@@ -9,6 +9,7 @@
     "name": "PoseChrono!",
     "title": "PoseChrono!",
     "subtitle": "Session de modèles vivants pour Eagle",
+    "subtitleDesktop": "Session de modèles vivants",
     "description": "Outil de chronométrage pour les séances de dessin d'après modèle"
   },
   "titlebar": {
@@ -24,6 +25,7 @@
     "noImagesFound": "⚠️ Aucune image trouvée",
     "imagesAnalyzed": "Images analysées",
     "allLibraryAnalyzed": "Toute la bibliothèque est analysée",
+    "mediaFoldersAnalyzed": "Dossiers médias analysés",
     "imageLoaded": "image chargée",
     "imagesLoaded": "images chargées",
     "videoLoaded": "vidéo chargée",
@@ -268,6 +270,7 @@
     "appearance": "Apparence",
     "showGrid": "Afficher la grille de fond",
     "hideGrid": "Masquer la grille de fond",
+    "selectMediaFolder": "Choisir un répertoire d'image",
     "changeTheme": "Changer de thème",
     "configuration": "Configuration"
   },
@@ -341,7 +344,8 @@
     "remove": "Retirer le tag",
     "noTags": "Aucun tag",
     "noTagsAvailable": "Aucun tag disponible. Créez-en un nouveau ci-dessus.",
-    "createBtn": "Créer"
+    "createBtn": "Créer",
+    "desktopUnavailable": "Les tags sont disponibles uniquement dans Eagle."
   },
   "notifications": {
     "imageCopied": "Image copiée",
