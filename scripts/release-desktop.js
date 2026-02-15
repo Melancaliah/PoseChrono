@@ -8,6 +8,18 @@ const ROOT = path.resolve(__dirname, "..");
 const DIST_ROOT = path.join(ROOT, "dist");
 const DEFAULT_OUT_DIR = path.join(DIST_ROOT, "desktop-app");
 const DESKTOP_APP_DIR = path.join(ROOT, "apps", "desktop");
+const DESKTOP_WEB_DIRNAME = "web";
+
+const WEB_RUNTIME_ENTRIES = [
+  "index.html",
+  "manifest.json",
+  "logo.png",
+  "_locales",
+  "css",
+  "js",
+  "assets",
+  "LICENSE",
+];
 
 const EXCLUDED_SEGMENTS = new Set([
   "node_modules",
@@ -38,6 +50,17 @@ async function copyRecursive(src, dest) {
   }
   await fsp.mkdir(path.dirname(dest), { recursive: true });
   await fsp.copyFile(src, dest);
+}
+
+async function copyRootRuntimeFiles(destWebRoot) {
+  for (const relPath of WEB_RUNTIME_ENTRIES) {
+    const src = path.join(ROOT, relPath);
+    if (!(await exists(src))) {
+      throw new Error(`[release:desktop] Missing runtime entry: ${relPath}`);
+    }
+    const dest = path.join(destWebRoot, relPath);
+    await copyRecursive(src, dest);
+  }
 }
 
 async function listFilesRecursive(baseDir) {
@@ -86,7 +109,9 @@ async function main() {
     );
   }
 
-  await copyRecursive(DESKTOP_APP_DIR, path.join(outDir, "app"));
+  const outAppDir = path.join(outDir, "app");
+  await copyRecursive(DESKTOP_APP_DIR, outAppDir);
+  await copyRootRuntimeFiles(path.join(outAppDir, DESKTOP_WEB_DIRNAME));
 
   const files = await listFilesRecursive(outDir);
   let totalBytes = 0;

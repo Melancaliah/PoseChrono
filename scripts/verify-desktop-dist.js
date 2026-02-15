@@ -14,6 +14,12 @@ const REQUIRED_RELATIVE_FILES = [
   "app/src/preload.js",
   "app/src/renderer/index.html",
   "app/src/renderer/renderer.js",
+  "app/web/index.html",
+  "app/web/manifest.json",
+  "app/web/js/plugin.js",
+  "app/web/js/timeline.js",
+  "app/web/css/modals.css",
+  "app/web/_locales/en.json",
 ];
 
 const FORBIDDEN_RELATIVE_FILES = [

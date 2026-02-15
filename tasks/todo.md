@@ -59,13 +59,13 @@ Créer un contrat `PlatformAPI` pour isoler les dépendances Eagle.
 - [ ] `platform.capabilities` (tags, revealEagle, pinWindow, etc.)
 
 ### Tâches
-- [ ] Créer adapter Eagle qui wrappe `eagle.*` sans changer le comportement.
-- [ ] Remplacer les appels directs `eagle.*` dans le code applicatif par `platform.*`.
-- [ ] Ajouter logs d’erreur explicites quand une capability n’est pas dispo.
+- [x] Créer adapter Eagle qui wrappe `eagle.*` sans changer le comportement.
+- [x] Remplacer les appels directs `eagle.*` dans le code applicatif par `platform.*`.
+- [x] Ajouter logs d’erreur explicites quand une capability n’est pas dispo.
 
 ### Critères de sortie
 - [ ] Eagle fonctionne pareil qu’avant (smoke tests session + draw + history + modals).
-- [ ] Aucun appel `eagle.*` en dehors de l’adapter Eagle.
+- [x] Aucun appel `eagle.*` en dehors de l’adapter Eagle.
 
 ---
 

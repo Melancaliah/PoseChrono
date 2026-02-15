@@ -31,6 +31,78 @@ function getTimelineStorage() {
   return null;
 }
 
+function getTimelinePlatformAdapter() {
+  try {
+    if (
+      typeof window !== "undefined" &&
+      typeof window.getPoseChronoPlatform === "function"
+    ) {
+      return window.getPoseChronoPlatform();
+    }
+  } catch (_) {}
+  return null;
+}
+
+const _timelineMissingCapabilityWarned = new Set();
+
+function timelineWarnMissingCapability(capabilityKey, operationLabel) {
+  const platform = getTimelinePlatformAdapter();
+  const capability = String(capabilityKey || "").trim();
+  if (!capability) return;
+  if (_timelineMissingCapabilityWarned.has(capability)) return;
+
+  const hasPlatformCapabilities =
+    !!platform &&
+    !!platform.capabilities &&
+    Object.prototype.hasOwnProperty.call(
+      platform.capabilities,
+      capability,
+    );
+
+  if (!hasPlatformCapabilities || platform.capabilities[capability]) {
+    return;
+  }
+
+  _timelineMissingCapabilityWarned.add(capability);
+  console.warn(
+    `[Timeline:Platform] Missing capability "${capability}" for "${operationLabel}".`,
+  );
+}
+
+async function timelineDialogShowMessageBox(options) {
+  const platform = getTimelinePlatformAdapter();
+  try {
+    if (platform?.dialogs?.showMessageBox) {
+      return await platform.dialogs.showMessageBox(options);
+    }
+  } catch (_) {}
+  timelineWarnMissingCapability("dialogs", "dialogs.showMessageBox");
+  return { response: 0, checkboxChecked: false };
+}
+
+function timelineNotify(payload) {
+  const platform = getTimelinePlatformAdapter();
+  if (!payload) return;
+  try {
+    if (platform?.notification?.show) {
+      platform.notification.show(payload);
+      return;
+    }
+  } catch (_) {}
+  timelineWarnMissingCapability("notifications", "notification.show");
+}
+
+async function timelineItemGetById(id) {
+  const platform = getTimelinePlatformAdapter();
+  try {
+    if (platform?.item?.getById) {
+      return await platform.item.getById(id);
+    }
+  } catch (_) {}
+  timelineWarnMissingCapability("items", "item.getById");
+  return null;
+}
+
 // Validation des sessions
 const SESSION_VALIDATION = {
   MIN_POSES: 1,
@@ -153,7 +225,7 @@ async function openTimelineConfirmDialog(options = {}) {
 
   // Fallback legacy (dialog Eagle native)
   try {
-    const result = await eagle.dialog.showMessageBox({
+    const result = await timelineDialogShowMessageBox({
       type: "warning",
       title,
       message,
@@ -182,18 +254,12 @@ function showTimelineToast(type, message, duration = 2500) {
     return;
   }
 
-  if (
-    typeof eagle !== "undefined" &&
-    eagle.notification &&
-    eagle.notification.show
-  ) {
-    eagle.notification.show({
-      title: message,
-      body: "",
-      mute: false,
-      duration,
-    });
-  }
+  timelineNotify({
+    title: message,
+    body: "",
+    mute: false,
+    duration,
+  });
 }
 
 function scheduleTimelineUndoAction(options = {}) {
@@ -2450,18 +2516,16 @@ class TimelineRenderer {
         "[Timeline] Pas d'IDs d'images disponibles (anciennes sessions sans ID)",
       );
       // Notification à l'utilisateur
-      if (typeof eagle !== "undefined" && eagle.notification) {
-        eagle.notification.show({
-          title: tl("timeline.reuseError", {}, "Impossible de rejouer"),
-          body: tl(
-            "timeline.reuseErrorOldSession",
-            {},
-            "Cette session est trop ancienne et ne contient pas les IDs des images.",
-          ),
-          mute: false,
-          duration: 3000,
-        });
-      }
+      timelineNotify({
+        title: tl("timeline.reuseError", {}, "Impossible de rejouer"),
+        body: tl(
+          "timeline.reuseErrorOldSession",
+          {},
+          "Cette session est trop ancienne et ne contient pas les IDs des images.",
+        ),
+        mute: false,
+        duration: 3000,
+      });
       return;
     }
 
@@ -2479,22 +2543,16 @@ class TimelineRenderer {
         this._closeDayDetail();
 
         // Notification de succès
-        if (typeof eagle !== "undefined" && eagle.notification) {
-          eagle.notification.show({
-            title: tl(
-              "timeline.reuseSuccess",
-              {},
-              "Session restaurée avec succès",
-            ),
-            body: tl(
-              "timeline.reuseSuccessBody",
-              { count: imageIds.length },
-              `${imageIds.length} images chargées`,
-            ),
-            mute: false,
-            duration: 2000,
-          });
-        }
+        timelineNotify({
+          title: tl("timeline.reuseSuccess", {}, "Session restaurée avec succès"),
+          body: tl(
+            "timeline.reuseSuccessBody",
+            { count: imageIds.length },
+            `${imageIds.length} images chargées`,
+          ),
+          mute: false,
+          duration: 2000,
+        });
       } catch (e) {
         console.error("[Timeline] Erreur lors du chargement des images:", e);
       }
@@ -2756,15 +2814,9 @@ class TimelineRenderer {
 
     // Si on a l'ID et qu'on n'a pas le filePath, récupérer l'item via l'API Eagle
     // Éviter d'appeler l'API si on a déjà toutes les données nécessaires
-    if (
-      imgData.id &&
-      !imgData.filePath && // Ne pas appeler l'API si on a déjà le filePath
-      typeof eagle !== "undefined" &&
-      eagle.item &&
-      eagle.item.getById
-    ) {
+    if (imgData.id && !imgData.filePath) {
       try {
-        const item = await eagle.item.getById(imgData.id);
+        const item = await timelineItemGetById(imgData.id);
         console.log("[Timeline] Item récupéré via API Eagle:", item);
 
         // Vérifier que l'item retourné est valide (a un id)

@@ -267,6 +267,323 @@ function decodeDataToken(input) {
   }
 }
 
+function getPlatformAdapter() {
+  try {
+    if (
+      typeof window !== "undefined" &&
+      typeof window.getPoseChronoPlatform === "function"
+    ) {
+      return window.getPoseChronoPlatform();
+    }
+  } catch (_) {}
+  return null;
+}
+
+const _platformMissingCapabilityWarned = new Set();
+
+function platformWarnMissingCapability(capabilityKey, operationLabel) {
+  const platform = getPlatformAdapter();
+  const capability = String(capabilityKey || "").trim();
+  if (!capability) return;
+  if (_platformMissingCapabilityWarned.has(capability)) return;
+
+  const hasPlatformCapabilities =
+    !!platform &&
+    !!platform.capabilities &&
+    Object.prototype.hasOwnProperty.call(platform.capabilities, capability);
+
+  if (!hasPlatformCapabilities || platform.capabilities[capability]) return;
+
+  _platformMissingCapabilityWarned.add(capability);
+  console.warn(
+    `[Platform] Missing capability "${capability}" for "${operationLabel}".`,
+  );
+}
+
+function platformNotify(payload) {
+  const platform = getPlatformAdapter();
+  if (!payload) return;
+  try {
+    if (
+      platform &&
+      platform.notification &&
+      typeof platform.notification.show === "function"
+    ) {
+      platform.notification.show(payload);
+      return;
+    }
+  } catch (_) {}
+  platformWarnMissingCapability("notifications", "notification.show");
+}
+
+function platformRuntimeOnCreate(handler) {
+  const platform = getPlatformAdapter();
+  if (!handler || typeof handler !== "function") return;
+  try {
+    if (
+      platform &&
+      platform.runtime &&
+      typeof platform.runtime.onCreate === "function"
+    ) {
+      platform.runtime.onCreate(handler);
+      return;
+    }
+  } catch (_) {}
+  platformWarnMissingCapability("eagleApi", "runtime.onCreate");
+}
+
+function platformRuntimeOnRun(handler) {
+  const platform = getPlatformAdapter();
+  if (!handler || typeof handler !== "function") return;
+  try {
+    if (
+      platform &&
+      platform.runtime &&
+      typeof platform.runtime.onRun === "function"
+    ) {
+      platform.runtime.onRun(handler);
+      return;
+    }
+  } catch (_) {}
+  platformWarnMissingCapability("eagleApi", "runtime.onRun");
+}
+
+function platformRuntimeOnHide(handler) {
+  const platform = getPlatformAdapter();
+  if (!handler || typeof handler !== "function") return;
+  try {
+    if (
+      platform &&
+      platform.runtime &&
+      typeof platform.runtime.onHide === "function"
+    ) {
+      platform.runtime.onHide(handler);
+      return;
+    }
+  } catch (_) {}
+  platformWarnMissingCapability("eagleApi", "runtime.onHide");
+}
+
+async function platformWindowHide() {
+  const platform = getPlatformAdapter();
+  try {
+    if (platform?.window?.hide) {
+      await platform.window.hide();
+      return;
+    }
+  } catch (_) {}
+  platformWarnMissingCapability("windowControls", "window.hide");
+}
+
+async function platformWindowMinimize() {
+  const platform = getPlatformAdapter();
+  try {
+    if (platform?.window?.minimize) {
+      await platform.window.minimize();
+      return;
+    }
+  } catch (_) {}
+  platformWarnMissingCapability("windowControls", "window.minimize");
+}
+
+async function platformWindowToggleMaximize() {
+  const platform = getPlatformAdapter();
+  try {
+    if (platform?.window) {
+      const isMaximized = await (platform.window.isMaximized?.() || false);
+      if (isMaximized && platform.window.unmaximize) {
+        await platform.window.unmaximize();
+      } else if (platform.window.maximize) {
+        await platform.window.maximize();
+      }
+      return;
+    }
+  } catch (_) {}
+  platformWarnMissingCapability("windowControls", "window.toggleMaximize");
+}
+
+async function platformWindowToggleAlwaysOnTop() {
+  const platform = getPlatformAdapter();
+  try {
+    if (platform?.window) {
+      const isOnTop = await (platform.window.isAlwaysOnTop?.() || false);
+      if (platform.window.setAlwaysOnTop) {
+        await platform.window.setAlwaysOnTop(!isOnTop);
+      }
+      return !isOnTop;
+    }
+  } catch (_) {}
+  platformWarnMissingCapability(
+    "windowControls",
+    "window.toggleAlwaysOnTop",
+  );
+  return false;
+}
+
+async function platformPreferenceSet(key, value) {
+  const platform = getPlatformAdapter();
+  try {
+    if (platform?.preferences?.set) {
+      await platform.preferences.set(key, value);
+      return;
+    }
+  } catch (_) {}
+  platformWarnMissingCapability("preferences", "preferences.set");
+}
+
+async function platformDialogShowMessageBox(options) {
+  const platform = getPlatformAdapter();
+  try {
+    if (platform?.dialogs?.showMessageBox) {
+      return await platform.dialogs.showMessageBox(options);
+    }
+  } catch (_) {}
+  platformWarnMissingCapability("dialogs", "dialogs.showMessageBox");
+  return { response: 0, checkboxChecked: false };
+}
+
+async function platformItemGetSelected() {
+  const platform = getPlatformAdapter();
+  try {
+    if (platform?.item?.getSelected) {
+      return (await platform.item.getSelected()) || [];
+    }
+  } catch (_) {}
+  platformWarnMissingCapability("items", "item.getSelected");
+  return [];
+}
+
+async function platformFolderGetSelected() {
+  const platform = getPlatformAdapter();
+  try {
+    if (platform?.folder?.getSelected) {
+      return (await platform.folder.getSelected()) || [];
+    }
+  } catch (_) {}
+  platformWarnMissingCapability("folders", "folder.getSelected");
+  return [];
+}
+
+async function platformItemGet(query = {}) {
+  const platform = getPlatformAdapter();
+  try {
+    if (platform?.item?.get) {
+      return (await platform.item.get(query)) || [];
+    }
+  } catch (_) {}
+  platformWarnMissingCapability("items", "item.get");
+  return [];
+}
+
+async function platformItemGetById(id) {
+  const platform = getPlatformAdapter();
+  try {
+    if (platform?.item?.getById) {
+      return await platform.item.getById(id);
+    }
+  } catch (_) {}
+  platformWarnMissingCapability("items", "item.getById");
+  return null;
+}
+
+async function platformItemOpen(id) {
+  const platform = getPlatformAdapter();
+  try {
+    if (platform?.item?.open) {
+      await platform.item.open(id);
+      return;
+    }
+  } catch (_) {}
+  platformWarnMissingCapability("items", "item.open");
+}
+
+async function platformItemMoveToTrash(ids) {
+  const platform = getPlatformAdapter();
+  try {
+    if (platform?.item?.moveToTrash) {
+      await platform.item.moveToTrash(ids);
+      return;
+    }
+  } catch (_) {}
+  platformWarnMissingCapability("items", "item.moveToTrash");
+}
+
+async function platformTagGroupGet() {
+  const platform = getPlatformAdapter();
+  try {
+    if (platform?.tagGroup?.get) {
+      return (await platform.tagGroup.get()) || [];
+    }
+  } catch (_) {}
+  platformWarnMissingCapability("tags", "tagGroup.get");
+  return [];
+}
+
+async function platformTagGet() {
+  const platform = getPlatformAdapter();
+  try {
+    if (platform?.tag?.get) {
+      return (await platform.tag.get()) || [];
+    }
+  } catch (_) {}
+  platformWarnMissingCapability("tags", "tag.get");
+  return [];
+}
+
+async function platformClipboardCopyFiles(paths) {
+  const platform = getPlatformAdapter();
+  try {
+    if (platform?.clipboard?.copyFiles) {
+      await platform.clipboard.copyFiles(paths);
+      return true;
+    }
+  } catch (_) {}
+  platformWarnMissingCapability("clipboard", "clipboard.copyFiles");
+  return false;
+}
+
+async function platformShellShowItemInFolder(filePath) {
+  const platform = getPlatformAdapter();
+  try {
+    if (platform?.shell?.showItemInFolder) {
+      await platform.shell.showItemInFolder(filePath);
+      return true;
+    }
+  } catch (_) {}
+  platformWarnMissingCapability("shell", "shell.showItemInFolder");
+  return false;
+}
+
+async function platformItemShowInFolder(id) {
+  const platform = getPlatformAdapter();
+  try {
+    if (platform?.item?.showInFolder) {
+      await platform.item.showInFolder(id);
+      return true;
+    }
+  } catch (_) {}
+  platformWarnMissingCapability("items", "item.showInFolder");
+  return false;
+}
+
+function isDesktopStandaloneRuntime() {
+  try {
+    return (
+      typeof window !== "undefined" &&
+      !!window.poseChronoDesktop &&
+      window.poseChronoDesktop.platform === "desktop"
+    );
+  } catch (_) {
+    return false;
+  }
+}
+
+function getRevealActionI18nKey() {
+  return isDesktopStandaloneRuntime()
+    ? "drawing.revealInExplorer"
+    : "drawing.openInEagle";
+}
+
 const PoseChronoStorage = (() => {
   const DB_NAME = "posechrono-storage";
   const DB_VERSION = 1;
@@ -305,18 +622,12 @@ const PoseChronoStorage = (() => {
       return;
     }
 
-    if (
-      typeof eagle !== "undefined" &&
-      eagle?.notification &&
-      typeof eagle.notification.show === "function"
-    ) {
-      eagle.notification.show({
-        title: message,
-        body: "",
-        mute: false,
-        duration: 5000,
-      });
-    }
+    platformNotify({
+      title: message,
+      body: "",
+      mute: false,
+      duration: 5000,
+    });
   };
 
   const cloneValue = (value) => {
@@ -1783,20 +2094,42 @@ function forceChronoSync() {
 // 6. INITIALISATION
 // ================================================================
 
-// Hooks Eagle
-eagle.onPluginCreate(async () => {
-  loadTheme(); // Charger le thème sauvegardé
-  await initPlugin();
-  setupTitlebarControls(); // Initialiser les contrôles de la barre de titre
-  setupTitlebarHover(); // Initialiser l'affichage au survol de la titlebar
-  // Initialiser le module historique/timeline
-  if (typeof initTimeline === "function") {
-    await initTimeline();
-  }
-  // Fade in l'interface une fois prête
-  requestAnimationFrame(() => {
-    document.body.style.opacity = "1";
-  });
+// Hooks runtime
+let createLifecyclePromise = null;
+let runLifecyclePromise = null;
+
+async function runCreateLifecycle() {
+  if (createLifecyclePromise) return createLifecyclePromise;
+  createLifecyclePromise = (async () => {
+    loadTheme(); // Charger le thème sauvegardé
+    await initPlugin();
+    setupTitlebarControls(); // Initialiser les contrôles de la barre de titre
+    setupTitlebarHover(); // Initialiser l'affichage au survol de la titlebar
+    // Initialiser le module historique/timeline
+    if (typeof initTimeline === "function") {
+      await initTimeline();
+    }
+    // Fade in l'interface une fois prête
+    requestAnimationFrame(() => {
+      document.body.style.opacity = "1";
+    });
+  })();
+  return createLifecyclePromise;
+}
+
+async function runRuntimeLifecycle() {
+  if (runLifecyclePromise) return runLifecyclePromise;
+  runLifecyclePromise = (async () => {
+    await runCreateLifecycle();
+    // Charger les traductions avant de charger les images
+    await loadTranslations();
+    await loadImages();
+  })();
+  return runLifecyclePromise;
+}
+
+platformRuntimeOnCreate(async () => {
+  await runCreateLifecycle();
 });
 
 // ================================================================
@@ -1823,7 +2156,7 @@ function setupTitlebarControls() {
 
   // Fermer la fenetre
   if (closeBtn) {
-    closeBtn.addEventListener("click", () => {
+    closeBtn.addEventListener("click", async () => {
       // Arreter la session en cours avant de fermer
       if (state.isRunning) {
         stopTimer();
@@ -1844,35 +2177,29 @@ function setupTitlebarControls() {
       document.body.classList.remove("review-active");
       settingsScreen.classList.remove("hidden");
 
-      eagle.window.hide();
+      await platformWindowHide();
     });
   }
 
   // Minimiser la fenetre
   if (minimizeBtn) {
     minimizeBtn.addEventListener("click", async () => {
-      await eagle.window.minimize();
+      await platformWindowMinimize();
     });
   }
 
   // Maximiser / Restaurer la fenetre
   if (maximizeBtn) {
     maximizeBtn.addEventListener("click", async () => {
-      const isMaximized = await eagle.window.isMaximized();
-      if (isMaximized) {
-        await eagle.window.unmaximize();
-      } else {
-        await eagle.window.maximize();
-      }
+      await platformWindowToggleMaximize();
     });
   }
 
   // Pin / Unpin la fenetre (keep always on top)
   if (pinBtn) {
     pinBtn.addEventListener("click", async () => {
-      const isOnTop = await eagle.window.isAlwaysOnTop();
-      await eagle.window.setAlwaysOnTop(!isOnTop);
-      pinBtn.classList.toggle("active", !isOnTop);
+      const isOnTop = await platformWindowToggleAlwaysOnTop();
+      pinBtn.classList.toggle("active", !!isOnTop);
     });
   }
 }
@@ -3053,13 +3380,18 @@ function closeGlobalSettingsModal(options = {}) {
   globalSettingsLastFocusedElement = null;
 }
 
-eagle.onPluginRun(async () => {
-  // Charger les traductions avant de charger les images
-  await loadTranslations();
-  await loadImages();
+platformRuntimeOnRun(async () => {
+  await runRuntimeLifecycle();
 });
 
-eagle.onPluginHide(() => {
+// Filet de sécurité: certains environnements Eagle peuvent rater un hook runtime
+window.addEventListener("load", () => {
+  setTimeout(() => {
+    void runRuntimeLifecycle();
+  }, 250);
+});
+
+platformRuntimeOnHide(() => {
   stopTimer();
   if (typeof window.flushTimelineStorage === "function") {
     void window.flushTimelineStorage();
@@ -4231,14 +4563,9 @@ function setupEventListeners() {
       CONFIG_RUNTIME_DEFAULTS.titlebarAlwaysVisible;
 
     applyTheme(CONFIG_RUNTIME_DEFAULTS.currentTheme);
-    if (typeof eagle !== "undefined" && eagle?.preferences?.set) {
-      try {
-        await eagle.preferences.set(
-          "theme",
-          CONFIG_RUNTIME_DEFAULTS.currentTheme,
-        );
-      } catch (_) {}
-    }
+    try {
+      await platformPreferenceSet("theme", CONFIG_RUNTIME_DEFAULTS.currentTheme);
+    } catch (_) {}
 
     applyVisualPreferencesFromStore();
     if (
@@ -5271,7 +5598,7 @@ function setupEventListeners() {
     e.preventDefault();
     showNextImageMenu(e.clientX, e.clientY);
   });
-  settingsBtn.addEventListener("click", () => {
+  settingsBtn.addEventListener("click", async () => {
     stopTimer();
     // Fermer le mode dessin s'il est actif
     if (
@@ -5286,9 +5613,7 @@ function setupEventListeners() {
     // Vérifier si on est déjà sur l'écran settings
     if (!settingsScreen.classList.contains("hidden")) {
       // Retour à l'accueil (eagle)
-      if (typeof eagle !== "undefined" && eagle?.window?.hide) {
-        eagle.window.hide();
-      }
+      await platformWindowHide();
       return;
     }
 
@@ -5831,10 +6156,9 @@ function setupEventListeners() {
     if (e.shiftKey && e.code === "KeyT") {
       e.preventDefault();
       const pinBtn = document.getElementById("pin-btn");
-      const isOnTop = await eagle.window.isAlwaysOnTop();
-      await eagle.window.setAlwaysOnTop(!isOnTop);
+      const isOnTop = await platformWindowToggleAlwaysOnTop();
       if (pinBtn) {
-        pinBtn.classList.toggle("active", !isOnTop);
+        pinBtn.classList.toggle("active", !!isOnTop);
       }
     }
   });
@@ -6331,21 +6655,21 @@ async function loadImages() {
     let items = [];
     let sourceMessage = i18next.t("settings.imagesAnalyzed");
 
-    const selectedItems = await eagle.item.getSelected();
+    const selectedItems = await platformItemGetSelected();
 
     if (selectedItems && selectedItems.length > 0) {
       items = selectedItems;
     } else {
-      const selectedFolders = await eagle.folder.getSelected();
+      const selectedFolders = await platformFolderGetSelected();
       if (selectedFolders && selectedFolders.length > 0) {
-        items = await eagle.item.get({
+        items = await platformItemGet({
           folders: selectedFolders.map((f) => f.id),
         });
       }
     }
 
     if (!items || items.length === 0) {
-      items = await eagle.item.get({});
+      items = await platformItemGet({});
       sourceMessage = i18next.t("settings.allLibraryAnalyzed");
     }
 
@@ -8114,11 +8438,7 @@ function showImageContextMenu(x, y) {
       onClick: copyImageToClipboard,
     },
     {
-      text: i18next.t("drawing.revealInExplorer"),
-      onClick: openImageInExplorer,
-    },
-    {
-      text: i18next.t("drawing.openInEagle"),
+      text: i18next.t(getRevealActionI18nKey()),
       onClick: revealImage,
       icon: ICONS.REVEAL,
     },
@@ -8151,10 +8471,7 @@ function showRevealMenu(x, y) {
   };
 
   menu.appendChild(
-    createMenuItem(i18next.t("drawing.openInEagle"), revealImage, ICONS.REVEAL),
-  );
-  menu.appendChild(
-    createMenuItem(i18next.t("drawing.revealInExplorer"), openImageInExplorer),
+    createMenuItem(i18next.t(getRevealActionI18nKey()), revealImage, ICONS.REVEAL),
   );
 
   adjustMenuPosition(menu, x, y, true);
@@ -9146,9 +9463,7 @@ function showSettingsContextMenu(x, y) {
         document.documentElement.setAttribute("data-theme", nextTheme);
 
         // Sauvegarder le thème
-        if (typeof eagle !== "undefined" && eagle?.preferences?.set) {
-          eagle.preferences.set("theme", nextTheme).catch(() => {});
-        }
+        platformPreferenceSet("theme", nextTheme).catch(() => {});
       },
     },
     "separator",
@@ -10498,15 +10813,12 @@ function showHotkeysModal() {
         // Rafraîchir le DOM sans recréer le modal
         modal.querySelectorAll(".hotkey-item").forEach(refreshHotkeyItem);
 
-        // Notification Eagle
-        if (typeof eagle !== "undefined" && eagle.notification) {
-          eagle.notification.show({
-            title: t("hotkeys.title", "Keyboard Shortcuts"),
-            body: t("hotkeys.resetDone", "All shortcuts reset to default."),
-            mute: true,
-            duration: 2000,
-          });
-        }
+        platformNotify({
+          title: t("hotkeys.title", "Keyboard Shortcuts"),
+          body: t("hotkeys.resetDone", "All shortcuts reset to default."),
+          mute: true,
+          duration: 2000,
+        });
       }
     });
 
@@ -12149,11 +12461,11 @@ function openZoomForImage(image, options = {}) {
     // Bouton Révéler
     const btnReveal = document.createElement("button");
     btnReveal.className = "control-btn-small";
-    btnReveal.setAttribute("data-tooltip", i18next.t("drawing.openInEagle"));
+    btnReveal.setAttribute("data-tooltip", i18next.t(getRevealActionI18nKey()));
     btnReveal.innerHTML = ICONS.REVEAL;
     btnReveal.onclick = async () => {
-      if (eagle.window?.minimize) await eagle.window.minimize();
-      await eagle.item.open(image.id);
+      await platformWindowMinimize();
+      await platformItemOpen(image.id);
     };
 
     // Bouton Supprimer (optionnel, seulement si onDelete est fourni)
@@ -12205,11 +12517,10 @@ function openZoomForImage(image, options = {}) {
           if (typeof image.moveToTrash === "function") {
             await image.moveToTrash();
           } else if (
-            eagle?.item?.moveToTrash &&
             image?.id !== undefined &&
             image?.id !== null
           ) {
-            await eagle.item.moveToTrash([image.id]);
+            await platformItemMoveToTrash([image.id]);
           }
         } catch (e) {
           console.error("Erreur suppression:", e);
@@ -12818,21 +13129,19 @@ function showReview() {
               if (typeof targetImage.moveToTrash === "function") {
                 await targetImage.moveToTrash();
               } else if (
-                eagle?.item?.moveToTrash &&
                 targetImage?.id !== undefined &&
                 targetImage?.id !== null
               ) {
-                await eagle.item.moveToTrash([targetImage.id]);
+                await platformItemMoveToTrash([targetImage.id]);
               }
             } catch (e) {
               console.error("Erreur suppression:", e);
               try {
                 if (
-                  eagle?.item?.moveToTrash &&
                   targetImage?.id !== undefined &&
                   targetImage?.id !== null
                 ) {
-                  await eagle.item.moveToTrash([targetImage.id]);
+                  await platformItemMoveToTrash([targetImage.id]);
                 }
               } catch (_) {}
             }
@@ -13229,11 +13538,11 @@ function showReview() {
     // Bouton Révéler
     const btnReveal = document.createElement("button");
     btnReveal.className = "control-btn-small";
-    btnReveal.setAttribute("data-tooltip", i18next.t("drawing.openInEagle"));
+    btnReveal.setAttribute("data-tooltip", i18next.t(getRevealActionI18nKey()));
     btnReveal.innerHTML = ICONS.REVEAL;
     btnReveal.onclick = async () => {
-      if (eagle.window?.minimize) await eagle.window.minimize();
-      await eagle.item.open(image.id);
+      await platformWindowMinimize();
+      await platformItemOpen(image.id);
     };
 
     // Bouton Supprimer
@@ -13347,21 +13656,19 @@ function showReview() {
             if (typeof image.moveToTrash === "function") {
               await image.moveToTrash();
             } else if (
-              eagle?.item?.moveToTrash &&
               image?.id !== undefined &&
               image?.id !== null
             ) {
-              await eagle.item.moveToTrash([image.id]);
+              await platformItemMoveToTrash([image.id]);
             }
           } catch (e) {
             console.error("Erreur suppression:", e);
             try {
               if (
-                eagle?.item?.moveToTrash &&
                 image?.id !== undefined &&
                 image?.id !== null
               ) {
-                await eagle.item.moveToTrash([image.id]);
+                await platformItemMoveToTrash([image.id]);
               }
             } catch (_) {}
           }
@@ -13869,7 +14176,8 @@ function toggleImageInfo() {
 
       try {
         // Récupérer l'item Eagle
-        const item = await eagle.item.getById(image.id);
+        const item = await platformItemGetById(image.id);
+        if (!item) throw new Error("Item not found");
 
         // Retirer le tag
         if (item.tags) {
@@ -13965,14 +14273,14 @@ async function openTagsModal(reviewIndex = null, explicitImage = null) {
 
     try {
       // Récupérer les groupes de tags depuis Eagle
-      const tagGroups = await eagle.tagGroup.get();
+      const tagGroups = await platformTagGroupGet();
 
       if (!tagGroups || tagGroups.length === 0) {
         return;
       }
 
       // Récupérer tous les tags pour compter les tags par groupe
-      const allTags = await eagle.tag.get();
+      const allTags = await platformTagGet();
 
       // Créer un Map pour compter les tags par groupe ID
       const groupCountsMap = new Map();
@@ -14048,7 +14356,7 @@ async function openTagsModal(reviewIndex = null, explicitImage = null) {
   async function loadAvailableTags() {
     try {
       // Récupérer tous les tags depuis Eagle
-      const allTags = await eagle.tag.get();
+      const allTags = await platformTagGet();
       const imageTags = currentImage.tags || [];
 
       // Sauvegarder pour usage ultérieur
@@ -14127,7 +14435,8 @@ async function openTagsModal(reviewIndex = null, explicitImage = null) {
 
           try {
             // Récupérer l'item Eagle
-            const item = await eagle.item.getById(currentImage.id);
+            const item = await platformItemGetById(currentImage.id);
+            if (!item) throw new Error("Item not found");
 
             if (isActive) {
               // Retirer le tag
@@ -14175,7 +14484,8 @@ async function openTagsModal(reviewIndex = null, explicitImage = null) {
 
     try {
       // Récupérer l'item Eagle
-      const item = await eagle.item.getById(currentImage.id);
+      const item = await platformItemGetById(currentImage.id);
+      if (!item) throw new Error("Item not found");
 
       // Ajouter le tag
       if (!item.tags) item.tags = [];
@@ -14314,7 +14624,7 @@ async function openTagsModal(reviewIndex = null, explicitImage = null) {
 
   async function loadTagsForAutocomplete() {
     try {
-      const allTags = await eagle.tag.get();
+      const allTags = await platformTagGet();
       allTagNames = allTags.map((tag) => tag.name || tag);
     } catch (e) {
       console.error(
@@ -14551,19 +14861,16 @@ async function copyImageToClipboard() {
 
   try {
     // Méthode 1 : Copier le fichier (pour pouvoir le coller dans l'explorateur)
-    if (eagle.clipboard && eagle.clipboard.copyFiles) {
-      await eagle.clipboard.copyFiles([image.filePath]);
+    if (await platformClipboardCopyFiles([image.filePath])) {
       console.log("Fichier image copié dans le presse-papier");
 
       // Notification de succès
-      if (eagle.notification && eagle.notification.show) {
-        await eagle.notification.show({
-          title: i18next.t("notifications.imageCopied"),
-          body: i18next.t("notifications.imageCopiedToClipboard"),
-          duration: 2000,
-          mute: true,
-        });
-      }
+      platformNotify({
+        title: i18next.t("notifications.imageCopied"),
+        body: i18next.t("notifications.imageCopiedToClipboard"),
+        duration: 2000,
+        mute: true,
+      });
       return;
     }
 
@@ -14574,14 +14881,12 @@ async function copyImageToClipboard() {
     console.log(i18next.t("notifications.imageCopiedToClipboard"));
 
     // Notification de succès (fallback)
-    if (eagle.notification && eagle.notification.show) {
-      await eagle.notification.show({
-        title: i18next.t("notifications.imageCopied"),
-        body: i18next.t("notifications.imageCopiedToClipboard"),
-        duration: 2000,
-        mute: true,
-      });
-    }
+    platformNotify({
+      title: i18next.t("notifications.imageCopied"),
+      body: i18next.t("notifications.imageCopiedToClipboard"),
+      duration: 2000,
+      mute: true,
+    });
   } catch (err) {
     console.error("Erreur lors de la copie:", err);
   }
@@ -14593,10 +14898,11 @@ async function openImageInExplorer() {
 
   try {
     // Utiliser l'API Eagle pour ouvrir dans l'explorateur
-    if (eagle.shell && eagle.shell.showItemInFolder) {
-      await eagle.shell.showItemInFolder(image.filePath);
-    } else if (eagle.item && eagle.item.showInFolder) {
-      await eagle.item.showInFolder(image.id);
+    if (await platformShellShowItemInFolder(image.filePath)) {
+      return;
+    }
+    if (await platformItemShowInFolder(image.id)) {
+      return;
     } else {
       // Fallback: ouvrir directement le fichier
       window.open(`file:///${image.filePath}`);
@@ -14613,6 +14919,11 @@ async function openImageInExplorer() {
 }
 
 async function revealImage() {
+  if (isDesktopStandaloneRuntime()) {
+    await openImageInExplorer();
+    return;
+  }
+
   const image = state.images[state.currentIndex];
   if (image) {
     try {
@@ -14622,10 +14933,8 @@ async function revealImage() {
         updatePlayPauseIcon();
         stopTimer();
       }
-      if (eagle.window && eagle.window.minimize) {
-        await eagle.window.minimize();
-      }
-      await eagle.item.open(image.id);
+      await platformWindowMinimize();
+      await platformItemOpen(image.id);
     } catch (e) {
       console.error("Erreur reveal:", e);
     }
@@ -14744,21 +15053,19 @@ async function deleteImage() {
         if (typeof image.moveToTrash === "function") {
           await image.moveToTrash();
         } else if (
-          eagle?.item?.moveToTrash &&
           imageId !== undefined &&
           imageId !== null
         ) {
-          await eagle.item.moveToTrash([imageId]);
+          await platformItemMoveToTrash([imageId]);
         }
       } catch (e) {
         console.error("Erreur suppression:", e);
         try {
           if (
-            eagle?.item?.moveToTrash &&
             imageId !== undefined &&
             imageId !== null
           ) {
-            await eagle.item.moveToTrash([imageId]);
+            await platformItemMoveToTrash([imageId]);
           }
         } catch (err) {}
       }
@@ -15113,7 +15420,7 @@ async function loadSessionImages(imageIds, options = {}) {
     const items = [];
     for (const id of imageIds) {
       try {
-        const item = await eagle.item.getById(id);
+        const item = await platformItemGetById(id);
         if (item) {
           items.push(item);
         }
@@ -15818,7 +16125,7 @@ function updateButtonLabels() {
     "annotate-btn": i18next.t("drawing.annotateTooltip", {
       hotkey: hk.ANNOTATE.toUpperCase(),
     }),
-    "reveal-btn": i18next.t("drawing.openInEagle"),
+    "reveal-btn": i18next.t(getRevealActionI18nKey()),
     "delete-btn": i18next.t("drawing.deleteImage"),
     "stop-btn": i18next.t("timer.endSession"),
     "settings-btn": i18next.t("settings.title"),

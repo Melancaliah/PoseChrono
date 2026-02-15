@@ -69,13 +69,78 @@ Then in Eagle:
 2. Select the output folder printed by the script (`dist/eagle-plugin/` or fallback timestamp folder)
 3. Use Eagle's `Package Plugin` from this imported project
 
-### 🖥️ Standalone Scaffold
+### 🖥️ Standalone Desktop (dev)
 
 A dedicated desktop shell is available in:
 
 `apps/desktop/`
 
 It is intentionally isolated from Eagle packaging.
+
+Run locally:
+
+```bash
+npm run desktop:install
+npm run desktop:start
+```
+
+Windows double-click launcher:
+
+`desktop-start.bat`
+
+Windows installer build launcher:
+
+`desktop-build-win.bat`
+
+Desktop currently loads the real PoseChrono UI (`index.html` root) through an Electron bridge that emulates `eagle.*` APIs.
+On first start, it asks for a media folder and uses it as the desktop source.
+
+Build Windows installer (`.exe`):
+
+```bash
+npm run desktop:build:win
+# (unsigned fallback explicite)
+npm run desktop:build:win:unsigned
+```
+
+Output:
+
+`apps/desktop/dist/`
+
+Branding used for Windows build:
+- `logo.ico` (installer/app icon)
+- `logo.png` (runtime fallback icon)
+
+Release-friendly Windows output (copied to root dist):
+
+```bash
+npm run release:windows
+```
+
+Outputs:
+- `dist/windows/PoseChrono-Setup-<version>.exe`
+- `dist/windows/release.json`
+
+Unified release (Eagle + Windows):
+
+```bash
+npm run release:all
+```
+
+Clean old generated releases:
+
+```bash
+npm run release:clean:dry
+npm run release:clean
+```
+
+Bump all app versions at once (`manifest.json`, `apps/desktop/package.json`, `package.json`):
+
+```bash
+npm run version:bump -- patch
+# or
+npm run version:bump -- 1.0.3
+```
 
 Desktop release/verification helpers:
 
