@@ -63,6 +63,10 @@ If this folder is currently imported and locked by Eagle, the script will automa
 
 `dist/eagle-plugin-<timestamp>/`
 
+and a versioned archive:
+
+`dist/eagle/posechrono-eagle-v<version>.zip`
+
 Then in Eagle:
 
 1. `Plugins` > `Developer Options` > `Import Local Project`
@@ -155,5 +159,6 @@ If `dist/desktop-app/` is locked, release will fallback to `dist/desktop-app-<ti
 
 ```bash
 npm run verify:locales
+npm run verify:smoke
 npm run verify:builds
 ```

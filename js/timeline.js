@@ -32,6 +32,10 @@ function getTimelineStorage() {
 }
 
 function getTimelinePlatformAdapter() {
+  const shared = getSharedTimelinePlatformAccessUtils();
+  if (shared && typeof shared.getPlatform === "function") {
+    return shared.getPlatform();
+  }
   try {
     if (
       typeof window !== "undefined" &&
@@ -43,64 +47,120 @@ function getTimelinePlatformAdapter() {
   return null;
 }
 
-const _timelineMissingCapabilityWarned = new Set();
+const TIMELINE_CAPABILITY_WARNER = (() => {
+  try {
+    const createCapabilityWarner = getTimelineSharedFactory(
+      "createCapabilityWarner",
+    );
+    if (createCapabilityWarner) {
+      return createCapabilityWarner({
+        getPlatform: () => getTimelinePlatformAdapter(),
+        prefix: "[Timeline:Platform]",
+        logger: (...args) => console.warn(...args),
+      });
+    }
+  } catch (_) {}
+  const warned = new Set();
+  return (capabilityKey, operationLabel) => {
+    const platform = getTimelinePlatformAdapter();
+    const capability = String(capabilityKey || "").trim();
+    if (!capability) return;
+    if (warned.has(capability)) return;
+
+    const hasPlatformCapabilities =
+      !!platform &&
+      !!platform.capabilities &&
+      Object.prototype.hasOwnProperty.call(
+        platform.capabilities,
+        capability,
+      );
+
+    if (!hasPlatformCapabilities || platform.capabilities[capability]) {
+      return;
+    }
+
+    warned.add(capability);
+    console.warn(
+      `[Timeline:Platform] Missing capability "${capability}" for "${operationLabel}".`,
+    );
+  };
+})();
 
 function timelineWarnMissingCapability(capabilityKey, operationLabel) {
-  const platform = getTimelinePlatformAdapter();
-  const capability = String(capabilityKey || "").trim();
-  if (!capability) return;
-  if (_timelineMissingCapabilityWarned.has(capability)) return;
+  TIMELINE_CAPABILITY_WARNER(capabilityKey, operationLabel);
+}
 
-  const hasPlatformCapabilities =
-    !!platform &&
-    !!platform.capabilities &&
-    Object.prototype.hasOwnProperty.call(
-      platform.capabilities,
+function resolveTimelinePlatformMethod(platform, operationName) {
+  if (!platform || !operationName) return null;
+  const parts = String(operationName)
+    .split(".")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (parts.length === 0) return null;
+
+  let cursor = platform;
+  for (let i = 0; i < parts.length - 1; i += 1) {
+    cursor = cursor?.[parts[i]];
+    if (!cursor) return null;
+  }
+  const methodName = parts[parts.length - 1];
+  const method =
+    cursor && typeof cursor[methodName] === "function"
+      ? cursor[methodName].bind(cursor)
+      : null;
+  return method;
+}
+
+async function timelinePlatformCallAsync(
+  operationName,
+  args = [],
+  { capability, operationLabel, fallback } = {},
+) {
+  const safeOperationLabel = operationLabel || operationName;
+  const ops = getSharedTimelinePlatformOpsUtils();
+  if (ops && typeof ops.callAsync === "function") {
+    return ops.callAsync(operationName, args, {
       capability,
-    );
-
-  if (!hasPlatformCapabilities || platform.capabilities[capability]) {
-    return;
+      operationLabel: safeOperationLabel,
+      fallback,
+    });
   }
 
-  _timelineMissingCapabilityWarned.add(capability);
-  console.warn(
-    `[Timeline:Platform] Missing capability "${capability}" for "${operationLabel}".`,
-  );
+  const platform = getTimelinePlatformAdapter();
+  try {
+    const method = resolveTimelinePlatformMethod(platform, operationName);
+    if (method) {
+      return await method(...(Array.isArray(args) ? args : []));
+    }
+  } catch (_) {}
+
+  timelineWarnMissingCapability(capability, safeOperationLabel);
+  return fallback;
 }
 
 async function timelineDialogShowMessageBox(options) {
-  const platform = getTimelinePlatformAdapter();
-  try {
-    if (platform?.dialogs?.showMessageBox) {
-      return await platform.dialogs.showMessageBox(options);
-    }
-  } catch (_) {}
-  timelineWarnMissingCapability("dialogs", "dialogs.showMessageBox");
-  return { response: 0, checkboxChecked: false };
+  return timelinePlatformCallAsync("dialogs.showMessageBox", [options], {
+    capability: "dialogs",
+    operationLabel: "dialogs.showMessageBox",
+    fallback: { response: 0, checkboxChecked: false },
+  });
 }
 
 function timelineNotify(payload) {
-  const platform = getTimelinePlatformAdapter();
   if (!payload) return;
-  try {
-    if (platform?.notification?.show) {
-      platform.notification.show(payload);
-      return;
-    }
-  } catch (_) {}
-  timelineWarnMissingCapability("notifications", "notification.show");
+  void timelinePlatformCallAsync("notification.show", [payload], {
+    capability: "notifications",
+    operationLabel: "notification.show",
+    fallback: undefined,
+  });
 }
 
 async function timelineItemGetById(id) {
-  const platform = getTimelinePlatformAdapter();
-  try {
-    if (platform?.item?.getById) {
-      return await platform.item.getById(id);
-    }
-  } catch (_) {}
-  timelineWarnMissingCapability("items", "item.getById");
-  return null;
+  return timelinePlatformCallAsync("item.getById", [id], {
+    capability: "items",
+    operationLabel: "item.getById",
+    fallback: null,
+  });
 }
 
 // Validation des sessions
@@ -123,11 +183,191 @@ const ACTIVITY_LEVELS = {
 // HELPERS i18n
 // ================================================================
 
+function getSharedI18nUtils() {
+  const value = getTimelineSharedNamespaceValue("i18n");
+  if (value) return value;
+  return null;
+}
+
+function getTimelineSharedNamespaceValue(key) {
+  try {
+    if (typeof window !== "undefined" && window.PoseChronoShared) {
+      return window.PoseChronoShared[key] ?? null;
+    }
+  } catch (_) {}
+  return null;
+}
+
+function getTimelineSharedFactory(factoryName) {
+  const fn = getTimelineSharedNamespaceValue(factoryName);
+  if (typeof fn === "function") return fn;
+  return null;
+}
+
+const TIMELINE_SHARED_SINGLETONS = Object.create(null);
+
+function getTimelineSharedSingleton(factoryName, initInstance) {
+  const existing = TIMELINE_SHARED_SINGLETONS[factoryName];
+  if (existing) return existing;
+
+  const factory = getTimelineSharedFactory(factoryName);
+  if (!factory) return null;
+
+  const instance =
+    typeof initInstance === "function" ? initInstance(factory) : factory();
+  if (instance) {
+    TIMELINE_SHARED_SINGLETONS[factoryName] = instance;
+    return instance;
+  }
+  return null;
+}
+
+function getSharedSessionReplayUtils() {
+  return getTimelineSharedSingleton("createSessionReplayUtils");
+}
+
+function getSharedTimelineSanitizerUtils() {
+  return getTimelineSharedSingleton(
+    "createTimelineSanitizerUtils",
+    (factory) =>
+      factory({
+      schemaVersion: TIMELINE_SCHEMA_VERSION,
+      minPoses: SESSION_VALIDATION.MIN_POSES,
+      minTimeSeconds: SESSION_VALIDATION.MIN_TIME_SECONDS,
+      maxTimePerSession: SESSION_VALIDATION.MAX_TIME_PER_SESSION,
+      nowIso: () => new Date().toISOString(),
+      }),
+  );
+}
+
+function getSharedTimelineFormatUtils() {
+  return getTimelineSharedSingleton(
+    "createTimelineFormatUtils",
+    (factory) =>
+      factory({
+      getLocale,
+      minuteLabel: "min",
+      }),
+  );
+}
+
+function getSharedTimelinePlatformAccessUtils() {
+  return getTimelineSharedSingleton(
+    "createPlatformAccessUtils",
+    (factory) =>
+      factory({
+      getterName: "getPoseChronoPlatform",
+      }),
+  );
+}
+
+function getSharedTimelinePlatformOpsUtils() {
+  return getTimelineSharedSingleton(
+    "createPlatformOpsUtils",
+    (factory) =>
+      factory({
+      getPlatform: () => getTimelinePlatformAdapter(),
+      warnMissingCapability: (capabilityKey, operationLabel) =>
+        timelineWarnMissingCapability(capabilityKey, operationLabel),
+      }),
+  );
+}
+
+function getSharedTimelineDateUtils() {
+  return getTimelineSharedSingleton("createTimelineDateUtils");
+}
+
+function getSharedTimelineMediaUtils() {
+  return getTimelineSharedSingleton("createTimelineMediaUtils");
+}
+
+function getSharedTimelineDisplayUtils() {
+  return getTimelineSharedSingleton(
+    "createTimelineDisplayUtils",
+    (factory) =>
+      factory({
+      t: (key, options = {}, fallback = "") => tl(key, options, fallback),
+      formatTime: (seconds) => FormatUtils.time(seconds),
+      }),
+  );
+}
+
+function getSharedTimelineFeedbackUtils() {
+  return getTimelineSharedSingleton(
+    "createTimelineFeedbackUtils",
+    (factory) =>
+      factory({
+      showPoseChronoConfirmDialog:
+        typeof window.showPoseChronoConfirmDialog === "function"
+          ? window.showPoseChronoConfirmDialog
+          : null,
+      showMessageBox: (options) => timelineDialogShowMessageBox(options),
+      logError: (error) =>
+        console.error("[Timeline] Erreur ouverture dialog:", error),
+      showPoseChronoToast:
+        typeof window.showPoseChronoToast === "function"
+          ? window.showPoseChronoToast
+          : null,
+      notify: (payload) => timelineNotify(payload),
+      schedulePoseChronoUndoAction:
+        typeof window.schedulePoseChronoUndoAction === "function"
+          ? window.schedulePoseChronoUndoAction
+          : null,
+      document: typeof document !== "undefined" ? document : null,
+      requestAnimationFrame:
+        typeof requestAnimationFrame === "function"
+          ? requestAnimationFrame
+          : null,
+      setTimeout: typeof setTimeout === "function" ? setTimeout : null,
+      clearTimeout: typeof clearTimeout === "function" ? clearTimeout : null,
+      }),
+  );
+}
+
+function extractReplayImageIds(session) {
+  const utils = getSharedSessionReplayUtils();
+  if (utils && typeof utils.extractImageIdsFromSession === "function") {
+    return utils.extractImageIdsFromSession(session);
+  }
+  const images = Array.isArray(session?.images) ? session.images : [];
+  return images
+    .map((img) => (typeof img === "object" && img !== null ? img.id : null))
+    .filter((id) => id !== undefined && id !== null);
+}
+
+function buildReplayOptions(session) {
+  const utils = getSharedSessionReplayUtils();
+  if (utils && typeof utils.buildReplayOptionsFromSession === "function") {
+    return utils.buildReplayOptionsFromSession(session);
+  }
+  const poses = Math.max(0, Number(session?.poses) || 0);
+  const time = Math.max(0, Number(session?.time) || 0);
+  const mode = String(session?.mode || "classique").toLowerCase();
+  const duration = poses > 0 && time > 0 ? time / poses : null;
+  const customQueue = Array.isArray(session?.customQueue)
+    ? session.customQueue
+    : [];
+  const memoryType =
+    mode === "memory" &&
+    (session?.memoryType === "flash" || session?.memoryType === "progressive")
+      ? session.memoryType
+      : null;
+  return { mode, duration, customQueue, memoryType };
+}
+
 /**
  * Retourne le code locale BCP47 basé sur la langue active de i18next
  * @returns {string}
  */
 function getLocale() {
+  const utils = getSharedI18nUtils();
+  if (utils && typeof utils.getLocale === "function") {
+    return utils.getLocale(
+      typeof i18next !== "undefined" ? i18next : null,
+      "fr-FR",
+    );
+  }
+
   // Lire la locale déclarée dans le fichier de traductions chargé
   if (typeof i18next !== "undefined" && i18next.t) {
     const locale = i18next.t("_locale");
@@ -139,20 +379,48 @@ function getLocale() {
 /**
  * Récupère une traduction avec fallback
  * @param {string} key - Clé de traduction
- * @param {Object} options - Options i18next
+ * @param {Object} vars - Options i18next
  * @param {string} fallback - Valeur par défaut
  * @returns {string}
  */
-function tl(key, options = {}, fallback = "") {
-  if (typeof i18next !== "undefined" && i18next.t) {
-    const result = i18next.t(key, options);
+function getTimelineI18nText(
+  key,
+  fallback = "",
+  vars = undefined,
+  options = undefined,
+) {
+  const requireInitialized = !!options?.requireInitialized;
+  const i18nInstance =
+    typeof i18next !== "undefined" &&
+    typeof i18next.t === "function" &&
+    (!requireInitialized || !!i18next.isInitialized)
+      ? i18next
+      : null;
+  const utils = getSharedI18nUtils();
+  if (utils && typeof utils.t === "function") {
+    return utils.t(i18nInstance, key, { ...(vars || {}), defaultValue: fallback }, fallback);
+  }
+
+  if (i18nInstance) {
+    const result = i18nInstance.t(key, {
+      ...(vars || {}),
+      defaultValue: fallback,
+    });
     // i18next retourne la clé si non trouvée
     return result !== key ? result : fallback;
   }
   return fallback;
 }
 
+function tl(key, options = {}, fallback = "") {
+  return getTimelineI18nText(key, fallback, options);
+}
+
 function toFileUrl(path) {
+  const shared = getSharedTimelineMediaUtils();
+  if (shared && typeof shared.toFileUrl === "function") {
+    return shared.toFileUrl(path);
+  }
   if (typeof path !== "string") return "";
   const raw = path.trim();
   if (!raw) return "";
@@ -172,6 +440,10 @@ function toFileUrl(path) {
 }
 
 function resolveTimelineImageSrc(image) {
+  const shared = getSharedTimelineMediaUtils();
+  if (shared && typeof shared.resolveTimelineImageSrc === "function") {
+    return shared.resolveTimelineImageSrc(image);
+  }
   if (typeof image === "string") {
     return toFileUrl(image);
   }
@@ -201,6 +473,11 @@ function resolveTimelineImageSrc(image) {
  * @returns {Promise<{confirmed: boolean, checkboxChecked: boolean}>}
  */
 async function openTimelineConfirmDialog(options = {}) {
+  const shared = getSharedTimelineFeedbackUtils();
+  if (shared && typeof shared.openConfirmDialog === "function") {
+    return shared.openConfirmDialog(options);
+  }
+
   const {
     title = "",
     message = "",
@@ -246,6 +523,12 @@ async function openTimelineConfirmDialog(options = {}) {
 }
 
 function showTimelineToast(type, message, duration = 2500) {
+  const shared = getSharedTimelineFeedbackUtils();
+  if (shared && typeof shared.showToast === "function") {
+    shared.showToast(type, message, duration);
+    return;
+  }
+
   if (
     typeof window !== "undefined" &&
     typeof window.showPoseChronoToast === "function"
@@ -263,6 +546,11 @@ function showTimelineToast(type, message, duration = 2500) {
 }
 
 function scheduleTimelineUndoAction(options = {}) {
+  const shared = getSharedTimelineFeedbackUtils();
+  if (shared && typeof shared.scheduleUndoAction === "function") {
+    return shared.scheduleUndoAction(options);
+  }
+
   if (
     typeof window !== "undefined" &&
     typeof window.schedulePoseChronoUndoAction === "function"
@@ -328,6 +616,10 @@ function scheduleTimelineUndoAction(options = {}) {
  * @returns {string[]}
  */
 function getDayLabels() {
+  const shared = getSharedTimelineDisplayUtils();
+  if (shared && typeof shared.getDayLabels === "function") {
+    return shared.getDayLabels();
+  }
   const result = tl("timeline.dayLabels", { returnObjects: true }, null);
   if (Array.isArray(result)) return result;
   return ["L", "M", "M", "J", "V", "S", "D"];
@@ -339,6 +631,10 @@ function getDayLabels() {
  * @returns {string} - HTML formaté
  */
 function formatCustomStructure(customQueue) {
+  const shared = getSharedTimelineDisplayUtils();
+  if (shared && typeof shared.formatCustomStructure === "function") {
+    return shared.formatCustomStructure(customQueue);
+  }
   if (!customQueue || customQueue.length === 0) return "";
 
   const title = `<div class="custom-structure-title">${tl("timeline.sessionPlan", {}, "Plan de la session")}</div>`;
@@ -366,6 +662,10 @@ function formatCustomStructure(customQueue) {
  * @returns {string}
  */
 function getModeLabel(mode, memoryType) {
+  const shared = getSharedTimelineDisplayUtils();
+  if (shared && typeof shared.getModeLabel === "function") {
+    return shared.getModeLabel(mode, memoryType);
+  }
   const labels = {
     classique: tl("modes.classic.title", {}, "Classique"),
     custom: tl("modes.custom.title", {}, "Personnalisé"),
@@ -393,6 +693,10 @@ function getModeLabel(mode, memoryType) {
  * @returns {string[]}
  */
 function getMonthLabels() {
+  const shared = getSharedTimelineDisplayUtils();
+  if (shared && typeof shared.getMonthLabels === "function") {
+    return shared.getMonthLabels();
+  }
   const result = tl("timeline.monthLabels", { returnObjects: true }, null);
   if (Array.isArray(result)) return result;
   return [
@@ -422,6 +726,10 @@ const DateUtils = {
    * @returns {string}
    */
   toKey(date) {
+    const shared = getSharedTimelineDateUtils();
+    if (shared && typeof shared.toKey === "function") {
+      return shared.toKey(date);
+    }
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, "0");
     const day = String(date.getDate()).padStart(2, "0");
@@ -433,6 +741,10 @@ const DateUtils = {
    * @returns {Date}
    */
   getToday() {
+    const shared = getSharedTimelineDateUtils();
+    if (shared && typeof shared.getToday === "function") {
+      return shared.getToday();
+    }
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     return today;
@@ -445,6 +757,10 @@ const DateUtils = {
    * @returns {boolean}
    */
   isSameDay(d1, d2) {
+    const shared = getSharedTimelineDateUtils();
+    if (shared && typeof shared.isSameDay === "function") {
+      return shared.isSameDay(d1, d2);
+    }
     return d1.toDateString() === d2.toDateString();
   },
 
@@ -455,6 +771,10 @@ const DateUtils = {
    * @returns {boolean}
    */
   isFuture(date, today) {
+    const shared = getSharedTimelineDateUtils();
+    if (shared && typeof shared.isFuture === "function") {
+      return shared.isFuture(date, today);
+    }
     return date > today;
   },
 
@@ -464,6 +784,10 @@ const DateUtils = {
    * @returns {Date}
    */
   getMondayBefore(date) {
+    const shared = getSharedTimelineDateUtils();
+    if (shared && typeof shared.getMondayBefore === "function") {
+      return shared.getMondayBefore(date);
+    }
     const result = new Date(date);
     const dayOfWeek = result.getDay();
     const diff = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
@@ -478,6 +802,10 @@ const DateUtils = {
    * @returns {Date}
    */
   getYearStartDate(year) {
+    const shared = getSharedTimelineDateUtils();
+    if (shared && typeof shared.getYearStartDate === "function") {
+      return shared.getYearStartDate(year);
+    }
     const jan1 = new Date(year, 0, 1);
     return this.getMondayBefore(jan1);
   },
@@ -489,6 +817,10 @@ const DateUtils = {
    * @returns {number}
    */
   diffInDays(d1, d2) {
+    const shared = getSharedTimelineDateUtils();
+    if (shared && typeof shared.diffInDays === "function") {
+      return shared.diffInDays(d1, d2);
+    }
     return Math.floor((d1 - d2) / (1000 * 60 * 60 * 24));
   },
 };
@@ -504,6 +836,10 @@ const FormatUtils = {
    * @returns {string}
    */
   number(num) {
+    const shared = getSharedTimelineFormatUtils();
+    if (shared && typeof shared.formatNumber === "function") {
+      return shared.formatNumber(num);
+    }
     return num.toLocaleString(getLocale());
   },
 
@@ -514,6 +850,10 @@ const FormatUtils = {
    * @returns {string}
    */
   time(seconds) {
+    const shared = getSharedTimelineFormatUtils();
+    if (shared && typeof shared.formatTime === "function") {
+      return shared.formatTime(seconds);
+    }
     if (seconds <= 0) return "0s";
 
     const hours = Math.floor(seconds / 3600);
@@ -552,6 +892,10 @@ const FormatUtils = {
    * @returns {string}
    */
   date(date, options = { weekday: "long", day: "numeric", month: "long" }) {
+    const shared = getSharedTimelineFormatUtils();
+    if (shared && typeof shared.formatDate === "function") {
+      return shared.formatDate(date, options);
+    }
     return date.toLocaleDateString(getLocale(), options);
   },
 };
@@ -573,6 +917,10 @@ const TimelineData = {
    * @returns {Object}
    */
   _getDefaultData() {
+    const utils = getSharedTimelineSanitizerUtils();
+    if (utils && typeof utils.getDefaultData === "function") {
+      return utils.getDefaultData();
+    }
     return {
       days: {},
       stats: {
@@ -586,6 +934,10 @@ const TimelineData = {
   },
 
   _sanitizeSessionEntry(session) {
+    const utils = getSharedTimelineSanitizerUtils();
+    if (utils && typeof utils.sanitizeSessionEntry === "function") {
+      return utils.sanitizeSessionEntry(session);
+    }
     if (!session || typeof session !== "object") return null;
     const poses = Math.max(0, Math.round(Number(session.poses) || 0));
     const time = Math.max(0, Math.min(SESSION_VALIDATION.MAX_TIME_PER_SESSION, Math.round(Number(session.time) || 0)));
@@ -625,6 +977,10 @@ const TimelineData = {
   },
 
   _sanitizeSessionImageEntry(image) {
+    const utils = getSharedTimelineSanitizerUtils();
+    if (utils && typeof utils.sanitizeSessionImageEntry === "function") {
+      return utils.sanitizeSessionImageEntry(image);
+    }
     if (typeof image === "string") {
       const value = image.trim();
       if (!value) return null;
@@ -664,6 +1020,10 @@ const TimelineData = {
   },
 
   _sanitizeData(candidate) {
+    const utils = getSharedTimelineSanitizerUtils();
+    if (utils && typeof utils.sanitizeData === "function") {
+      return utils.sanitizeData(candidate);
+    }
     const base = this._getDefaultData();
     const raw = candidate && typeof candidate === "object" ? candidate : {};
     let repaired = false;
@@ -730,6 +1090,10 @@ const TimelineData = {
   },
 
   _normalizePayload(rawPayload) {
+    const utils = getSharedTimelineSanitizerUtils();
+    if (utils && typeof utils.normalizePayload === "function") {
+      return utils.normalizePayload(rawPayload);
+    }
     if (!rawPayload || typeof rawPayload !== "object") {
       const sanitized = this._sanitizeData(null);
       return {
@@ -761,6 +1125,10 @@ const TimelineData = {
   },
 
   _mergeDayEntries(existingDay, incomingDay) {
+    const utils = getSharedTimelineSanitizerUtils();
+    if (utils && typeof utils.mergeDayEntries === "function") {
+      return utils.mergeDayEntries(existingDay, incomingDay);
+    }
     const base = existingDay && typeof existingDay === "object" ? existingDay : {};
     const next =
       incomingDay && typeof incomingDay === "object" ? incomingDay : {};
@@ -817,6 +1185,10 @@ const TimelineData = {
   },
 
   _mergeTimelineDatas(datasets) {
+    const utils = getSharedTimelineSanitizerUtils();
+    if (utils && typeof utils.mergeTimelineDatas === "function") {
+      return utils.mergeTimelineDatas(datasets);
+    }
     const merged = this._getDefaultData();
     const sources = Array.isArray(datasets) ? datasets : [];
     sources.forEach((data) => {
@@ -834,6 +1206,20 @@ const TimelineData = {
   },
 
   _loadFromLocalStorageKey(storageKey) {
+    const utils = getSharedTimelineSanitizerUtils();
+    if (utils && typeof utils.loadFromLocalStorageKey === "function") {
+      const data = utils.loadFromLocalStorageKey(
+        localStorage,
+        storageKey,
+        (parsed) => this._normalizePayload(parsed),
+        {
+          onRepaired: (key) => {
+            console.warn(`[Timeline] Local data repaired during load (${key}).`);
+          },
+        },
+      );
+      return data;
+    }
     try {
       const stored = localStorage.getItem(storageKey);
       if (!stored) return null;
@@ -850,6 +1236,16 @@ const TimelineData = {
   },
 
   _listLocalCandidateKeys() {
+    const utils = getSharedTimelineSanitizerUtils();
+    if (utils && typeof utils.listLocalCandidateKeys === "function") {
+      return utils.listLocalCandidateKeys(localStorage, {
+        baseKeys: [TIMELINE_STORAGE_KEY, TIMELINE_FALLBACK_LOCAL_KEY],
+        backupPrefixes: [
+          "posechrono-timeline-backup:",
+          "posechrono-db:timeline_data:backup:",
+        ],
+      });
+    }
     const keys = new Set([TIMELINE_STORAGE_KEY, TIMELINE_FALLBACK_LOCAL_KEY]);
     try {
       for (let i = 0; i < localStorage.length; i++) {
@@ -867,6 +1263,19 @@ const TimelineData = {
   },
 
   _loadLocalCandidates() {
+    const utils = getSharedTimelineSanitizerUtils();
+    if (utils && typeof utils.loadLocalCandidates === "function") {
+      return utils.loadLocalCandidates(
+        localStorage,
+        this._listLocalCandidateKeys(),
+        (parsed) => this._normalizePayload(parsed),
+        {
+          onRepaired: (key) => {
+            console.warn(`[Timeline] Local data repaired during load (${key}).`);
+          },
+        },
+      );
+    }
     const candidates = [];
     const candidateKeys = this._listLocalCandidateKeys();
     for (const key of candidateKeys) {
@@ -879,6 +1288,14 @@ const TimelineData = {
 
   _loadFromLocalStorage() {
     const candidates = this._loadLocalCandidates();
+    const utils = getSharedTimelineSanitizerUtils();
+    if (utils && typeof utils.resolveLocalTimelineData === "function") {
+      return utils.resolveLocalTimelineData(
+        candidates,
+        (list) => this._mergeTimelineDatas(list),
+        () => this._getDefaultData(),
+      );
+    }
     if (candidates.length === 0) {
       return this._getDefaultData();
     }
@@ -886,6 +1303,11 @@ const TimelineData = {
   },
 
   _writeTimelineBackup(payload, prefix = "posechrono-timeline-backup:") {
+    const utils = getSharedTimelineSanitizerUtils();
+    if (utils && typeof utils.writeTimelineBackup === "function") {
+      utils.writeTimelineBackup(localStorage, payload, { prefix, keep: 3 });
+      return;
+    }
     try {
       const key = `${prefix}${Date.now()}`;
       localStorage.setItem(key, JSON.stringify(payload));
@@ -906,6 +1328,10 @@ const TimelineData = {
   },
 
   _cloneData(data) {
+    const utils = getSharedTimelineSanitizerUtils();
+    if (utils && typeof utils.cloneData === "function") {
+      return utils.cloneData(data);
+    }
     try {
       if (typeof structuredClone === "function") {
         return structuredClone(data);
@@ -1241,6 +1667,10 @@ const TimelineData = {
    * @returns {{poses: number, time: number, isValid: boolean}}
    */
   _validateSession(poses, time) {
+    const utils = getSharedTimelineSanitizerUtils();
+    if (utils && typeof utils.validateSessionValues === "function") {
+      return utils.validateSessionValues(poses, time);
+    }
     // Convertir en nombres et valider
     let validPoses = Math.max(0, Math.round(Number(poses) || 0));
     let validTime = Math.max(0, Math.round(Number(time) || 0));
@@ -2507,9 +2937,7 @@ class TimelineRenderer {
     }
 
     // Extraire les IDs des images
-    const imageIds = session.images
-      .map((img) => (typeof img === "object" ? img.id : null))
-      .filter((id) => id);
+    const imageIds = extractReplayImageIds(session);
 
     if (imageIds.length === 0) {
       console.warn(
@@ -2532,12 +2960,7 @@ class TimelineRenderer {
     // Appeler la fonction globale du plugin pour charger les images
     if (typeof window.loadSessionImages === "function") {
       try {
-        await window.loadSessionImages(imageIds, {
-          mode: session.mode,
-          duration: session.time / session.poses, // Durée moyenne par pose
-          customQueue: session.customQueue, // Restaurer la structure custom si présente
-          memoryType: session.memoryType, // Restaurer le type de mémoire si présent
-        });
+        await window.loadSessionImages(imageIds, buildReplayOptions(session));
 
         // Fermer le modal
         this._closeDayDetail();

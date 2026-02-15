@@ -246,6 +246,9 @@ const state = new Proxy(stateManager, {
 });
 
 function escapeHtml(input) {
+  if (SHARED_DOM_SAFETY_UTILS?.escapeHtml) {
+    return SHARED_DOM_SAFETY_UTILS.escapeHtml(input);
+  }
   const str = String(input ?? "");
   return str
     .replace(/&/g, "&amp;")
@@ -256,10 +259,16 @@ function escapeHtml(input) {
 }
 
 function encodeDataToken(input) {
+  if (SHARED_DOM_SAFETY_UTILS?.encodeDataToken) {
+    return SHARED_DOM_SAFETY_UTILS.encodeDataToken(input);
+  }
   return encodeURIComponent(String(input ?? ""));
 }
 
 function decodeDataToken(input) {
+  if (SHARED_DOM_SAFETY_UTILS?.decodeDataToken) {
+    return SHARED_DOM_SAFETY_UTILS.decodeDataToken(input);
+  }
   try {
     return decodeURIComponent(String(input ?? ""));
   } catch (_) {
@@ -268,6 +277,9 @@ function decodeDataToken(input) {
 }
 
 function getPlatformAdapter() {
+  if (SHARED_PLATFORM_ACCESS_UTILS?.getPlatform) {
+    return SHARED_PLATFORM_ACCESS_UTILS.getPlatform();
+  }
   try {
     if (
       typeof window !== "undefined" &&
@@ -279,28 +291,55 @@ function getPlatformAdapter() {
   return null;
 }
 
-const _platformMissingCapabilityWarned = new Set();
+const PLATFORM_CAPABILITY_WARNER = (() => {
+  try {
+    const createCapabilityWarner = getSharedFactory("createCapabilityWarner");
+    if (createCapabilityWarner) {
+      return createCapabilityWarner({
+        getPlatform: () => getPlatformAdapter(),
+        prefix: "[Platform]",
+        logger: (...args) => console.warn(...args),
+      });
+    }
+  } catch (_) {}
+  const warned = new Set();
+  return (capabilityKey, operationLabel) => {
+    const platform = getPlatformAdapter();
+    const capability = String(capabilityKey || "").trim();
+    if (!capability) return;
+    if (warned.has(capability)) return;
+
+    const hasPlatformCapabilities =
+      !!platform &&
+      !!platform.capabilities &&
+      Object.prototype.hasOwnProperty.call(platform.capabilities, capability);
+
+    if (!hasPlatformCapabilities || platform.capabilities[capability]) return;
+
+    warned.add(capability);
+    console.warn(
+      `[Platform] Missing capability "${capability}" for "${operationLabel}".`,
+    );
+  };
+})();
 
 function platformWarnMissingCapability(capabilityKey, operationLabel) {
-  const platform = getPlatformAdapter();
-  const capability = String(capabilityKey || "").trim();
-  if (!capability) return;
-  if (_platformMissingCapabilityWarned.has(capability)) return;
-
-  const hasPlatformCapabilities =
-    !!platform &&
-    !!platform.capabilities &&
-    Object.prototype.hasOwnProperty.call(platform.capabilities, capability);
-
-  if (!hasPlatformCapabilities || platform.capabilities[capability]) return;
-
-  _platformMissingCapabilityWarned.add(capability);
-  console.warn(
-    `[Platform] Missing capability "${capability}" for "${operationLabel}".`,
-  );
+  PLATFORM_CAPABILITY_WARNER(capabilityKey, operationLabel);
 }
 
 function platformNotify(payload) {
+  if (SHARED_PLATFORM_OPS_UTILS?.callAsync) {
+    SHARED_PLATFORM_OPS_UTILS.callAsync(
+      "notification.show",
+      [payload],
+      {
+        capability: "notifications",
+        operationLabel: "notification.show",
+        fallback: undefined,
+      },
+    );
+    return;
+  }
   const platform = getPlatformAdapter();
   if (!payload) return;
   try {
@@ -317,6 +356,14 @@ function platformNotify(payload) {
 }
 
 function platformRuntimeOnCreate(handler) {
+  if (SHARED_PLATFORM_OPS_UTILS?.call) {
+    if (!handler || typeof handler !== "function") return;
+    SHARED_PLATFORM_OPS_UTILS.call("runtime.onCreate", [handler], {
+      capability: "eagleApi",
+      operationLabel: "runtime.onCreate",
+    });
+    return;
+  }
   const platform = getPlatformAdapter();
   if (!handler || typeof handler !== "function") return;
   try {
@@ -333,6 +380,14 @@ function platformRuntimeOnCreate(handler) {
 }
 
 function platformRuntimeOnRun(handler) {
+  if (SHARED_PLATFORM_OPS_UTILS?.call) {
+    if (!handler || typeof handler !== "function") return;
+    SHARED_PLATFORM_OPS_UTILS.call("runtime.onRun", [handler], {
+      capability: "eagleApi",
+      operationLabel: "runtime.onRun",
+    });
+    return;
+  }
   const platform = getPlatformAdapter();
   if (!handler || typeof handler !== "function") return;
   try {
@@ -349,6 +404,14 @@ function platformRuntimeOnRun(handler) {
 }
 
 function platformRuntimeOnHide(handler) {
+  if (SHARED_PLATFORM_OPS_UTILS?.call) {
+    if (!handler || typeof handler !== "function") return;
+    SHARED_PLATFORM_OPS_UTILS.call("runtime.onHide", [handler], {
+      capability: "eagleApi",
+      operationLabel: "runtime.onHide",
+    });
+    return;
+  }
   const platform = getPlatformAdapter();
   if (!handler || typeof handler !== "function") return;
   try {
@@ -365,6 +428,14 @@ function platformRuntimeOnHide(handler) {
 }
 
 async function platformWindowHide() {
+  if (SHARED_PLATFORM_OPS_UTILS?.callAsync) {
+    await SHARED_PLATFORM_OPS_UTILS.callAsync("window.hide", [], {
+      capability: "windowControls",
+      operationLabel: "window.hide",
+      fallback: undefined,
+    });
+    return;
+  }
   const platform = getPlatformAdapter();
   try {
     if (platform?.window?.hide) {
@@ -376,6 +447,14 @@ async function platformWindowHide() {
 }
 
 async function platformWindowMinimize() {
+  if (SHARED_PLATFORM_OPS_UTILS?.callAsync) {
+    await SHARED_PLATFORM_OPS_UTILS.callAsync("window.minimize", [], {
+      capability: "windowControls",
+      operationLabel: "window.minimize",
+      fallback: undefined,
+    });
+    return;
+  }
   const platform = getPlatformAdapter();
   try {
     if (platform?.window?.minimize) {
@@ -387,6 +466,10 @@ async function platformWindowMinimize() {
 }
 
 async function platformWindowToggleMaximize() {
+  if (SHARED_PLATFORM_WINDOW_UTILS?.toggleMaximize) {
+    await SHARED_PLATFORM_WINDOW_UTILS.toggleMaximize();
+    return;
+  }
   const platform = getPlatformAdapter();
   try {
     if (platform?.window) {
@@ -403,6 +486,9 @@ async function platformWindowToggleMaximize() {
 }
 
 async function platformWindowToggleAlwaysOnTop() {
+  if (SHARED_PLATFORM_WINDOW_UTILS?.toggleAlwaysOnTop) {
+    return SHARED_PLATFORM_WINDOW_UTILS.toggleAlwaysOnTop();
+  }
   const platform = getPlatformAdapter();
   try {
     if (platform?.window) {
@@ -421,6 +507,18 @@ async function platformWindowToggleAlwaysOnTop() {
 }
 
 async function platformPreferenceSet(key, value) {
+  if (SHARED_PLATFORM_OPS_UTILS?.callAsync) {
+    await SHARED_PLATFORM_OPS_UTILS.callAsync(
+      "preferences.set",
+      [key, value],
+      {
+        capability: "preferences",
+        operationLabel: "preferences.set",
+        fallback: undefined,
+      },
+    );
+    return;
+  }
   const platform = getPlatformAdapter();
   try {
     if (platform?.preferences?.set) {
@@ -432,6 +530,17 @@ async function platformPreferenceSet(key, value) {
 }
 
 async function platformDialogShowMessageBox(options) {
+  if (SHARED_PLATFORM_OPS_UTILS?.callAsync) {
+    return SHARED_PLATFORM_OPS_UTILS.callAsync(
+      "dialogs.showMessageBox",
+      [options],
+      {
+        capability: "dialogs",
+        operationLabel: "dialogs.showMessageBox",
+        fallback: { response: 0, checkboxChecked: false },
+      },
+    );
+  }
   const platform = getPlatformAdapter();
   try {
     if (platform?.dialogs?.showMessageBox) {
@@ -443,6 +552,12 @@ async function platformDialogShowMessageBox(options) {
 }
 
 async function platformItemGetSelected() {
+  if (SHARED_PLATFORM_OPS_UTILS?.callArray) {
+    return SHARED_PLATFORM_OPS_UTILS.callArray("item.getSelected", [], {
+      capability: "items",
+      operationLabel: "item.getSelected",
+    });
+  }
   const platform = getPlatformAdapter();
   try {
     if (platform?.item?.getSelected) {
@@ -454,6 +569,12 @@ async function platformItemGetSelected() {
 }
 
 async function platformFolderGetSelected() {
+  if (SHARED_PLATFORM_OPS_UTILS?.callArray) {
+    return SHARED_PLATFORM_OPS_UTILS.callArray("folder.getSelected", [], {
+      capability: "folders",
+      operationLabel: "folder.getSelected",
+    });
+  }
   const platform = getPlatformAdapter();
   try {
     if (platform?.folder?.getSelected) {
@@ -465,6 +586,12 @@ async function platformFolderGetSelected() {
 }
 
 async function platformItemGet(query = {}) {
+  if (SHARED_PLATFORM_OPS_UTILS?.callArray) {
+    return SHARED_PLATFORM_OPS_UTILS.callArray("item.get", [query], {
+      capability: "items",
+      operationLabel: "item.get",
+    });
+  }
   const platform = getPlatformAdapter();
   try {
     if (platform?.item?.get) {
@@ -476,6 +603,17 @@ async function platformItemGet(query = {}) {
 }
 
 async function platformItemGetById(id) {
+  if (SHARED_PLATFORM_OPS_UTILS?.callAsync) {
+    return SHARED_PLATFORM_OPS_UTILS.callAsync(
+      "item.getById",
+      [id],
+      {
+        capability: "items",
+        operationLabel: "item.getById",
+        fallback: null,
+      },
+    );
+  }
   const platform = getPlatformAdapter();
   try {
     if (platform?.item?.getById) {
@@ -487,6 +625,14 @@ async function platformItemGetById(id) {
 }
 
 async function platformItemOpen(id) {
+  if (SHARED_PLATFORM_OPS_UTILS?.callAsync) {
+    await SHARED_PLATFORM_OPS_UTILS.callAsync("item.open", [id], {
+      capability: "items",
+      operationLabel: "item.open",
+      fallback: undefined,
+    });
+    return;
+  }
   const platform = getPlatformAdapter();
   try {
     if (platform?.item?.open) {
@@ -498,6 +644,14 @@ async function platformItemOpen(id) {
 }
 
 async function platformItemMoveToTrash(ids) {
+  if (SHARED_PLATFORM_OPS_UTILS?.callAsync) {
+    await SHARED_PLATFORM_OPS_UTILS.callAsync("item.moveToTrash", [ids], {
+      capability: "items",
+      operationLabel: "item.moveToTrash",
+      fallback: undefined,
+    });
+    return;
+  }
   const platform = getPlatformAdapter();
   try {
     if (platform?.item?.moveToTrash) {
@@ -509,6 +663,12 @@ async function platformItemMoveToTrash(ids) {
 }
 
 async function platformTagGroupGet() {
+  if (SHARED_PLATFORM_OPS_UTILS?.callArray) {
+    return SHARED_PLATFORM_OPS_UTILS.callArray("tagGroup.get", [], {
+      capability: "tags",
+      operationLabel: "tagGroup.get",
+    });
+  }
   const platform = getPlatformAdapter();
   try {
     if (platform?.tagGroup?.get) {
@@ -520,6 +680,12 @@ async function platformTagGroupGet() {
 }
 
 async function platformTagGet() {
+  if (SHARED_PLATFORM_OPS_UTILS?.callArray) {
+    return SHARED_PLATFORM_OPS_UTILS.callArray("tag.get", [], {
+      capability: "tags",
+      operationLabel: "tag.get",
+    });
+  }
   const platform = getPlatformAdapter();
   try {
     if (platform?.tag?.get) {
@@ -531,6 +697,16 @@ async function platformTagGet() {
 }
 
 async function platformClipboardCopyFiles(paths) {
+  if (SHARED_PLATFORM_OPS_UTILS?.callBoolean) {
+    return SHARED_PLATFORM_OPS_UTILS.callBoolean(
+      "clipboard.copyFiles",
+      [paths],
+      {
+        capability: "clipboard",
+        operationLabel: "clipboard.copyFiles",
+      },
+    );
+  }
   const platform = getPlatformAdapter();
   try {
     if (platform?.clipboard?.copyFiles) {
@@ -543,6 +719,16 @@ async function platformClipboardCopyFiles(paths) {
 }
 
 async function platformShellShowItemInFolder(filePath) {
+  if (SHARED_PLATFORM_OPS_UTILS?.callBoolean) {
+    return SHARED_PLATFORM_OPS_UTILS.callBoolean(
+      "shell.showItemInFolder",
+      [filePath],
+      {
+        capability: "shell",
+        operationLabel: "shell.showItemInFolder",
+      },
+    );
+  }
   const platform = getPlatformAdapter();
   try {
     if (platform?.shell?.showItemInFolder) {
@@ -555,6 +741,16 @@ async function platformShellShowItemInFolder(filePath) {
 }
 
 async function platformItemShowInFolder(id) {
+  if (SHARED_PLATFORM_OPS_UTILS?.callBoolean) {
+    return SHARED_PLATFORM_OPS_UTILS.callBoolean(
+      "item.showInFolder",
+      [id],
+      {
+        capability: "items",
+        operationLabel: "item.showInFolder",
+      },
+    );
+  }
   const platform = getPlatformAdapter();
   try {
     if (platform?.item?.showInFolder) {
@@ -567,6 +763,9 @@ async function platformItemShowInFolder(id) {
 }
 
 function isDesktopStandaloneRuntime() {
+  if (SHARED_RUNTIME_MODE_UTILS?.isDesktopStandaloneRuntime) {
+    return SHARED_RUNTIME_MODE_UTILS.isDesktopStandaloneRuntime();
+  }
   try {
     return (
       typeof window !== "undefined" &&
@@ -579,218 +778,56 @@ function isDesktopStandaloneRuntime() {
 }
 
 function getRevealActionI18nKey() {
+  if (SHARED_RUNTIME_MODE_UTILS?.getRevealActionI18nKey) {
+    return SHARED_RUNTIME_MODE_UTILS.getRevealActionI18nKey();
+  }
   return isDesktopStandaloneRuntime()
     ? "drawing.revealInExplorer"
     : "drawing.openInEagle";
 }
 
 const PoseChronoStorage = (() => {
-  const DB_NAME = "posechrono-storage";
-  const DB_VERSION = 1;
-  const STORE_NAME = "kv";
-  const FALLBACK_PREFIX = "posechrono-db:";
-  let openPromise = null;
-  let indexedDbAvailable = true;
-  let fallbackNotified = false;
-
-  const i18nText = (key, fallback) => {
-    try {
-      if (typeof i18next !== "undefined" && typeof i18next.t === "function") {
-        return i18next.t(key, { defaultValue: fallback });
-      }
-    } catch (_) {}
-    return fallback;
-  };
-
-  const notifyFallbackMode = () => {
-    if (fallbackNotified) return;
-    fallbackNotified = true;
-    const message = i18nText(
-      "storage.fallbackActive",
-      "Storage fallback enabled: IndexedDB unavailable, using local storage.",
-    );
-
+  try {
     if (
       typeof window !== "undefined" &&
-      typeof window.showPoseChronoToast === "function"
+      window.PoseChronoStorage &&
+      typeof window.PoseChronoStorage.configure === "function"
     ) {
-      window.showPoseChronoToast({
-        type: "error",
-        message,
-        duration: 5000,
+      window.PoseChronoStorage.configure({ notify: platformNotify });
+      return window.PoseChronoStorage;
+    }
+    if (
+      typeof window !== "undefined" &&
+      typeof window.PoseChronoShared?.createStorageAdapter === "function"
+    ) {
+      const storage = window.PoseChronoShared.createStorageAdapter({
+        notify: platformNotify,
       });
-      return;
+      window.PoseChronoStorage = storage;
+      return storage;
     }
-
-    platformNotify({
-      title: message,
-      body: "",
-      mute: false,
-      duration: 5000,
-    });
-  };
-
-  const cloneValue = (value) => {
-    try {
-      if (typeof structuredClone === "function") {
-        return structuredClone(value);
-      }
-    } catch (_) {}
-    return JSON.parse(JSON.stringify(value));
-  };
-
-  const openDb = () => {
-    if (openPromise) return openPromise;
-    openPromise = new Promise((resolve, reject) => {
-      if (typeof indexedDB === "undefined") {
-        reject(new Error("IndexedDB unavailable"));
-        return;
-      }
-      const request = indexedDB.open(DB_NAME, DB_VERSION);
-      request.onupgradeneeded = () => {
-        const db = request.result;
-        if (!db.objectStoreNames.contains(STORE_NAME)) {
-          db.createObjectStore(STORE_NAME, { keyPath: "key" });
-        }
-      };
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () =>
-        reject(request.error || new Error("open db failed"));
-    }).catch((error) => {
-      console.warn(
-        "[Storage] IndexedDB disabled, fallback localStorage:",
-        error,
-      );
-      indexedDbAvailable = false;
-      notifyFallbackMode();
-      return null;
-    });
-    return openPromise;
-  };
-
-  const getFallbackKey = (key) => `${FALLBACK_PREFIX}${key}`;
-
-  const withStore = async (mode, fn) => {
-    const db = await openDb();
-    if (!db) return null;
-    return new Promise((resolve, reject) => {
-      try {
-        const tx = db.transaction(STORE_NAME, mode);
-        const store = tx.objectStore(STORE_NAME);
-        const req = fn(store);
-        tx.oncomplete = () => resolve(req ? req.result : null);
-        tx.onabort = () => reject(tx.error || new Error("transaction aborted"));
-        tx.onerror = () => reject(tx.error || new Error("transaction error"));
-      } catch (e) {
-        reject(e);
-      }
-    });
-  };
-
-  const getJson = async (key, fallback = null) => {
-    try {
-      const db = await openDb();
-      if (!db) {
-        try {
-          const raw = localStorage.getItem(getFallbackKey(key));
-          if (raw === null) return fallback;
-          return JSON.parse(raw);
-        } catch (_) {
-          return fallback;
-        }
-      }
-      const row = await withStore("readonly", (store) => store.get(key));
-      if (!row || row.value === undefined || row.value === null)
-        return fallback;
-      return cloneValue(row.value);
-    } catch (e) {
-      console.warn("[Storage] getJson failed:", key, e);
-      return fallback;
+    if (typeof window !== "undefined" && window.PoseChronoStorage) {
+      return window.PoseChronoStorage;
     }
-  };
-
-  const setJson = async (key, value) => {
-    try {
-      const db = await openDb();
-      if (!db) {
-        localStorage.setItem(
-          getFallbackKey(key),
-          JSON.stringify(cloneValue(value)),
-        );
-        return true;
-      }
-      const payload = {
-        key,
-        value: cloneValue(value),
-        updatedAt: Date.now(),
-      };
-      await withStore("readwrite", (store) => store.put(payload));
-      return true;
-    } catch (e) {
-      console.warn("[Storage] setJson failed:", key, e);
-      return false;
-    }
-  };
-
-  const remove = async (key) => {
-    try {
-      const db = await openDb();
-      if (!db) {
-        localStorage.removeItem(getFallbackKey(key));
-        return true;
-      }
-      await withStore("readwrite", (store) => store.delete(key));
-      return true;
-    } catch (e) {
-      console.warn("[Storage] remove failed:", key, e);
-      return false;
-    }
-  };
-
-  const migrateFromLocalStorage = async (
-    localStorageKey,
-    dbKey,
-    fallback = null,
-  ) => {
-    const existing = await getJson(dbKey, undefined);
-    if (existing !== undefined) return existing;
-
-    let parsed = fallback;
-    try {
-      const raw = localStorage.getItem(localStorageKey);
-      if (raw) parsed = JSON.parse(raw);
-    } catch (e) {
-      console.warn("[Storage] migration parse failed:", localStorageKey, e);
-    }
-
-    if (parsed !== undefined) {
-      const written = await setJson(dbKey, parsed);
-      if (written) {
-        try {
-          localStorage.removeItem(localStorageKey);
-        } catch (_) {}
-      }
-    }
-    return parsed;
-  };
-
+  } catch (_) {}
   return {
-    getJson,
-    setJson,
-    remove,
-    migrateFromLocalStorage,
+    async getJson(_key, fallback = null) {
+      return fallback;
+    },
+    async setJson() {
+      return false;
+    },
+    async remove() {
+      return false;
+    },
+    async migrateFromLocalStorage(_localStorageKey, _dbKey, fallback = null) {
+      return fallback;
+    },
     status() {
-      return {
-        indexedDbAvailable,
-        fallbackMode: !indexedDbAvailable,
-      };
+      return { indexedDbAvailable: false, fallbackMode: true };
     },
   };
 })();
-
-if (typeof window !== "undefined") {
-  window.PoseChronoStorage = PoseChronoStorage;
-}
 
 const STORAGE_SCHEMA_VERSION = 2;
 const STORAGE_KEYS = {
@@ -808,17 +845,140 @@ const LEGACY_UI_PREF_KEYS = {
   GLOBAL_SETTINGS_COLLAPSED: "posechrono-global-settings-collapsed",
 };
 const LEGACY_DEFAULT_SESSION_MODE_STORAGE_KEY = "posechrono-default-session-mode";
-const SESSION_MODE_VALUES = new Set(["classique", "custom", "relax", "memory"]);
+
+function getSharedNamespaceValue(key) {
+  try {
+    if (typeof window !== "undefined" && window.PoseChronoShared) {
+      return window.PoseChronoShared[key] ?? null;
+    }
+  } catch (_) {}
+  return null;
+}
+
+const SHARED_PREFS_CORE = getSharedNamespaceValue("prefs");
+const SHARED_I18N_UTILS = getSharedNamespaceValue("i18n");
+
+function initSharedFactory(factoryName, createArgs) {
+  try {
+    const factory = getSharedFactory(factoryName);
+    if (!factory) return null;
+    if (typeof createArgs === "function") {
+      return factory(createArgs());
+    }
+    return factory();
+  } catch (_) {}
+  return null;
+}
+
+const SHARED_RUNTIME_MODE_UTILS = initSharedFactory(
+  "createRuntimeModeUtils",
+  () => ({ desktopPlatformValue: "desktop" }),
+);
+
+const SHARED_PLATFORM_ACCESS_UTILS = initSharedFactory(
+  "createPlatformAccessUtils",
+  () => ({ getterName: "getPoseChronoPlatform" }),
+);
+
+const SHARED_PREFERENCES_TRANSFER_UTILS = initSharedFactory(
+  "createPreferencesTransferUtils",
+  () => ({
+    document: typeof document !== "undefined" ? document : null,
+    URL: typeof URL !== "undefined" ? URL : null,
+    Blob: typeof Blob !== "undefined" ? Blob : null,
+    FileReader: typeof FileReader !== "undefined" ? FileReader : null,
+    setTimeout: typeof setTimeout === "function" ? setTimeout : null,
+    logError: (error) => console.error("[Prefs] export download error:", error),
+  }),
+);
+
+const SHARED_PLATFORM_OPS_UTILS = initSharedFactory(
+  "createPlatformOpsUtils",
+  () => ({
+    getPlatform: () => getPlatformAdapter(),
+    warnMissingCapability: (capabilityKey, operationLabel) =>
+      platformWarnMissingCapability(capabilityKey, operationLabel),
+  }),
+);
+
+const SHARED_PLATFORM_WINDOW_UTILS = initSharedFactory(
+  "createPlatformWindowUtils",
+  () => ({
+    getPlatform: () => getPlatformAdapter(),
+    warnMissingCapability: (capabilityKey, operationLabel) =>
+      platformWarnMissingCapability(capabilityKey, operationLabel),
+  }),
+);
+
+const SHARED_DOM_SAFETY_UTILS = initSharedFactory("createDomSafetyUtils");
 
 function normalizeSessionModeValue(mode, fallback = "classique") {
+  if (
+    SHARED_PREFS_CORE &&
+    typeof SHARED_PREFS_CORE.normalizeSessionModeValue === "function"
+  ) {
+    return SHARED_PREFS_CORE.normalizeSessionModeValue(mode, fallback);
+  }
   const normalized = String(mode ?? "")
     .trim()
     .toLowerCase();
-  return SESSION_MODE_VALUES.has(normalized) ? normalized : fallback;
+  const fallbackNormalized = String(fallback ?? "classique")
+    .trim()
+    .toLowerCase();
+  const validModes = new Set(["classique", "custom", "relax", "memory"]);
+  return validModes.has(normalized)
+    ? normalized
+    : validModes.has(fallbackNormalized)
+      ? fallbackNormalized
+      : "classique";
+}
+
+function getDefaultSessionModePrefsUtils() {
+  if (
+    !SHARED_PREFS_CORE ||
+    typeof SHARED_PREFS_CORE.createDefaultSessionModeUtils !== "function"
+  ) {
+    return null;
+  }
+  return SHARED_PREFS_CORE.createDefaultSessionModeUtils({
+    normalizeSessionModeValue,
+    getValue: () => {
+      if (typeof UIPreferences !== "undefined" && UIPreferences) {
+        return UIPreferences.get("defaultSessionMode", undefined);
+      }
+      return undefined;
+    },
+    setValue: (value) => {
+      if (typeof UIPreferences !== "undefined" && UIPreferences) {
+        UIPreferences.set("defaultSessionMode", value);
+      }
+    },
+  });
+}
+
+function translateCountLabel(key, count, fallbackSingular, fallbackPlural) {
+  if (SHARED_I18N_UTILS?.tCountLabel) {
+    return SHARED_I18N_UTILS.tCountLabel(
+      typeof i18next !== "undefined" ? i18next : null,
+      key,
+      count,
+      fallbackSingular,
+      fallbackPlural,
+    );
+  }
+  const safeCount = Number.isFinite(Number(count)) ? Number(count) : 0;
+  return i18next.t(key, {
+    count: safeCount,
+    defaultValue: safeCount === 1 ? fallbackSingular : fallbackPlural,
+  });
 }
 
 function loadPreferredDefaultSessionMode() {
   const fallback = normalizeSessionModeValue(CONFIG?.defaultSessionMode);
+  const prefsUtils = getDefaultSessionModePrefsUtils();
+  if (prefsUtils?.load) {
+    return prefsUtils.load(fallback);
+  }
   try {
     if (typeof UIPreferences !== "undefined" && UIPreferences) {
       return normalizeSessionModeValue(
@@ -833,18 +993,29 @@ function loadPreferredDefaultSessionMode() {
 }
 
 function savePreferredDefaultSessionMode(mode, persist = true) {
-  const next = normalizeSessionModeValue(mode);
+  const prefsUtils = getDefaultSessionModePrefsUtils();
+  const next = prefsUtils?.save
+    ? prefsUtils.save(mode, persist)
+    : normalizeSessionModeValue(mode);
   CONFIG.defaultSessionMode = next;
-  if (!persist) return next;
-  try {
-    if (typeof UIPreferences !== "undefined" && UIPreferences) {
-      UIPreferences.set("defaultSessionMode", next);
-    }
-  } catch (_) {}
+  if (!prefsUtils?.save) {
+    if (!persist) return next;
+    try {
+      if (typeof UIPreferences !== "undefined" && UIPreferences) {
+        UIPreferences.set("defaultSessionMode", next);
+      }
+    } catch (_) {}
+  }
   return next;
 }
 
 function normalizeStringArray(input) {
+  if (
+    SHARED_PREFS_CORE &&
+    typeof SHARED_PREFS_CORE.normalizeStringArray === "function"
+  ) {
+    return SHARED_PREFS_CORE.normalizeStringArray(input);
+  }
   if (!Array.isArray(input)) return [];
   const seen = new Set();
   const out = [];
@@ -858,233 +1029,995 @@ function normalizeStringArray(input) {
   return out;
 }
 
-const UIPreferences = (() => {
-  // Capture defaults once from config bootstrap so reset is stable even after runtime toggles.
-  const BASE_DEFAULT_GRID_ENABLED =
-    typeof CONFIG !== "undefined" ? !!(CONFIG?.backgroundGrid ?? false) : false;
-  const BASE_DEFAULT_TITLEBAR_ALWAYS_VISIBLE =
-    typeof CONFIG !== "undefined"
-      ? !!(CONFIG?.titlebarAlwaysVisible ?? false)
-      : false;
-  const BASE_DEFAULT_SESSION_MODE = normalizeSessionModeValue(
-    typeof CONFIG !== "undefined" ? CONFIG?.defaultSessionMode : "classique",
-    "classique",
-  );
-
-  const getDefaultGridEnabled = () => BASE_DEFAULT_GRID_ENABLED;
-  const getDefaultTitlebarAlwaysVisible = () =>
-    BASE_DEFAULT_TITLEBAR_ALWAYS_VISIBLE;
-  const getDefaultSessionMode = () => BASE_DEFAULT_SESSION_MODE;
-
-  const getDefaultPrefs = () => ({
-    schemaVersion: UI_PREFS_SCHEMA_VERSION,
-    backgroundGridEnabled: getDefaultGridEnabled(),
-    titlebarAlwaysVisible: getDefaultTitlebarAlwaysVisible(),
-    defaultSessionMode: getDefaultSessionMode(),
-    reviewDurationsVisible: true,
-    hotkeysCollapsedCategories: [],
-    globalSettingsCollapsedCategories: ["maintenance"],
-  });
-
-  let cache = null;
-
-  const persist = () => {
-    if (!cache) return;
-    try {
-      localStorage.setItem(UI_PREFS_STORAGE_KEY, JSON.stringify(cache));
-    } catch (_) {}
-  };
-
-  const load = () => {
-    if (cache) return cache;
-    const defaults = getDefaultPrefs();
-    let parsed = {};
-    let changed = false;
-
-    try {
-      const raw = localStorage.getItem(UI_PREFS_STORAGE_KEY);
-      if (raw) {
-        const obj = JSON.parse(raw);
-        if (obj && typeof obj === "object") {
-          parsed = obj;
-        }
-      }
-    } catch (_) {
-      changed = true;
+function getSharedFactory(factoryName) {
+  try {
+    if (typeof window !== "undefined") {
+      const fn = window.PoseChronoShared?.[factoryName];
+      if (typeof fn === "function") return fn;
     }
+  } catch (_) {}
+  return null;
+}
 
-    cache = {
-      ...defaults,
-      ...parsed,
+const SHARED_UI_PREFERENCES_FACTORY = getSharedFactory("createUIPreferences");
+
+const UIPreferences = SHARED_UI_PREFERENCES_FACTORY
+  ? SHARED_UI_PREFERENCES_FACTORY({
+      storage: typeof localStorage !== "undefined" ? localStorage : null,
+      storageKey: UI_PREFS_STORAGE_KEY,
       schemaVersion: UI_PREFS_SCHEMA_VERSION,
+      legacyKeys: LEGACY_UI_PREF_KEYS,
+      legacyDefaultSessionModeStorageKey:
+        LEGACY_DEFAULT_SESSION_MODE_STORAGE_KEY,
+      normalizeSessionModeValue,
+      normalizeStringArray,
+      defaults: {
+        backgroundGridEnabled:
+          typeof CONFIG !== "undefined" ? !!(CONFIG?.backgroundGrid ?? false) : false,
+        titlebarAlwaysVisible:
+          typeof CONFIG !== "undefined"
+            ? !!(CONFIG?.titlebarAlwaysVisible ?? false)
+            : false,
+        defaultSessionMode:
+          typeof CONFIG !== "undefined" ? CONFIG?.defaultSessionMode : "classique",
+        reviewDurationsVisible: true,
+        hotkeysCollapsedCategories: [],
+        globalSettingsCollapsedCategories: ["maintenance"],
+      },
+    })
+  : {
+      init() {},
+      get(_key, fallback = undefined) {
+        return fallback;
+      },
+      set(_key, value) {
+        return value;
+      },
+      getStringArray() {
+        return [];
+      },
+      setStringArray(_key, value) {
+        return normalizeStringArray(value);
+      },
+      exportData() {
+        return {
+          schemaVersion: UI_PREFS_SCHEMA_VERSION,
+          backgroundGridEnabled: false,
+          titlebarAlwaysVisible: false,
+          defaultSessionMode: "classique",
+          reviewDurationsVisible: true,
+          hotkeysCollapsedCategories: [],
+          globalSettingsCollapsedCategories: ["maintenance"],
+        };
+      },
+      importData() {
+        return false;
+      },
+      resetVisualPrefs() {
+        return this.exportData();
+      },
     };
 
-    cache.backgroundGridEnabled = !!cache.backgroundGridEnabled;
-    cache.reviewDurationsVisible = cache.reviewDurationsVisible !== false;
-    cache.defaultSessionMode = normalizeSessionModeValue(
-      cache.defaultSessionMode,
-      getDefaultSessionMode(),
+function createSharedFactoryModule(factoryName, createArgs) {
+  const factory = getSharedFactory(factoryName);
+  if (!factory) return { factory: null, module: null };
+  try {
+    const module =
+      typeof createArgs === "function"
+        ? factory(createArgs())
+        : createArgs === undefined
+          ? factory()
+          : factory(createArgs);
+    return { factory, module };
+  } catch (_) {
+    return { factory, module: null };
+  }
+}
+
+const SHARED_SESSION_PLAN_MODULE = createSharedFactoryModule(
+  "createSessionPlanUtils",
+  () => ({
+    schemaVersion: STORAGE_SCHEMA_VERSION,
+    now: () => Date.now(),
+  }),
+);
+const SHARED_SESSION_PLAN_UTILS_FACTORY = SHARED_SESSION_PLAN_MODULE.factory;
+const SESSION_PLAN_UTILS = SHARED_SESSION_PLAN_MODULE.module;
+
+const SHARED_SESSION_METRICS_MODULE = createSharedFactoryModule(
+  "createSessionMetricsUtils",
+);
+const SHARED_SESSION_METRICS_FACTORY = SHARED_SESSION_METRICS_MODULE.factory;
+const SESSION_METRICS_UTILS = SHARED_SESSION_METRICS_MODULE.module;
+
+const SHARED_CUSTOM_SESSION_MODULE = createSharedFactoryModule(
+  "createCustomSessionUtils",
+);
+const SHARED_CUSTOM_SESSION_UTILS_FACTORY = SHARED_CUSTOM_SESSION_MODULE.factory;
+const CUSTOM_SESSION_UTILS = SHARED_CUSTOM_SESSION_MODULE.module;
+
+const SHARED_SESSION_FLOW_MODULE = createSharedFactoryModule(
+  "createSessionFlowUtils",
+);
+const SHARED_SESSION_FLOW_UTILS_FACTORY = SHARED_SESSION_FLOW_MODULE.factory;
+const SESSION_FLOW_UTILS = SHARED_SESSION_FLOW_MODULE.module;
+
+const SHARED_TIMER_TICK_MODULE = createSharedFactoryModule(
+  "createTimerTickUtils",
+);
+const SHARED_TIMER_TICK_UTILS_FACTORY = SHARED_TIMER_TICK_MODULE.factory;
+const TIMER_TICK_UTILS = SHARED_TIMER_TICK_MODULE.module;
+
+const SHARED_REVIEW_SESSION_MODULE = createSharedFactoryModule(
+  "createReviewSessionUtils",
+);
+const SHARED_REVIEW_SESSION_UTILS_FACTORY = SHARED_REVIEW_SESSION_MODULE.factory;
+const REVIEW_SESSION_UTILS = SHARED_REVIEW_SESSION_MODULE.module;
+
+const SHARED_REVIEW_GRID_MODULE = createSharedFactoryModule(
+  "createReviewGridUtils",
+);
+const SHARED_REVIEW_GRID_UTILS_FACTORY = SHARED_REVIEW_GRID_MODULE.factory;
+const REVIEW_GRID_UTILS = SHARED_REVIEW_GRID_MODULE.module;
+
+const SHARED_REVIEW_INTERACTIONS_MODULE = createSharedFactoryModule(
+  "createReviewInteractionsUtils",
+);
+const SHARED_REVIEW_INTERACTIONS_UTILS_FACTORY =
+  SHARED_REVIEW_INTERACTIONS_MODULE.factory;
+const REVIEW_INTERACTIONS_UTILS = SHARED_REVIEW_INTERACTIONS_MODULE.module;
+
+const SHARED_SESSION_REPLAY_MODULE = createSharedFactoryModule(
+  "createSessionReplayUtils",
+);
+const SHARED_SESSION_REPLAY_UTILS_FACTORY = SHARED_SESSION_REPLAY_MODULE.factory;
+const SESSION_REPLAY_UTILS = SHARED_SESSION_REPLAY_MODULE.module;
+
+const SHARED_SESSION_MEDIA_MODULE = createSharedFactoryModule(
+  "createSessionMediaUtils",
+);
+const SHARED_SESSION_MEDIA_UTILS_FACTORY = SHARED_SESSION_MEDIA_MODULE.factory;
+const SESSION_MEDIA_UTILS = SHARED_SESSION_MEDIA_MODULE.module;
+
+const SHARED_SESSION_MODE_UI_MODULE = createSharedFactoryModule(
+  "createSessionModeUiUtils",
+);
+const SHARED_SESSION_MODE_UI_UTILS_FACTORY =
+  SHARED_SESSION_MODE_UI_MODULE.factory;
+const SESSION_MODE_UI_UTILS = SHARED_SESSION_MODE_UI_MODULE.module;
+
+const SHARED_SESSION_TIME_FORMAT_MODULE = createSharedFactoryModule(
+  "createSessionTimeFormatUtils",
+);
+const SHARED_SESSION_TIME_FORMAT_UTILS_FACTORY =
+  SHARED_SESSION_TIME_FORMAT_MODULE.factory;
+const SESSION_TIME_FORMAT_UTILS = SHARED_SESSION_TIME_FORMAT_MODULE.module;
+
+const SHARED_SESSION_DURATION_BUTTONS_MODULE = createSharedFactoryModule(
+  "createSessionDurationButtonsUtils",
+);
+const SHARED_SESSION_DURATION_BUTTONS_UTILS_FACTORY =
+  SHARED_SESSION_DURATION_BUTTONS_MODULE.factory;
+const SESSION_DURATION_BUTTONS_UTILS =
+  SHARED_SESSION_DURATION_BUTTONS_MODULE.module;
+
+const SHARED_SESSION_TIME_INPUT_MODULE = createSharedFactoryModule(
+  "createSessionTimeInputUtils",
+);
+const SHARED_SESSION_TIME_INPUT_UTILS_FACTORY =
+  SHARED_SESSION_TIME_INPUT_MODULE.factory;
+const SESSION_TIME_INPUT_UTILS = SHARED_SESSION_TIME_INPUT_MODULE.module;
+
+const SHARED_HOTKEYS_UTILS_FACTORY = getSharedFactory("createHotkeysUtils");
+
+let HOTKEYS_UTILS = null;
+
+const SHARED_STORAGE_DIAGNOSTICS_UTILS_FACTORY = getSharedFactory(
+  "createStorageDiagnosticsUtils",
+);
+const STORAGE_DIAGNOSTICS_UTILS =
+  SHARED_STORAGE_DIAGNOSTICS_UTILS_FACTORY
+    ? SHARED_STORAGE_DIAGNOSTICS_UTILS_FACTORY()
+    : null;
+
+function calculateSessionPlanDuration(steps) {
+  if (SESSION_METRICS_UTILS?.calculatePlanDuration) {
+    return SESSION_METRICS_UTILS.calculatePlanDuration(steps);
+  }
+  if (!Array.isArray(steps)) return 0;
+  return steps.reduce((total, step) => {
+    if (!step || typeof step !== "object") return total;
+    const duration = Math.max(0, Number(step.duration) || 0);
+    if (step.type === "pause") {
+      return total + duration;
+    }
+    return total + Math.max(0, Number(step.count) || 0) * duration;
+  }, 0);
+}
+
+function calculateSessionPlanPoses(steps) {
+  if (SESSION_METRICS_UTILS?.calculatePlanPoses) {
+    return SESSION_METRICS_UTILS.calculatePlanPoses(steps);
+  }
+  if (!Array.isArray(steps)) return 0;
+  return steps.reduce((total, step) => {
+    if (!step || typeof step !== "object" || step.type === "pause") {
+      return total;
+    }
+    return total + Math.max(0, Number(step.count) || 0);
+  }, 0);
+}
+
+function clampMemorySessionPosesCount(requestedCount, imagesCount, fallback = 1) {
+  if (SESSION_METRICS_UTILS?.clampMemoryPosesCount) {
+    return SESSION_METRICS_UTILS.clampMemoryPosesCount(
+      requestedCount,
+      imagesCount,
+      fallback,
     );
-    cache.hotkeysCollapsedCategories = normalizeStringArray(
-      cache.hotkeysCollapsedCategories,
+  }
+  const min = 1;
+  const max = Math.max(min, Math.round(Number(imagesCount) || min));
+  const desired = Math.round(Number(requestedCount) || fallback);
+  return Math.max(min, Math.min(desired, max));
+}
+
+function calculateMemoryTotalDurationSeconds(
+  posesCount,
+  drawingTime,
+  displayTime,
+) {
+  if (SESSION_METRICS_UTILS?.calculateMemoryTotalSeconds) {
+    return SESSION_METRICS_UTILS.calculateMemoryTotalSeconds(
+      posesCount,
+      drawingTime,
+      displayTime,
     );
-    cache.globalSettingsCollapsedCategories = normalizeStringArray(
-      cache.globalSettingsCollapsedCategories,
+  }
+  const poses = Math.max(0, Number(posesCount) || 0);
+  const drawing = Math.max(0, Number(drawingTime) || 0);
+  const display = Math.max(0, Number(displayTime) || 0);
+  return poses * (drawing + display);
+}
+
+function findNextCustomPoseStepIndex(queue, fromIndex) {
+  if (CUSTOM_SESSION_UTILS?.findNextPoseStepIndex) {
+    return CUSTOM_SESSION_UTILS.findNextPoseStepIndex(queue, fromIndex);
+  }
+  if (!Array.isArray(queue)) return -1;
+  const start = Math.max(-1, Math.round(Number(fromIndex) || -1));
+  for (let i = start + 1; i < queue.length; i++) {
+    if (queue[i] && queue[i].type === "pose") return i;
+  }
+  return -1;
+}
+
+function findPrevCustomPoseStepIndex(queue, fromIndex) {
+  if (CUSTOM_SESSION_UTILS?.findPrevPoseStepIndex) {
+    return CUSTOM_SESSION_UTILS.findPrevPoseStepIndex(queue, fromIndex);
+  }
+  if (!Array.isArray(queue)) return -1;
+  const start = Math.min(queue.length, Math.round(Number(fromIndex) || 0));
+  for (let i = start - 1; i >= 0; i--) {
+    if (queue[i] && queue[i].type === "pose") return i;
+  }
+  return -1;
+}
+
+function findNextCustomPoseStep(queue, fromIndex) {
+  if (CUSTOM_SESSION_UTILS?.findNextPoseStep) {
+    return CUSTOM_SESSION_UTILS.findNextPoseStep(queue, fromIndex);
+  }
+  const idx = findNextCustomPoseStepIndex(queue, fromIndex);
+  return idx >= 0 ? queue[idx] : null;
+}
+
+function hasNextCustomPoseGroup(queue, fromIndex) {
+  if (CUSTOM_SESSION_UTILS?.hasNextPoseGroup) {
+    return CUSTOM_SESSION_UTILS.hasNextPoseGroup(queue, fromIndex);
+  }
+  return findNextCustomPoseStepIndex(queue, fromIndex) >= 0;
+}
+
+function hasPrevCustomPoseGroup(queue, fromIndex) {
+  if (CUSTOM_SESSION_UTILS?.hasPrevPoseGroup) {
+    return CUSTOM_SESSION_UTILS.hasPrevPoseGroup(queue, fromIndex);
+  }
+  return findPrevCustomPoseStepIndex(queue, fromIndex) >= 0;
+}
+
+function getCustomPoseSessionProgress(queue, currentStepIndex, currentPoseInStep) {
+  if (CUSTOM_SESSION_UTILS?.getCustomPoseSessionProgress) {
+    return CUSTOM_SESSION_UTILS.getCustomPoseSessionProgress(
+      queue,
+      currentStepIndex,
+      currentPoseInStep,
     );
-
-    // Migration legacy: review durations visibility
-    if (
-      !Object.prototype.hasOwnProperty.call(parsed, "reviewDurationsVisible")
-    ) {
-      try {
-        const raw = localStorage.getItem(
-          LEGACY_UI_PREF_KEYS.REVIEW_DURATIONS_VISIBLE,
-        );
-        if (raw !== null) {
-          cache.reviewDurationsVisible = raw !== "0";
-          changed = true;
-          localStorage.removeItem(LEGACY_UI_PREF_KEYS.REVIEW_DURATIONS_VISIBLE);
-        }
-      } catch (_) {}
-    }
-
-    // Migration legacy: global settings collapsed categories
-    if (
-      !Object.prototype.hasOwnProperty.call(
-        parsed,
-        "globalSettingsCollapsedCategories",
-      )
-    ) {
-      try {
-        const raw = localStorage.getItem(
-          LEGACY_UI_PREF_KEYS.GLOBAL_SETTINGS_COLLAPSED,
-        );
-        if (raw) {
-          cache.globalSettingsCollapsedCategories = normalizeStringArray(
-            JSON.parse(raw),
-          );
-          changed = true;
-          localStorage.removeItem(
-            LEGACY_UI_PREF_KEYS.GLOBAL_SETTINGS_COLLAPSED,
-          );
-        }
-      } catch (_) {}
-    }
-
-    // Migration legacy: default session mode (old standalone localStorage key)
-    if (!Object.prototype.hasOwnProperty.call(parsed, "defaultSessionMode")) {
-      try {
-        const raw = localStorage.getItem(LEGACY_DEFAULT_SESSION_MODE_STORAGE_KEY);
-        if (raw) {
-          cache.defaultSessionMode = normalizeSessionModeValue(
-            raw,
-            getDefaultSessionMode(),
-          );
-          changed = true;
-          localStorage.removeItem(LEGACY_DEFAULT_SESSION_MODE_STORAGE_KEY);
-        }
-      } catch (_) {}
-    }
-
-    if (changed) persist();
-    return cache;
-  };
-
-  const sanitizeByKey = (key, value) => {
-    switch (key) {
-      case "backgroundGridEnabled":
-      case "titlebarAlwaysVisible":
-      case "reviewDurationsVisible":
-        return !!value;
-      case "defaultSessionMode":
-        return normalizeSessionModeValue(value, getDefaultSessionMode());
-      case "hotkeysCollapsedCategories":
-      case "globalSettingsCollapsedCategories":
-        return normalizeStringArray(value);
-      default:
-        return value;
-    }
-  };
-
+  }
+  const safeQueue = Array.isArray(queue) ? queue : [];
+  let totalPoses = 0;
+  let poseGroupCount = 0;
+  let globalPoseIndex = 0;
+  for (let i = 0; i < safeQueue.length; i++) {
+    const step = safeQueue[i];
+    if (!step || step.type !== "pose") continue;
+    const count = Math.max(1, Number(step.count) || 1);
+    poseGroupCount += 1;
+    totalPoses += count;
+    if (i < currentStepIndex) globalPoseIndex += count;
+  }
+  const current = safeQueue[currentStepIndex];
+  if (current && current.type === "pose") {
+    globalPoseIndex += Math.min(
+      Math.max(1, Number(current.count) || 1),
+      Math.max(1, Number(currentPoseInStep) || 1),
+    );
+  }
   return {
-    init() {
-      return load();
-    },
-    get(key, fallback = undefined) {
-      const prefs = load();
-      return Object.prototype.hasOwnProperty.call(prefs, key)
-        ? prefs[key]
-        : fallback;
-    },
-    set(key, value, options = {}) {
-      const { persist: shouldPersist = true } = options;
-      const prefs = load();
-      prefs[key] = sanitizeByKey(key, value);
-      if (shouldPersist) persist();
-      return prefs[key];
-    },
-    getStringArray(key) {
-      return normalizeStringArray(this.get(key, []));
-    },
-    setStringArray(key, value, options = {}) {
-      return this.set(key, normalizeStringArray(value), options);
-    },
-    exportData() {
-      const prefs = load();
-      return {
-        schemaVersion: UI_PREFS_SCHEMA_VERSION,
-        backgroundGridEnabled: !!prefs.backgroundGridEnabled,
-        titlebarAlwaysVisible: !!prefs.titlebarAlwaysVisible,
-        defaultSessionMode: normalizeSessionModeValue(
-          prefs.defaultSessionMode,
-          getDefaultSessionMode(),
-        ),
-        reviewDurationsVisible: !!prefs.reviewDurationsVisible,
-        hotkeysCollapsedCategories: normalizeStringArray(
-          prefs.hotkeysCollapsedCategories,
-        ),
-        globalSettingsCollapsedCategories: normalizeStringArray(
-          prefs.globalSettingsCollapsedCategories,
-        ),
-      };
-    },
-    importData(data, options = {}) {
-      if (!data || typeof data !== "object") return false;
-      const { persist: shouldPersist = true } = options;
-      const prefs = load();
-      const knownKeys = [
-        "backgroundGridEnabled",
-        "titlebarAlwaysVisible",
-        "defaultSessionMode",
-        "reviewDurationsVisible",
-        "hotkeysCollapsedCategories",
-        "globalSettingsCollapsedCategories",
-      ];
-      let changed = false;
-      knownKeys.forEach((key) => {
-        if (!Object.prototype.hasOwnProperty.call(data, key)) return;
-        prefs[key] = sanitizeByKey(key, data[key]);
-        changed = true;
-      });
-      if (changed && shouldPersist) persist();
-      return changed;
-    },
-    resetVisualPrefs() {
-      const defaults = getDefaultPrefs();
-      cache = defaults;
-      persist();
-      return this.exportData();
-    },
+    totalPoses,
+    globalPoseIndex: Math.min(Math.max(globalPoseIndex, 0), totalPoses),
+    poseGroupCount,
+    showGlobal: poseGroupCount > 1,
   };
-})();
+}
+
+function calculateCustomTotalRemainingSeconds(
+  queue,
+  currentStepIndex,
+  currentPoseInStep,
+  timeRemaining,
+) {
+  if (CUSTOM_SESSION_UTILS?.calculateCustomTotalRemainingSeconds) {
+    return CUSTOM_SESSION_UTILS.calculateCustomTotalRemainingSeconds(
+      queue,
+      currentStepIndex,
+      currentPoseInStep,
+      timeRemaining,
+    );
+  }
+  const safeQueue = Array.isArray(queue) ? queue : [];
+  let total = Math.max(0, Number(timeRemaining) || 0);
+  for (let i = currentStepIndex + 1; i < safeQueue.length; i++) {
+    const step = safeQueue[i];
+    if (!step || typeof step !== "object") continue;
+    const duration = Math.max(0, Number(step.duration) || 0);
+    total += duration * (step.type === "pause" ? 1 : Math.max(1, Number(step.count) || 1));
+  }
+  const current = safeQueue[currentStepIndex];
+  if (current && current.type === "pose") {
+    const count = Math.max(1, Number(current.count) || 1);
+    const duration = Math.max(0, Number(current.duration) || 0);
+    const posesRemaining = Math.max(
+      0,
+      count - Math.max(1, Number(currentPoseInStep) || 1),
+    );
+    total += posesRemaining * duration;
+  }
+  return total;
+}
+
+function getCustomStepTotalSeconds(step) {
+  if (CUSTOM_SESSION_UTILS?.getStepTotalSeconds) {
+    return CUSTOM_SESSION_UTILS.getStepTotalSeconds(step);
+  }
+  if (!step || typeof step !== "object") return 0;
+  const duration = Math.max(0, Number(step.duration) || 0);
+  if (step.type === "pause") return duration;
+  const count = Math.max(1, Number(step.count) || 1);
+  return duration * count;
+}
+
+function calculateCustomQueueTotalSeconds(queue) {
+  if (CUSTOM_SESSION_UTILS?.calculateQueueTotalSeconds) {
+    return CUSTOM_SESSION_UTILS.calculateQueueTotalSeconds(queue);
+  }
+  if (!Array.isArray(queue) || queue.length === 0) return 0;
+  return queue.reduce((total, step) => total + getCustomStepTotalSeconds(step), 0);
+}
+
+function getCustomStepDurationHms(duration) {
+  if (CUSTOM_SESSION_UTILS?.stepDurationToHms) {
+    return CUSTOM_SESSION_UTILS.stepDurationToHms(duration);
+  }
+  const safe = Math.max(0, Math.floor(Number(duration) || 0));
+  return {
+    hours: Math.floor(safe / 3600),
+    minutes: Math.floor((safe % 3600) / 60),
+    seconds: safe % 60,
+  };
+}
+
+function getCustomStepDisplayModel(step) {
+  if (CUSTOM_SESSION_UTILS?.getStepDisplayModel) {
+    return CUSTOM_SESSION_UTILS.getStepDisplayModel(step);
+  }
+  const isPause = !!step && step.type === "pause";
+  const duration = Math.max(0, Number(step?.duration) || 0);
+  const count = isPause ? 1 : Math.max(1, Number(step?.count) || 1);
+  const hms = getCustomStepDurationHms(duration);
+  return {
+    isPause,
+    count,
+    duration,
+    groupTotalSeconds: duration * count,
+    hours: hms.hours,
+    minutes: hms.minutes,
+    seconds: hms.seconds,
+  };
+}
+
+function createCustomQueueStep(input) {
+  if (CUSTOM_SESSION_UTILS?.createQueueStep) {
+    return CUSTOM_SESSION_UTILS.createQueueStep(input);
+  }
+  const isPause = !!input?.isPause;
+  const duration = Math.max(0, Number(input?.duration) || 0);
+  if (duration <= 0) return null;
+  const count = isPause ? 1 : Math.max(1, parseIntegerValue(input?.count, 5));
+  const id =
+    input?.id !== undefined && input?.id !== null
+      ? input.id
+      : typeof input?.now === "function"
+        ? input.now()
+        : Date.now();
+  return {
+    type: isPause ? "pause" : "pose",
+    count,
+    duration,
+    id,
+  };
+}
+
+function updateCustomStepDurationFromUnit(step, type, value, minDuration = 1) {
+  if (CUSTOM_SESSION_UTILS?.updateStepDurationFromUnit) {
+    return CUSTOM_SESSION_UTILS.updateStepDurationFromUnit(
+      step,
+      type,
+      value,
+      minDuration,
+    );
+  }
+  if (!step || typeof step !== "object") {
+    return { updated: false, duration: 0 };
+  }
+  const safeType = String(type || "").toLowerCase();
+  if (safeType !== "h" && safeType !== "m" && safeType !== "s") {
+    return { updated: false, duration: Math.max(0, Number(step.duration) || 0) };
+  }
+  const parts = getCustomStepDurationHms(step.duration);
+  const nextValue = Math.max(0, parseIntegerValue(value, 0));
+  if (safeType === "h") parts.hours = nextValue;
+  if (safeType === "m") parts.minutes = nextValue;
+  if (safeType === "s") parts.seconds = nextValue;
+  const raw = hmsToTotalSeconds(parts.hours, parts.minutes, parts.seconds);
+  step.duration = Math.max(Math.max(0, Number(minDuration) || 1), raw);
+  return { updated: true, duration: step.duration, parts };
+}
+
+function updateCustomStepPositiveIntField(step, field, value, minValue = 1) {
+  if (CUSTOM_SESSION_UTILS?.updateStepPositiveIntField) {
+    return CUSTOM_SESSION_UTILS.updateStepPositiveIntField(
+      step,
+      field,
+      value,
+      minValue,
+    );
+  }
+  if (!step || typeof step !== "object") {
+    return { updated: false, value: 0 };
+  }
+  const safeField = String(field || "").trim();
+  if (!safeField) {
+    return { updated: false, value: 0 };
+  }
+  const min = Math.max(0, parseIntegerValue(minValue, 1));
+  const nextValue = parseIntegerValue(value, NaN);
+  if (!Number.isFinite(nextValue) || nextValue < min) {
+    return { updated: false, value: Math.max(0, Number(step[safeField]) || 0) };
+  }
+  step[safeField] = nextValue;
+  return { updated: true, value: nextValue, field: safeField };
+}
+
+function applyCustomQueueDropOperation(
+  queue,
+  sourceIndex,
+  targetIndex,
+  isBelow,
+  isDuplicate,
+) {
+  if (CUSTOM_SESSION_UTILS?.applyQueueDropOperation) {
+    return CUSTOM_SESSION_UTILS.applyQueueDropOperation(
+      queue,
+      sourceIndex,
+      targetIndex,
+      isBelow,
+      isDuplicate,
+      (item) => ({ ...item }),
+    );
+  }
+  if (!Array.isArray(queue) || queue.length === 0) {
+    return { changed: false, finalIndex: -1 };
+  }
+  const sIdx = parseIntegerValue(sourceIndex, -1);
+  const tIdx = parseIntegerValue(targetIndex, -1);
+  if (sIdx < 0 || tIdx < 0 || sIdx >= queue.length || tIdx >= queue.length) {
+    return { changed: false, finalIndex: -1 };
+  }
+  let finalIndex = isBelow ? tIdx + 1 : tIdx;
+  if (sIdx < finalIndex) {
+    finalIndex -= 1;
+  }
+  if (isDuplicate) {
+    const sourceItem = queue[sIdx];
+    if (!sourceItem || typeof sourceItem !== "object") {
+      return { changed: false, finalIndex };
+    }
+    queue.splice(finalIndex, 0, { ...sourceItem });
+    return { changed: true, finalIndex, duplicate: true };
+  }
+  if (sIdx === finalIndex) {
+    return { changed: false, finalIndex };
+  }
+  const moved = queue.splice(sIdx, 1)[0];
+  queue.splice(finalIndex, 0, moved);
+  return { changed: true, finalIndex, duplicate: false };
+}
+
+function resolveClassicSessionDuration(
+  hours,
+  minutes,
+  seconds,
+  activeButtonDuration,
+  fallbackSelectedDuration,
+) {
+  if (SESSION_FLOW_UTILS?.resolveClassicDuration) {
+    return SESSION_FLOW_UTILS.resolveClassicDuration(
+      hours,
+      minutes,
+      seconds,
+      activeButtonDuration,
+      fallbackSelectedDuration,
+    );
+  }
+  const h = Math.max(0, Number(hours) || 0);
+  const m = Math.max(0, Number(minutes) || 0);
+  const s = Math.max(0, Number(seconds) || 0);
+  const manualTotal = h * 3600 + m * 60 + s;
+  if (manualTotal > 0) return manualTotal;
+  const fromButton = Math.max(0, Number(activeButtonDuration) || 0);
+  if (fromButton > 0) return fromButton;
+  return Math.max(0, Number(fallbackSelectedDuration) || 60);
+}
+
+function resolveSessionModeStartState(input) {
+  if (SESSION_FLOW_UTILS?.resolveSessionStartState) {
+    return SESSION_FLOW_UTILS.resolveSessionStartState(input);
+  }
+  const sessionMode = String(input?.sessionMode || "classique").toLowerCase();
+  const selectedDuration = Math.max(0, Number(input?.selectedDuration) || 60);
+  const customQueue = Array.isArray(input?.customQueue) ? input.customQueue : [];
+  const imagesLength = Math.max(1, Number(input?.imagesLength) || 1);
+  const memoryType = String(input?.memoryType || "flash").toLowerCase();
+  const memoryPosesCount = clampMemorySessionPosesCount(
+    input?.memoryPosesCount,
+    imagesLength,
+    1,
+  );
+  if (sessionMode === "custom") {
+    if (customQueue.length === 0) {
+      return {
+        isValid: false,
+        selectedDuration,
+        timeRemaining: selectedDuration,
+        currentStepIndex: 0,
+        currentPoseInStep: 1,
+        memoryPosesCount,
+      };
+    }
+    const firstStep = customQueue[0];
+    const firstDuration = Math.max(0, Number(firstStep?.duration) || selectedDuration);
+    return {
+      isValid: true,
+      selectedDuration: firstDuration,
+      timeRemaining: firstDuration,
+      currentStepIndex: 0,
+      currentPoseInStep: 1,
+      memoryPosesCount,
+      memoryHidden: false,
+    };
+  }
+  if (sessionMode === "memory") {
+    const resolved =
+      memoryType === "flash"
+        ? Math.max(0, Number(input?.memoryDuration) || selectedDuration)
+        : selectedDuration;
+    return {
+      isValid: true,
+      selectedDuration:
+        memoryType === "flash" ? resolved : selectedDuration,
+      timeRemaining: resolved,
+      currentStepIndex: 0,
+      currentPoseInStep: 1,
+      memoryPosesCount,
+      memoryHidden: false,
+    };
+  }
+  return {
+    isValid: true,
+    selectedDuration,
+    timeRemaining: sessionMode === "relax" ? 0 : selectedDuration,
+    currentStepIndex: 0,
+    currentPoseInStep: 1,
+    memoryPosesCount,
+    memoryHidden: false,
+  };
+}
+
+function advanceCustomSessionCursor(queue, currentStepIndex, currentPoseInStep) {
+  if (SESSION_FLOW_UTILS?.advanceCustomCursor) {
+    return SESSION_FLOW_UTILS.advanceCustomCursor(
+      queue,
+      currentStepIndex,
+      currentPoseInStep,
+    );
+  }
+  const safeQueue = Array.isArray(queue) ? queue : [];
+  let stepIndex = Number.isFinite(Number(currentStepIndex))
+    ? Number(currentStepIndex)
+    : 0;
+  let poseInStep = Math.max(1, Number(currentPoseInStep) || 1);
+  const current = safeQueue[stepIndex];
+  if (!current) {
+    return {
+      finished: true,
+      currentStepIndex: stepIndex,
+      currentPoseInStep: poseInStep,
+      nextStep: null,
+      enteredNewStep: false,
+      soundCue: null,
+    };
+  }
+  const count = Math.max(1, Number(current.count) || 1);
+  let enteredNewStep = false;
+  if (poseInStep < count) {
+    poseInStep += 1;
+  } else {
+    stepIndex += 1;
+    poseInStep = 1;
+    enteredNewStep = true;
+  }
+  if (stepIndex >= safeQueue.length) {
+    return {
+      finished: true,
+      currentStepIndex: stepIndex,
+      currentPoseInStep: poseInStep,
+      nextStep: null,
+      enteredNewStep,
+      soundCue: null,
+    };
+  }
+  const nextStep = safeQueue[stepIndex];
+  return {
+    finished: false,
+    currentStepIndex: stepIndex,
+    currentPoseInStep: poseInStep,
+    nextStep,
+    enteredNewStep,
+    soundCue: enteredNewStep ? (nextStep.type === "pause" ? "pause" : "group") : null,
+  };
+}
+
+function shouldEndMemorySessionAtIndex(currentIndex, memoryPosesCount) {
+  if (SESSION_FLOW_UTILS?.shouldEndMemorySession) {
+    return SESSION_FLOW_UTILS.shouldEndMemorySession(
+      currentIndex,
+      memoryPosesCount,
+    );
+  }
+  return Number(currentIndex) + 1 >= Math.max(1, Number(memoryPosesCount) || 1);
+}
+
+function getNextCyclicIndex(currentIndex, length) {
+  if (SESSION_FLOW_UTILS?.nextCyclicIndex) {
+    return SESSION_FLOW_UTILS.nextCyclicIndex(currentIndex, length);
+  }
+  const total = Math.max(1, Number(length) || 1);
+  return (Math.max(0, Number(currentIndex) || 0) + 1) % total;
+}
+
+function isCustomPauseTick(sessionMode, customQueue, currentStepIndex) {
+  if (TIMER_TICK_UTILS?.isCustomPauseStep) {
+    return TIMER_TICK_UTILS.isCustomPauseStep(
+      sessionMode,
+      customQueue,
+      currentStepIndex,
+    );
+  }
+  return (
+    sessionMode === "custom" &&
+    Array.isArray(customQueue) &&
+    customQueue[currentStepIndex]?.type === "pause"
+  );
+}
+
+function shouldEnterMemoryHiddenPhaseTick(input) {
+  if (TIMER_TICK_UTILS?.shouldEnterMemoryHiddenPhase) {
+    return TIMER_TICK_UTILS.shouldEnterMemoryHiddenPhase(input);
+  }
+  return (
+    input?.sessionMode === "memory" &&
+    input?.memoryType === "flash" &&
+    Number(input?.timeRemaining) < 0 &&
+    !input?.memoryHidden
+  );
+}
+
+function shouldAdvanceFromMemoryHiddenPhaseTick(input) {
+  if (TIMER_TICK_UTILS?.shouldAdvanceFromMemoryHiddenPhase) {
+    return TIMER_TICK_UTILS.shouldAdvanceFromMemoryHiddenPhase(input);
+  }
+  return (
+    input?.sessionMode === "memory" &&
+    input?.memoryType === "flash" &&
+    !!input?.memoryHidden &&
+    Number(input?.timeRemaining) < 0
+  );
+}
+
+function getTickSoundDecision(input) {
+  if (TIMER_TICK_UTILS?.getTickSoundDecision) {
+    return TIMER_TICK_UTILS.getTickSoundDecision(input);
+  }
+  if (!input?.soundEnabled) return { playTick: false, volume: 0 };
+  const threshold = (Number(input?.selectedDuration) || 0) * 0.2;
+  const timeRemaining = Number(input?.timeRemaining) || 0;
+  if (
+    !input?.isCustomPause &&
+    threshold > 0 &&
+    timeRemaining <= threshold &&
+    timeRemaining > 0
+  ) {
+    return {
+      playTick: true,
+      volume: (threshold - timeRemaining) / threshold,
+    };
+  }
+  return { playTick: false, volume: 0 };
+}
+
+function shouldPlayEndSoundTick(input) {
+  if (TIMER_TICK_UTILS?.shouldPlayEndSound) {
+    return TIMER_TICK_UTILS.shouldPlayEndSound(input);
+  }
+  const isMemoryFlash =
+    input?.sessionMode === "memory" && input?.memoryType === "flash";
+  return !!input?.soundEnabled && Number(input?.timeRemaining) === 0 && !isMemoryFlash;
+}
+
+function shouldAutoAdvanceOnTimerEndTick(input) {
+  if (TIMER_TICK_UTILS?.shouldAutoAdvanceOnTimerEnd) {
+    return TIMER_TICK_UTILS.shouldAutoAdvanceOnTimerEnd(input);
+  }
+  const isMemoryFlash =
+    input?.sessionMode === "memory" && input?.memoryType === "flash";
+  return Number(input?.timeRemaining) <= 0 && !isMemoryFlash;
+}
+
+function buildReviewSessionDetailsPayload(input) {
+  if (REVIEW_SESSION_UTILS?.buildSessionDetails) {
+    return REVIEW_SESSION_UTILS.buildSessionDetails(input);
+  }
+  const sessionMode = String(input?.sessionMode || "classique");
+  return {
+    mode: sessionMode,
+    memoryType: sessionMode === "memory" ? input?.memoryType || null : null,
+    customQueue:
+      sessionMode === "custom" && Array.isArray(input?.customQueue)
+        ? input.customQueue.map((step) => ({
+            type: step.type,
+            count: Number(step.count) || 0,
+            duration: Number(step.duration) || 0,
+          }))
+        : null,
+    images: Array.isArray(input?.imagesSeen)
+      ? input.imagesSeen.map((img) => ({
+          id: img.id,
+          filePath: img.filePath,
+          path: img.path || img.filePath,
+          file: img.file || img.filePath,
+          ext: img.ext,
+          thumbnailURL: img.thumbnailURL || img.thumbnail || "",
+          thumbnail: img.thumbnail || img.thumbnailURL || "",
+          url: img.url,
+          name: img.name,
+        }))
+      : [],
+  };
+}
+
+function computeReviewSessionSummary(imagesSeen, totalSessionTime) {
+  if (REVIEW_SESSION_UTILS?.computeReviewSummary) {
+    return REVIEW_SESSION_UTILS.computeReviewSummary(imagesSeen, totalSessionTime);
+  }
+  const sessionPoses = Array.isArray(imagesSeen) ? imagesSeen.length : 0;
+  const sessionTime = Math.max(0, Number(totalSessionTime) || 0);
+  const mins = Math.floor(sessionTime / 60);
+  const secs = sessionTime % 60;
+  return {
+    sessionPoses,
+    sessionTime,
+    mins,
+    secs,
+    shouldRecord: sessionPoses > 0 && sessionTime > 0,
+  };
+}
+
+function buildReviewGridItemsModel(imagesSeen, options = {}) {
+  if (REVIEW_GRID_UTILS?.buildReviewGridItems) {
+    return REVIEW_GRID_UTILS.buildReviewGridItems(imagesSeen, options);
+  }
+  const images = Array.isArray(imagesSeen) ? imagesSeen : [];
+  const includeDurations = options.includeDurations !== false;
+  return images.map((image, index) => {
+    const isVideo =
+      typeof options.isVideoFile === "function" ? !!options.isVideoFile(image) : false;
+    const src =
+      image?.thumbnailURL ||
+      image?.thumbnail ||
+      (image?.filePath ? `file:///${image.filePath}` : "");
+    const durationText =
+      includeDurations && typeof options.getDurationSeconds === "function"
+        ? (typeof options.formatDuration === "function"
+            ? options.formatDuration(options.getDurationSeconds(image))
+            : String(options.getDurationSeconds(image)))
+        : null;
+    const annotated =
+      typeof options.isAnnotated === "function" ? !!options.isAnnotated(image) : false;
+    return {
+      index,
+      image,
+      isVideo,
+      src,
+      durationText,
+      annotated,
+      hasMetaBadge: !!durationText || annotated,
+    };
+  });
+}
+
+function getReviewDurationToggleCopy(isVisible) {
+  if (REVIEW_INTERACTIONS_UTILS?.getDurationToggleCopy) {
+    return REVIEW_INTERACTIONS_UTILS.getDurationToggleCopy(isVisible);
+  }
+  return isVisible
+    ? {
+        i18nKey: "drawing.hideDurations",
+        defaultValue: "Hide durations",
+      }
+    : {
+        i18nKey: "drawing.showDurations",
+        defaultValue: "Show durations",
+      };
+}
+
+function getReviewDurationToggleTransition(isVisible) {
+  if (REVIEW_INTERACTIONS_UTILS?.getDurationToggleTransition) {
+    return REVIEW_INTERACTIONS_UTILS.getDurationToggleTransition(isVisible);
+  }
+  return isVisible
+    ? {
+        nextVisible: false,
+        animateHide: true,
+        renderBeforeShow: false,
+        animateShow: false,
+      }
+    : {
+        nextVisible: true,
+        animateHide: false,
+        renderBeforeShow: true,
+        animateShow: true,
+      };
+}
+
+function normalizeReviewZoomIndex(index, length) {
+  if (REVIEW_INTERACTIONS_UTILS?.normalizeReviewIndex) {
+    return REVIEW_INTERACTIONS_UTILS.normalizeReviewIndex(index, length);
+  }
+  const total = Math.max(0, Math.floor(Number(length) || 0));
+  if (total === 0) return 0;
+  const idx = Math.floor(Number(index) || 0);
+  return Math.max(0, Math.min(idx, total - 1));
+}
+
+function normalizeSessionReplayLoadOptions(options = {}) {
+  if (SESSION_REPLAY_UTILS?.normalizeLoadSessionOptions) {
+    return SESSION_REPLAY_UTILS.normalizeLoadSessionOptions(options);
+  }
+  const rawMode = String(options?.mode || "classique").trim().toLowerCase();
+  const mode =
+    rawMode === "custom" ||
+    rawMode === "relax" ||
+    rawMode === "memory" ||
+    rawMode === "classique"
+      ? rawMode
+      : "classique";
+  const durationRaw = Number(options?.duration);
+  const duration =
+    Number.isFinite(durationRaw) && durationRaw > 0
+      ? Math.round(durationRaw)
+      : null;
+  const customQueue =
+    mode === "custom" && Array.isArray(options?.customQueue)
+      ? options.customQueue
+      : [];
+  const memoryType =
+    mode === "memory" &&
+    (options?.memoryType === "flash" || options?.memoryType === "progressive")
+      ? options.memoryType
+      : null;
+  return { mode, duration, customQueue, memoryType };
+}
+
+function filterSessionMediaItems(items) {
+  if (SESSION_MEDIA_UTILS?.filterByExtensions) {
+    return SESSION_MEDIA_UTILS.filterByExtensions(items, MEDIA_EXTENSIONS);
+  }
+  const source = Array.isArray(items) ? items : [];
+  return source.filter((item) =>
+    MEDIA_EXTENSIONS.includes(String(item?.ext || "").toLowerCase()),
+  );
+}
+
+function shuffleSessionMediaItems(items) {
+  if (SESSION_MEDIA_UTILS?.shuffleArray) {
+    return SESSION_MEDIA_UTILS.shuffleArray(items, Math.random);
+  }
+  const arr = Array.isArray(items) ? [...items] : [];
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+function countSessionMediaTypes(items) {
+  if (SESSION_MEDIA_UTILS?.countByExtensions) {
+    return SESSION_MEDIA_UTILS.countByExtensions(
+      items,
+      IMAGE_EXTENSIONS,
+      VIDEO_EXTENSIONS,
+    );
+  }
+  const source = Array.isArray(items) ? items : [];
+  let imageCount = 0;
+  let videoCount = 0;
+  source.forEach((item) => {
+    const ext = String(item?.ext || "").toLowerCase();
+    if (IMAGE_EXTENSIONS.includes(ext)) {
+      imageCount += 1;
+      return;
+    }
+    if (VIDEO_EXTENSIONS.includes(ext)) {
+      videoCount += 1;
+    }
+  });
+  return { imageCount, videoCount, totalCount: imageCount + videoCount };
+}
 
 function clampInt(value, min, max, fallback = min) {
+  if (SESSION_PLAN_UTILS?.clampInt) {
+    return SESSION_PLAN_UTILS.clampInt(value, min, max, fallback);
+  }
   const num = Number(value);
   if (!Number.isFinite(num)) return fallback;
   return Math.max(min, Math.min(max, Math.round(num)));
 }
 
 function normalizeCustomStep(step) {
+  if (SESSION_PLAN_UTILS?.normalizeCustomStep) {
+    return SESSION_PLAN_UTILS.normalizeCustomStep(step);
+  }
   if (!step || typeof step !== "object") return null;
   const type =
     step.type === "pause" ? "pause" : step.type === "pose" ? "pose" : null;
@@ -1101,6 +2034,9 @@ function normalizeCustomStep(step) {
 }
 
 function normalizeSessionPlansPayload(raw) {
+  if (SESSION_PLAN_UTILS?.normalizeSessionPlansPayload) {
+    return SESSION_PLAN_UTILS.normalizeSessionPlansPayload(raw);
+  }
   const source =
     raw && typeof raw === "object" && Array.isArray(raw.plans)
       ? raw.plans
@@ -1155,7 +2091,35 @@ function normalizeSessionPlansPayload(raw) {
   return { payload, plans, repaired };
 }
 
+function getHotkeysUtils() {
+  if (HOTKEYS_UTILS || !SHARED_HOTKEYS_UTILS_FACTORY) {
+    return HOTKEYS_UTILS;
+  }
+  const defaultBindings =
+    typeof DEFAULT_HOTKEYS !== "undefined" &&
+    DEFAULT_HOTKEYS &&
+    typeof DEFAULT_HOTKEYS === "object"
+      ? DEFAULT_HOTKEYS
+      : {};
+  const nonCustomizableKeys =
+    typeof NON_CUSTOMIZABLE_HOTKEYS !== "undefined" &&
+    NON_CUSTOMIZABLE_HOTKEYS instanceof Set
+      ? Array.from(NON_CUSTOMIZABLE_HOTKEYS)
+      : [];
+
+  HOTKEYS_UTILS = SHARED_HOTKEYS_UTILS_FACTORY({
+    schemaVersion: STORAGE_SCHEMA_VERSION,
+    defaultBindings,
+    nonCustomizableKeys,
+  });
+  return HOTKEYS_UTILS;
+}
+
 function normalizeHotkeysPayload(raw) {
+  const hotkeysUtils = getHotkeysUtils();
+  if (hotkeysUtils?.normalizeHotkeysPayload) {
+    return hotkeysUtils.normalizeHotkeysPayload(raw);
+  }
   const sourceBindings =
     raw &&
     typeof raw === "object" &&
@@ -1206,6 +2170,70 @@ function normalizeHotkeysPayload(raw) {
   }
 
   return { payload, bindings, repaired };
+}
+
+function collectCustomHotkeysBindings() {
+  const hotkeysUtils = getHotkeysUtils();
+  if (hotkeysUtils?.collectCustomBindings) {
+    return hotkeysUtils.collectCustomBindings(CONFIG.HOTKEYS);
+  }
+  const out = {};
+  Object.keys(DEFAULT_HOTKEYS).forEach((key) => {
+    if (NON_CUSTOMIZABLE_HOTKEYS.has(key)) return;
+    if (CONFIG.HOTKEYS[key] !== DEFAULT_HOTKEYS[key]) {
+      out[key] = CONFIG.HOTKEYS[key];
+    }
+  });
+  return out;
+}
+
+function resetConfigHotkeysToDefaults() {
+  const hotkeysUtils = getHotkeysUtils();
+  if (hotkeysUtils?.resetBindingsToDefaults) {
+    hotkeysUtils.resetBindingsToDefaults(CONFIG.HOTKEYS);
+    return;
+  }
+  Object.keys(DEFAULT_HOTKEYS).forEach((key) => {
+    CONFIG.HOTKEYS[key] = DEFAULT_HOTKEYS[key];
+  });
+}
+
+function enforceNonCustomizableConfigHotkeys() {
+  const hotkeysUtils = getHotkeysUtils();
+  if (hotkeysUtils?.enforceNonCustomizableBindings) {
+    hotkeysUtils.enforceNonCustomizableBindings(CONFIG.HOTKEYS);
+    return;
+  }
+  NON_CUSTOMIZABLE_HOTKEYS.forEach((key) => {
+    if (DEFAULT_HOTKEYS[key]) {
+      CONFIG.HOTKEYS[key] = DEFAULT_HOTKEYS[key];
+    }
+  });
+}
+
+function applyCustomHotkeysToConfig(customBindings, options = {}) {
+  const hotkeysUtils = getHotkeysUtils();
+  if (hotkeysUtils?.applyCustomBindings) {
+    hotkeysUtils.applyCustomBindings(CONFIG.HOTKEYS, customBindings, {
+      resetToDefaults: !!options.resetToDefaults,
+      enforceNonCustomizable: true,
+      requireTargetKey: true,
+    });
+    return;
+  }
+
+  if (options.resetToDefaults) {
+    resetConfigHotkeysToDefaults();
+  }
+  const source =
+    customBindings && typeof customBindings === "object" ? customBindings : {};
+  Object.keys(source).forEach((key) => {
+    if (NON_CUSTOMIZABLE_HOTKEYS.has(key)) return;
+    if (Object.prototype.hasOwnProperty.call(CONFIG.HOTKEYS, key)) {
+      CONFIG.HOTKEYS[key] = source[key];
+    }
+  });
+  enforceNonCustomizableConfigHotkeys();
 }
 
 async function runStorageSmokeTests() {
@@ -2076,13 +3104,14 @@ function initSliderWithGradient(slider) {
  * Fonction utilitaire pour mettre à jour l'état à partir des inputs
  */
 function forceChronoSync() {
-  const h = parseInt(DOMCache.hoursInput?.value) || 0;
-  const m = parseInt(DOMCache.minutesInput?.value) || 0;
-  const s = parseInt(DOMCache.secondsInput?.value) || 0;
-  const total = h * 3600 + m * 60 + s;
+  const { totalSeconds: total } = readHmsInputValues(
+    DOMCache.hoursInput,
+    DOMCache.minutesInput,
+    DOMCache.secondsInput,
+  );
 
   if (total > 0) {
-    DOMCache.durationBtns.forEach((b) => b.classList.remove("active"));
+    clearDurationButtonsActive(DOMCache.durationBtns);
     DOMCache.inputGroups.forEach((g) => g.classList.add("active"));
     state.selectedDuration = total;
     state.timeRemaining = total;
@@ -2293,13 +3322,39 @@ function toggleTheme() {
   applyTheme(THEMES[nextIndex]);
 }
 
-function getGlobalSettingsText(key, fallback, vars = undefined) {
+function getI18nText(key, fallback = "", vars = undefined, options = undefined) {
+  const requireInitialized = !!options?.requireInitialized;
+  const i18nInstance =
+    typeof i18next !== "undefined" &&
+    typeof i18next.t === "function" &&
+    (!requireInitialized || !!i18next.isInitialized)
+      ? i18next
+      : null;
+
+  if (SHARED_I18N_UTILS?.t) {
+    return SHARED_I18N_UTILS.t(
+      i18nInstance,
+      key,
+      { defaultValue: fallback, ...(vars || {}) },
+      fallback,
+    );
+  }
+
   try {
-    if (typeof i18next !== "undefined" && typeof i18next.t === "function") {
-      return i18next.t(key, { defaultValue: fallback, ...(vars || {}) });
+    if (i18nInstance) {
+      return i18nInstance.t(key, { defaultValue: fallback, ...(vars || {}) });
     }
   } catch (_) {}
   return fallback;
+}
+
+function createI18nTextGetter(requireInitialized = false) {
+  return (key, fallback = "", vars = undefined) =>
+    getI18nText(key, fallback, vars, { requireInitialized });
+}
+
+function getGlobalSettingsText(key, fallback, vars = undefined) {
+  return getI18nText(key, fallback, vars);
 }
 
 const GLOBAL_SETTINGS_SECTION_ICONS = {
@@ -3025,18 +4080,20 @@ function initGlobalSettingsCategoryToggles() {
 
 function countCustomHotkeys() {
   try {
-    return Object.keys(DEFAULT_HOTKEYS).reduce((count, key) => {
-      if (NON_CUSTOMIZABLE_HOTKEYS.has(key)) return count;
-      if (!Object.prototype.hasOwnProperty.call(CONFIG.HOTKEYS, key))
-        return count;
-      return CONFIG.HOTKEYS[key] !== DEFAULT_HOTKEYS[key] ? count + 1 : count;
-    }, 0);
+    const hotkeysUtils = getHotkeysUtils();
+    if (hotkeysUtils?.countCustomBindings) {
+      return hotkeysUtils.countCustomBindings(CONFIG.HOTKEYS);
+    }
+    return Object.keys(collectCustomHotkeysBindings()).length;
   } catch (_) {
     return 0;
   }
 }
 
 function extractTimelineStatsFromData(data) {
+  if (STORAGE_DIAGNOSTICS_UTILS?.extractTimelineStatsFromData) {
+    return STORAGE_DIAGNOSTICS_UTILS.extractTimelineStatsFromData(data);
+  }
   const source =
     data &&
     typeof data === "object" &&
@@ -3058,6 +4115,42 @@ function extractTimelineStatsFromData(data) {
 }
 
 async function collectGlobalSettingsStorageDiagnostics() {
+  if (STORAGE_DIAGNOSTICS_UTILS?.collectStorageDiagnostics) {
+    return STORAGE_DIAGNOSTICS_UTILS.collectStorageDiagnostics({
+      customHotkeysCount: countCustomHotkeys(),
+      getTimelineData: () =>
+        window.TimelineData && typeof window.TimelineData.getData === "function"
+          ? window.TimelineData.getData()
+          : undefined,
+      loadTimelinePayload: async () => {
+        if (
+          typeof PoseChronoStorage === "undefined" ||
+          !PoseChronoStorage ||
+          typeof PoseChronoStorage.getJson !== "function"
+        ) {
+          return undefined;
+        }
+        return PoseChronoStorage.getJson(STORAGE_KEYS.TIMELINE_DB, undefined);
+      },
+      loadPlansPayload: async () => {
+        if (
+          typeof PoseChronoStorage === "undefined" ||
+          !PoseChronoStorage ||
+          typeof PoseChronoStorage.getJson !== "function"
+        ) {
+          return undefined;
+        }
+        return PoseChronoStorage.getJson(STORAGE_KEYS.SESSION_PLANS_DB, undefined);
+      },
+      loadLegacyPlansPayload: () => {
+        const localRaw = localStorage.getItem("posechrono_session_plans");
+        if (!localRaw) return undefined;
+        return JSON.parse(localRaw);
+      },
+      normalizeSessionPlansPayload,
+    });
+  }
+
   const diagnostics = {
     timelineDays: 0,
     timelineSessions: 0,
@@ -3829,13 +4922,7 @@ async function initPlugin() {
 
   // Marquer le bouton 1min comme actif au chargement (selectedDuration = 60)
   // et s'assurer qu'aucun bouton de durée mémoire n'interfère
-  durationBtns.forEach((btn) => {
-    if (parseInt(btn.dataset.duration) === state.selectedDuration) {
-      btn.classList.add("active");
-    } else {
-      btn.classList.remove("active");
-    }
-  });
+  toggleDurationButtonsForValue(durationBtns, state.selectedDuration);
 
   // Nettoyer les boutons actifs des modes non sélectionnés
   const memoryFlashBtns =
@@ -3843,16 +4930,10 @@ async function initPlugin() {
   const memoryProgressiveBtns =
     memoryProgressiveSettings?.querySelectorAll(".duration-btn");
   if (memoryFlashBtns) {
-    memoryFlashBtns.forEach((btn) => {
-      if (parseInt(btn.dataset.duration) === state.memoryDuration) {
-        btn.classList.add("active");
-      } else {
-        btn.classList.remove("active");
-      }
-    });
+    toggleDurationButtonsForValue(memoryFlashBtns, state.memoryDuration);
   }
   if (memoryProgressiveBtns) {
-    memoryProgressiveBtns.forEach((btn) => btn.classList.remove("active"));
+    clearDurationButtonsActive(memoryProgressiveBtns);
   }
 
   renderGlobalSettingsSections();
@@ -3943,6 +5024,9 @@ function applyPreferredDefaultSessionMode(options = {}) {
 }
 
 function createPrefsBackupFilename() {
+  if (SHARED_PREFERENCES_TRANSFER_UTILS?.createBackupFilename) {
+    return SHARED_PREFERENCES_TRANSFER_UTILS.createBackupFilename();
+  }
   const now = new Date();
   const yyyy = now.getFullYear();
   const mm = String(now.getMonth() + 1).padStart(2, "0");
@@ -3954,6 +5038,12 @@ function createPrefsBackupFilename() {
 }
 
 function downloadJsonPayload(filename, payload) {
+  if (SHARED_PREFERENCES_TRANSFER_UTILS?.downloadJsonPayload) {
+    return SHARED_PREFERENCES_TRANSFER_UTILS.downloadJsonPayload(
+      filename,
+      payload,
+    );
+  }
   try {
     const content = JSON.stringify(payload, null, 2);
     const blob = new Blob([content], {
@@ -3975,6 +5065,9 @@ function downloadJsonPayload(filename, payload) {
 }
 
 function pickJsonFileText() {
+  if (SHARED_PREFERENCES_TRANSFER_UTILS?.pickJsonFileText) {
+    return SHARED_PREFERENCES_TRANSFER_UTILS.pickJsonFileText();
+  }
   return new Promise((resolve) => {
     const input = document.createElement("input");
     input.type = "file";
@@ -4224,46 +5317,33 @@ function setupEventListeners() {
 
   // Calculer la durée totale d'un plan (en secondes)
   function calculatePlanDuration(steps) {
-    return steps.reduce((total, step) => {
-      if (step.type === "pause") {
-        return total + step.duration;
-      } else {
-        // Pour les poses : nombre de poses × durée
-        return total + step.count * step.duration;
-      }
-    }, 0);
+    return calculateSessionPlanDuration(steps);
   }
 
   // Formater une durée en secondes vers format lisible
   function formatDuration(seconds) {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = seconds % 60;
-
+    if (SESSION_TIME_FORMAT_UTILS?.formatCompactDuration) {
+      return SESSION_TIME_FORMAT_UTILS.formatCompactDuration(seconds);
+    }
+    const safe = Math.max(0, Math.floor(Number(seconds) || 0));
+    const h = Math.floor(safe / 3600);
+    const m = Math.floor((safe % 3600) / 60);
+    const s = safe % 60;
     const parts = [];
     if (h > 0) parts.push(`${h}h`);
     if (m > 0) parts.push(`${m}m`);
     if (s > 0 || parts.length === 0) parts.push(`${s}s`);
-
     return parts.join(" ");
   }
 
   // Labels i18n singulier/pluriel via `count` pour la section des plans
   function getPlanWord(base, count) {
-    const safeCount = Number.isFinite(Number(count)) ? Number(count) : 0;
-
     if (base === "pose") {
-      return i18next.t("modes.custom.pose", {
-        count: safeCount,
-        defaultValue: safeCount === 1 ? "pose" : "poses",
-      });
+      return translateCountLabel("modes.custom.pose", count, "pose", "poses");
     }
 
     if (base === "step") {
-      return i18next.t("modes.custom.step", {
-        count: safeCount,
-        defaultValue: safeCount === 1 ? "step" : "steps",
-      });
+      return translateCountLabel("modes.custom.step", count, "step", "steps");
     }
 
     return "";
@@ -4367,10 +5447,7 @@ function setupEventListeners() {
 
   // Calculer le total de poses d'un plan (hors pauses)
   function calculatePlanPoses(steps) {
-    return (steps || []).reduce((total, step) => {
-      if (step.type === "pause") return total;
-      return total + (Number(step.count) || 0);
-    }, 0);
+    return calculateSessionPlanPoses(steps);
   }
 
   // Ouvrir le modal
@@ -4532,7 +5609,8 @@ function setupEventListeners() {
     Object.keys(CONFIG.HOTKEYS).forEach((k) => {
       delete CONFIG.HOTKEYS[k];
     });
-    Object.assign(CONFIG.HOTKEYS, DEFAULT_HOTKEYS);
+    resetConfigHotkeysToDefaults();
+    enforceNonCustomizableConfigHotkeys();
 
     UIPreferences.resetVisualPrefs();
     UIPreferences.set(
@@ -4632,13 +5710,7 @@ function setupEventListeners() {
       }
 
       if (selections.hotkeys) {
-        const hotkeysToSave = {};
-        Object.keys(DEFAULT_HOTKEYS).forEach((key) => {
-          if (NON_CUSTOMIZABLE_HOTKEYS.has(key)) return;
-          if (CONFIG.HOTKEYS[key] !== DEFAULT_HOTKEYS[key]) {
-            hotkeysToSave[key] = CONFIG.HOTKEYS[key];
-          }
-        });
+        const hotkeysToSave = collectCustomHotkeysBindings();
         sections.hotkeys = normalizeHotkeysPayload({
           schemaVersion: STORAGE_SCHEMA_VERSION,
           bindings: hotkeysToSave,
@@ -4777,13 +5849,8 @@ function setupEventListeners() {
           try {
             localStorage.removeItem(HOTKEYS_STORAGE_KEY);
           } catch (_) {}
-          Object.keys(DEFAULT_HOTKEYS).forEach((key) => {
-            CONFIG.HOTKEYS[key] = DEFAULT_HOTKEYS[key];
-          });
-          Object.keys(normalizedHotkeys.bindings).forEach((key) => {
-            if (!NON_CUSTOMIZABLE_HOTKEYS.has(key) && CONFIG.HOTKEYS[key]) {
-              CONFIG.HOTKEYS[key] = normalizedHotkeys.bindings[key];
-            }
+          applyCustomHotkeysToConfig(normalizedHotkeys.bindings, {
+            resetToDefaults: true,
           });
           updateButtonLabels();
           updateSidebarTooltips();
@@ -5100,12 +6167,8 @@ function setupEventListeners() {
         try {
           localStorage.removeItem(HOTKEYS_STORAGE_KEY);
         } catch (_) {}
-        Object.keys(DEFAULT_HOTKEYS).forEach((key) => {
-          CONFIG.HOTKEYS[key] = DEFAULT_HOTKEYS[key];
-        });
-        NON_CUSTOMIZABLE_HOTKEYS.forEach((key) => {
-          if (DEFAULT_HOTKEYS[key]) CONFIG.HOTKEYS[key] = DEFAULT_HOTKEYS[key];
-        });
+        resetConfigHotkeysToDefaults();
+        enforceNonCustomizableConfigHotkeys();
         repairedLabels.push(
           i18next.t("storage.targetHotkeys", {
             defaultValue: "Keyboard shortcuts",
@@ -5169,9 +6232,8 @@ function setupEventListeners() {
   if (durationBtns) {
     durationBtns.forEach((btn) => {
       btn.addEventListener("click", () => {
-        durationBtns.forEach((b) => b.classList.remove("active"));
-        btn.classList.add("active");
-        state.selectedDuration = parseInt(btn.dataset.duration);
+        toggleDurationButtonsForValue(durationBtns, getDurationFromButton(btn));
+        state.selectedDuration = getDurationFromButton(btn);
         if (hoursInput) hoursInput.value = 0;
         if (minutesInput) minutesInput.value = 0;
         if (secondsInput) secondsInput.value = 0;
@@ -5214,9 +6276,11 @@ function setupEventListeners() {
   if (memoryFlashBtns) {
     memoryFlashBtns.forEach((btn) => {
       btn.addEventListener("click", () => {
-        memoryFlashBtns.forEach((b) => b.classList.remove("active"));
-        btn.classList.add("active");
-        state.memoryDuration = parseInt(btn.dataset.duration);
+        toggleDurationButtonsForValue(
+          memoryFlashBtns,
+          getDurationFromButton(btn),
+        );
+        state.memoryDuration = getDurationFromButton(btn);
       });
     });
   }
@@ -5226,9 +6290,11 @@ function setupEventListeners() {
   if (memoryProgressiveBtns) {
     memoryProgressiveBtns.forEach((btn) => {
       btn.addEventListener("click", () => {
-        memoryProgressiveBtns.forEach((b) => b.classList.remove("active"));
-        btn.classList.add("active");
-        state.selectedDuration = parseInt(btn.dataset.duration);
+        toggleDurationButtonsForValue(
+          memoryProgressiveBtns,
+          getDurationFromButton(btn),
+        );
+        state.selectedDuration = getDurationFromButton(btn);
         // Désactiver le custom time du mode progressif
         const memoryProgressiveCustomTime = document.querySelector(
           "#memory-progressive-settings .memory-custom-time",
@@ -5258,13 +6324,14 @@ function setupEventListeners() {
   );
 
   const updateMemoryProgressiveDuration = () => {
-    const minutes = parseInt(memoryProgressiveMinutes.value) || 0;
-    const seconds = parseInt(memoryProgressiveSeconds.value) || 0;
-    const totalSeconds = minutes * 60 + seconds;
+    const { totalSeconds } = readMinutesSecondsInputValues(
+      memoryProgressiveMinutes,
+      memoryProgressiveSeconds,
+    );
 
     if (totalSeconds > 0) {
       // Désactiver tous les boutons de durée
-      memoryProgressiveBtns?.forEach((b) => b.classList.remove("active"));
+      clearDurationButtonsActive(memoryProgressiveBtns);
       // Activer visuellement le custom time
       memoryProgressiveCustomTime?.classList.add("active");
       state.selectedDuration = totalSeconds;
@@ -5291,13 +6358,14 @@ function setupEventListeners() {
   const memoryCustomTime = document.querySelector(".memory-custom-time");
 
   const updateMemoryDuration = () => {
-    const minutes = parseInt(memoryFlashMinutes.value) || 0;
-    const seconds = parseInt(memoryFlashSeconds.value) || 0;
-    const totalSeconds = minutes * 60 + seconds;
+    const { totalSeconds } = readMinutesSecondsInputValues(
+      memoryFlashMinutes,
+      memoryFlashSeconds,
+    );
 
     if (totalSeconds > 0) {
       // Désactiver tous les boutons de durée
-      memoryFlashBtns?.forEach((b) => b.classList.remove("active"));
+      clearDurationButtonsActive(memoryFlashBtns);
       // Activer visuellement le custom time
       memoryCustomTime?.classList.add("active");
       state.memoryDuration = totalSeconds;
@@ -5343,9 +6411,10 @@ function setupEventListeners() {
   const noPressureBtn = document.getElementById("no-pressure-btn");
 
   const updateMemoryDrawingTime = () => {
-    const minutes = parseInt(memoryDrawingMinutes.value) || 0;
-    const seconds = parseInt(memoryDrawingSeconds.value) || 0;
-    const totalSeconds = minutes * 60 + seconds;
+    const { totalSeconds } = readMinutesSecondsInputValues(
+      memoryDrawingMinutes,
+      memoryDrawingSeconds,
+    );
 
     if (totalSeconds > 0) {
       // Activer l'input de temps
@@ -5488,7 +6557,11 @@ function setupEventListeners() {
     const drawingTime = state.memoryDrawingTime || 0;
     const displayTime = state.memoryDuration || 0;
 
-    const totalSeconds = posesCount * drawingTime + posesCount * displayTime;
+    const totalSeconds = calculateMemoryTotalDurationSeconds(
+      posesCount,
+      drawingTime,
+      displayTime,
+    );
 
     // Formater en heures, minutes, secondes
     const hours = Math.floor(totalSeconds / 3600);
@@ -5569,12 +6642,13 @@ function setupEventListeners() {
   // === CHAMPS DE SAISIE PERSONNALISÉE (H:M:S) ===
   // Debounce pour éviter les reflow excessifs
   const handleTimerInputChange = PerformanceUtils.debounce(() => {
-    const h = parseInt(hoursInput.value) || 0;
-    const m = parseInt(minutesInput.value) || 0;
-    const s = parseInt(secondsInput.value) || 0;
-    const totalCustom = h * 3600 + m * 60 + s;
+    const { totalSeconds: totalCustom } = readHmsInputValues(
+      hoursInput,
+      minutesInput,
+      secondsInput,
+    );
     if (totalCustom > 0) {
-      DOMCache.durationBtns.forEach((btn) => btn.classList.remove("active"));
+      clearDurationButtonsActive(DOMCache.durationBtns);
       DOMCache.inputGroups.forEach((group) => group.classList.add("active"));
       state.selectedDuration = totalCustom;
     }
@@ -6079,14 +7153,7 @@ function setupEventListeners() {
       if (state.originalImages.length > 0) {
         if (state.randomShuffle) {
           // Mélanger les images
-          state.images = [...state.originalImages];
-          for (let i = state.images.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [state.images[i], state.images[j]] = [
-              state.images[j],
-              state.images[i],
-            ];
-          }
+          state.images = shuffleSessionMediaItems(state.originalImages);
         } else {
           // Restaurer l'ordre original
           state.images = [...state.originalImages];
@@ -6673,9 +7740,7 @@ async function loadImages() {
       sourceMessage = i18next.t("settings.allLibraryAnalyzed");
     }
 
-    state.images = items.filter((item) =>
-      MEDIA_EXTENSIONS.includes(item.ext.toLowerCase()),
-    );
+    state.images = filterSessionMediaItems(items);
 
     // Sauvegarder l'ordre original des images
     state.originalImages = [...state.images];
@@ -6685,12 +7750,9 @@ async function loadImages() {
     // ========================================
     imageCache.clear();
 
-    // Fisher-Yates shuffle pour mélanger efficacement les images (si activé)
+    // Shuffle si activé
     if (state.randomShuffle && state.images.length > 0) {
-      for (let i = state.images.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [state.images[i], state.images[j]] = [state.images[j], state.images[i]];
-      }
+      state.images = shuffleSessionMediaItems(state.images);
     }
 
     if (state.images.length === 0) {
@@ -6702,13 +7764,10 @@ async function loadImages() {
       }
     } else {
       // Compter séparément images et vidéos
-      const imageCount = state.images.filter((item) =>
-        IMAGE_EXTENSIONS.includes(item.ext.toLowerCase()),
-      ).length;
-      const videoCount = state.images.filter((item) =>
-        VIDEO_EXTENSIONS.includes(item.ext.toLowerCase()),
-      ).length;
-      const count = imageCount + videoCount;
+      const mediaCounts = countSessionMediaTypes(state.images);
+      const imageCount = mediaCounts.imageCount;
+      const videoCount = mediaCounts.videoCount;
+      const count = mediaCounts.totalCount;
 
       // Construire le message avec orthographe correcte
       let countMessage = "";
@@ -6869,61 +7928,42 @@ function startSession() {
   hideMemoryOverlay();
 
   if (state.sessionMode === "classique") {
-    const h = parseInt(hoursInput.value) || 0;
-    const m = parseInt(minutesInput.value) || 0;
-    const s = parseInt(secondsInput.value) || 0;
-    const totalManual = h * 3600 + m * 60 + s;
-
-    // Si l'utilisateur a tapé quelque chose, c'est PRIORITAIRE
-    if (totalManual > 0) {
-      state.selectedDuration = totalManual;
-    } else {
-      // Sinon on prend le bouton qui a la classe "active" dans le panneau classique
-      const activeBtn = document.querySelector(
-        "#mode-classique-settings .duration-btn.active",
-      );
-      if (activeBtn) {
-        state.selectedDuration = parseInt(activeBtn.dataset.duration);
-      }
-    }
-
-    // Mettre à jour le temps restant pour le mode classique
-    state.timeRemaining = state.selectedDuration;
-  }
-
-  // --- LOGIQUE MODE PERSONNALISÉ ---
-  if (state.sessionMode === "custom") {
-    if (state.customQueue.length === 0) return;
-
-    state.currentStepIndex = 0;
-    state.currentPoseInStep = 1;
-
-    const firstStep = state.customQueue[0];
-    state.selectedDuration = firstStep.duration;
-    state.timeRemaining = firstStep.duration;
-  } else if (state.sessionMode === "memory") {
-    // --- LOGIQUE MODE M\u00c9MOIRE ---
-    state.memoryHidden = false; // R\u00e9initialiser l'\u00e9tat
-    // Appliquer une limite stricte de poses pour la session mémoire.
-    state.memoryPosesCount = Math.max(
-      1,
-      Math.min(parseInt(state.memoryPosesCount) || 1, state.images.length),
+    const { hours: h, minutes: m, seconds: s } = readHmsInputValues(
+      hoursInput,
+      minutesInput,
+      secondsInput,
     );
-
-    if (state.memoryType === "flash") {
-      // En mode flash, la dur\u00e9e totale est le temps d'affichage
-      state.selectedDuration = state.memoryDuration;
-      state.timeRemaining = state.memoryDuration;
-    } else {
-      // En mode progressif, on utilise la dur\u00e9e s\u00e9lectionn\u00e9e dans les boutons
-      // La dur\u00e9e est d\u00e9j\u00e0 dans state.selectedDuration
-      state.timeRemaining = state.selectedDuration;
-    }
-  } else {
-    // Logique classique ou relax
-    state.timeRemaining =
-      state.sessionMode === "relax" ? 0 : state.selectedDuration;
+    const activeBtn = document.querySelector(
+      "#mode-classique-settings .duration-btn.active",
+    );
+    const activeDuration = getDurationFromButton(activeBtn, 0);
+    state.selectedDuration = resolveClassicSessionDuration(
+      h,
+      m,
+      s,
+      activeDuration,
+      state.selectedDuration,
+    );
   }
+
+  const sessionStart = resolveSessionModeStartState({
+    sessionMode: state.sessionMode,
+    selectedDuration: state.selectedDuration,
+    customQueue: state.customQueue,
+    memoryType: state.memoryType,
+    memoryDuration: state.memoryDuration,
+    memoryPosesCount: state.memoryPosesCount,
+    imagesLength: state.images.length,
+    clampMemoryPosesCount: clampMemorySessionPosesCount,
+  });
+  if (!sessionStart.isValid) return;
+
+  state.selectedDuration = sessionStart.selectedDuration;
+  state.timeRemaining = sessionStart.timeRemaining;
+  state.currentStepIndex = sessionStart.currentStepIndex;
+  state.currentPoseInStep = sessionStart.currentPoseInStep;
+  state.memoryPosesCount = sessionStart.memoryPosesCount;
+  state.memoryHidden = !!sessionStart.memoryHidden;
   // --------------------------------
 
   settingsScreen.classList.add("hidden");
@@ -6933,11 +7973,7 @@ function startSession() {
 
   // Re-mélanger les images à chaque nouvelle session si l'option est activée
   if (state.randomShuffle && state.images.length > 1) {
-    // Fisher-Yates shuffle
-    for (let i = state.images.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [state.images[i], state.images[j]] = [state.images[j], state.images[i]];
-    }
+    state.images = shuffleSessionMediaItems(state.images);
   }
 
   state.currentIndex = 0;
@@ -7000,9 +8036,11 @@ function startTimer() {
     if (!state.isPlaying) return;
     state.timeRemaining--;
 
-    const isCustomPause =
-      state.sessionMode === "custom" &&
-      state.customQueue[state.currentStepIndex]?.type === "pause";
+    const isCustomPause = isCustomPauseTick(
+      state.sessionMode,
+      state.customQueue,
+      state.currentStepIndex,
+    );
 
     if (!isCustomPause) {
       state.totalSessionTime++;
@@ -7011,7 +8049,14 @@ function startTimer() {
 
     // LOGIQUE SPÉCIFIQUE MODE MÉMOIRE FLASH
     if (state.sessionMode === "memory" && state.memoryType === "flash") {
-      if (state.timeRemaining < 0 && !state.memoryHidden) {
+      if (
+        shouldEnterMemoryHiddenPhaseTick({
+          sessionMode: state.sessionMode,
+          memoryType: state.memoryType,
+          timeRemaining: state.timeRemaining,
+          memoryHidden: state.memoryHidden,
+        })
+      ) {
         // Arrêter le timer et afficher l'écran de masquage
         state.memoryHidden = true;
         stopTimer();
@@ -7033,7 +8078,14 @@ function startTimer() {
       }
 
       // Si on est en phase de dessin (overlay visible) et que le temps est écoulé
-      if (state.memoryHidden && state.timeRemaining < 0) {
+      if (
+        shouldAdvanceFromMemoryHiddenPhaseTick({
+          sessionMode: state.sessionMode,
+          memoryType: state.memoryType,
+          timeRemaining: state.timeRemaining,
+          memoryHidden: state.memoryHidden,
+        })
+      ) {
         stopTimer();
         // Attendre 1 seconde puis passer à l'image suivante
         setTimeout(() => {
@@ -7044,19 +8096,22 @@ function startTimer() {
     }
 
     if (state.soundEnabled) {
-      const threshold = state.selectedDuration * 0.2;
-      if (
-        !isCustomPause &&
-        state.timeRemaining <= threshold &&
-        state.timeRemaining > 0
-      ) {
-        const volume = (threshold - state.timeRemaining) / threshold;
-        SoundManager.play("tick", { volume });
+      const tickDecision = getTickSoundDecision({
+        soundEnabled: state.soundEnabled,
+        selectedDuration: state.selectedDuration,
+        timeRemaining: state.timeRemaining,
+        isCustomPause,
+      });
+      if (tickDecision.playTick) {
+        SoundManager.play("tick", { volume: tickDecision.volume });
       }
-      // En mode mémoire, jouer le son à 0 mais continuer le timer
       if (
-        state.timeRemaining === 0 &&
-        !(state.sessionMode === "memory" && state.memoryType === "flash")
+        shouldPlayEndSoundTick({
+          soundEnabled: state.soundEnabled,
+          timeRemaining: state.timeRemaining,
+          sessionMode: state.sessionMode,
+          memoryType: state.memoryType,
+        })
       ) {
         SoundManager.play("end");
       }
@@ -7065,11 +8120,13 @@ function startTimer() {
     updateTimerDisplay();
     applyImageFilters(); // Mettre à jour le flou progressif chaque seconde
 
-    if (state.timeRemaining <= 0) {
-      // En mode mémoire flash, ne pas passer automatiquement à l'image suivante
-      if (state.sessionMode === "memory" && state.memoryType === "flash") {
-        return; // L'utilisateur cliquera pour passer à la suivante
-      }
+    if (
+      shouldAutoAdvanceOnTimerEndTick({
+        timeRemaining: state.timeRemaining,
+        sessionMode: state.sessionMode,
+        memoryType: state.memoryType,
+      })
+    ) {
       stopTimer();
       setTimeout(nextImage, 100);
     }
@@ -7135,6 +8192,9 @@ function getSeenImageDurationSeconds(image) {
 }
 
 function formatReviewDuration(seconds) {
+  if (SESSION_TIME_FORMAT_UTILS?.formatClockDuration) {
+    return SESSION_TIME_FORMAT_UTILS.formatClockDuration(seconds);
+  }
   const safe = Math.max(0, Math.floor(Number(seconds) || 0));
   const h = Math.floor(safe / 3600);
   const m = Math.floor((safe % 3600) / 60);
@@ -7216,46 +8276,15 @@ function nextImage() {
     return;
   }
 
-  function getNextStepMessage() {
-    resetProgressBar();
-    for (
-      let i = state.currentStepIndex + 1;
-      i < state.customQueue.length;
-      i++
-    ) {
-      const step = state.customQueue[i];
-
-      if (step.type === "pose") {
-        const count = step.count;
-        const duration = step.duration;
-
-        let timeStr = "";
-        const mins = Math.floor(duration / 60);
-        const secs = duration % 60;
-        if (mins > 0) timeStr += mins + " min ";
-        if (secs > 0 || mins === 0) timeStr += secs + "s";
-
-        const poseWord =
-          count > 1 ? i18next.t("misc.poses") : i18next.t("misc.pose");
-
-        return i18next.t("drawing.nextStep", {
-          poseCount: count,
-          poseWord,
-          duration: timeStr.trim(),
-        });
-      }
-    }
-    return i18next.t("drawing.lastStep");
-  }
-
   // 2. Logique pour les autres modes (Classique / Relax)
   if (state.sessionMode === "memory") {
-    const memorySessionLimit = Math.max(
+    const memorySessionLimit = clampMemorySessionPosesCount(
+      state.memoryPosesCount,
+      state.images.length,
       1,
-      Math.min(parseInt(state.memoryPosesCount) || 1, state.images.length),
     );
     // L'image courante compte déjà comme une pose: si on atteint la limite, on termine.
-    if (state.currentIndex + 1 >= memorySessionLimit) {
+    if (shouldEndMemorySessionAtIndex(state.currentIndex, memorySessionLimit)) {
       showReview();
       return;
     }
@@ -7281,7 +8310,7 @@ function nextImage() {
   }
 
   // Vérifier si on a vu toutes les images (pour aller au review screen)
-  const nextIndex = (state.currentIndex + 1) % state.images.length;
+  const nextIndex = getNextCyclicIndex(state.currentIndex, state.images.length);
 
   // Si on revient au début et qu'on a vu toutes les images, afficher le review
   if (nextIndex === 0 && state.imagesSeen.length >= state.images.length) {
@@ -7337,15 +8366,12 @@ function nextPoseGroup() {
   // Passer au prochain groupe de poses (étape de type "pose")
   if (state.sessionMode !== "custom") return;
 
-  let nextGroupIndex = null;
-  for (let i = state.currentStepIndex + 1; i < state.customQueue.length; i++) {
-    if (state.customQueue[i].type === "pose") {
-      nextGroupIndex = i;
-      break;
-    }
-  }
+  const nextGroupIndex = findNextCustomPoseStepIndex(
+    state.customQueue,
+    state.currentStepIndex,
+  );
 
-  if (nextGroupIndex !== null) {
+  if (nextGroupIndex >= 0) {
     finalizeCurrentPoseForReview();
     // Aller au groupe de poses suivant
     stopTimer();
@@ -7372,15 +8398,12 @@ function previousPoseGroup() {
   // Revenir au groupe de poses précédent (étape de type "pose")
   if (state.sessionMode !== "custom") return;
 
-  let prevGroupIndex = null;
-  for (let i = state.currentStepIndex - 1; i >= 0; i--) {
-    if (state.customQueue[i].type === "pose") {
-      prevGroupIndex = i;
-      break;
-    }
-  }
+  const prevGroupIndex = findPrevCustomPoseStepIndex(
+    state.customQueue,
+    state.currentStepIndex,
+  );
 
-  if (prevGroupIndex !== null) {
+  if (prevGroupIndex >= 0) {
     finalizeCurrentPoseForReview();
     // Aller au groupe de poses précédent
     stopTimer();
@@ -7450,15 +8473,10 @@ function showPrevImageMenu(x, y) {
   menu.style.top = y + "px";
 
   // Vérifier s'il y a un groupe de poses précédent disponible
-  let hasPrevGroup = false;
-  if (state.sessionMode === "custom") {
-    for (let i = state.currentStepIndex - 1; i >= 0; i--) {
-      if (state.customQueue[i].type === "pose") {
-        hasPrevGroup = true;
-        break;
-      }
-    }
-  }
+  const hasPrevGroup =
+    state.sessionMode === "custom"
+      ? hasPrevCustomPoseGroup(state.customQueue, state.currentStepIndex)
+      : false;
 
   const prevGroupOption = document.createElement("div");
   prevGroupOption.className = `context-menu-item${hasPrevGroup ? "" : " disabled"}`;
@@ -7486,19 +8504,10 @@ function showNextImageMenu(x, y) {
   menu.style.top = y + "px";
 
   // Vérifier s'il y a un prochain groupe de poses disponible
-  let hasNextGroup = false;
-  if (state.sessionMode === "custom") {
-    for (
-      let i = state.currentStepIndex + 1;
-      i < state.customQueue.length;
-      i++
-    ) {
-      if (state.customQueue[i].type === "pose") {
-        hasNextGroup = true;
-        break;
-      }
-    }
-  }
+  const hasNextGroup =
+    state.sessionMode === "custom"
+      ? hasNextCustomPoseGroup(state.customQueue, state.currentStepIndex)
+      : false;
 
   const nextGroupOption = document.createElement("div");
   nextGroupOption.className = `context-menu-item${hasNextGroup ? "" : " disabled"}`;
@@ -7619,6 +8628,9 @@ function updateImageTransform() {
  * @returns {boolean}
  */
 function isVideoFile(item) {
+  if (SESSION_MEDIA_UTILS?.isVideoFile) {
+    return SESSION_MEDIA_UTILS.isVideoFile(item, VIDEO_EXTENSIONS);
+  }
   if (!item || !item.ext) return false;
   return VIDEO_EXTENSIONS.includes(item.ext.toLowerCase());
 }
@@ -7629,7 +8641,10 @@ function isVideoFile(item) {
  * @returns {boolean}
  */
 function isGifFile(item) {
-  return item.ext.toLowerCase() === "gif";
+  if (SESSION_MEDIA_UTILS?.isGifFile) {
+    return SESSION_MEDIA_UTILS.isGifFile(item);
+  }
+  return String(item?.ext || "").toLowerCase() === "gif";
 }
 
 /**
@@ -8076,17 +9091,10 @@ function updateDisplay(shouldAnimateFlip = false) {
       if (btn) btn.classList.add("disabled-in-pause");
     });
 
-    let nextPoseStep = null;
-    for (
-      let i = state.currentStepIndex + 1;
-      i < state.customQueue.length;
-      i++
-    ) {
-      if (state.customQueue[i].type === "pose") {
-        nextPoseStep = state.customQueue[i];
-        break;
-      }
-    }
+    const nextPoseStep = findNextCustomPoseStep(
+      state.customQueue,
+      state.currentStepIndex,
+    );
 
     if (nextStepInfoDisplay) {
       if (nextPoseStep) {
@@ -8144,12 +9152,10 @@ function updateDisplay(shouldAnimateFlip = false) {
 
     const displayTotal =
       state.sessionMode === "memory"
-        ? Math.max(
+        ? clampMemorySessionPosesCount(
+            state.memoryPosesCount,
+            state.images.length,
             1,
-            Math.min(
-              parseInt(state.memoryPosesCount) || 1,
-              state.images.length,
-            ),
           )
         : state.images.length;
     imageCounter.textContent = `${state.currentIndex + 1} / ${displayTotal}`;
@@ -8165,24 +9171,14 @@ function updateDisplay(shouldAnimateFlip = false) {
     if (state.sessionMode === "custom") {
       const currentStep = state.customQueue[state.currentStepIndex];
       if (currentStep) {
-        // 1. Calculer le total de poses combinées
-        const poseSteps = state.customQueue.filter(
-          (step) => step.type === "pose",
+        const customProgress = getCustomPoseSessionProgress(
+          state.customQueue,
+          state.currentStepIndex,
+          state.currentPoseInStep || 1,
         );
-        const totalPosesInSession = poseSteps.reduce(
-          (acc, step) => acc + step.count,
-          0,
-        );
-
-        let globalPoseIndex = 0;
-        for (let i = 0; i < state.currentStepIndex; i++) {
-          if (state.customQueue[i].type === "pose") {
-            globalPoseIndex += state.customQueue[i].count;
-          }
-        }
-        globalPoseIndex += state.currentPoseInStep || 1;
-
-        const showGlobal = poseSteps.length > 1;
+        const totalPosesInSession = customProgress.totalPoses;
+        const globalPoseIndex = customProgress.globalPoseIndex;
+        const showGlobal = customProgress.showGlobal;
 
         imageCounter.innerHTML = `
           <div class="session-info-container">
@@ -9426,12 +10422,7 @@ function showSettingsContextMenu(x, y) {
   const isGridEnabled = document.body.classList.contains("grid-enabled");
 
   // Helper pour obtenir les traductions avec fallback
-  const t = (key, fallback) => {
-    if (typeof i18next !== "undefined" && i18next.isInitialized) {
-      return i18next.t(key, { defaultValue: fallback });
-    }
-    return fallback;
-  };
+  const t = createI18nTextGetter(true);
 
   const items = [
     {
@@ -9509,6 +10500,12 @@ const HOTKEY_IMPLICIT_MODIFIERS = {
  * - Combinaisons explicites (Ctrl+Alt+S) → affichées telles quelles avec " + "
  */
 function formatHotkeyDisplay(hotkeyName, value) {
+  const hotkeysUtils = getHotkeysUtils();
+  if (hotkeysUtils?.formatHotkeyDisplay) {
+    return hotkeysUtils.formatHotkeyDisplay(hotkeyName, value, {
+      implicitModifiers: HOTKEY_IMPLICIT_MODIFIERS,
+    });
+  }
   if (!value) return "";
 
   // Si la valeur contient déjà des modificateurs explicites (ex: "Ctrl+Alt+S")
@@ -9598,6 +10595,14 @@ const NON_CUSTOMIZABLE_HOTKEYS = new Set(["DRAWING_CLOSE"]);
 let poseChronoConfirmDialogQueue = Promise.resolve();
 let poseChronoConfirmDialogCounter = 0;
 const poseChronoUndoTimers = new Map();
+
+function enqueuePoseChronoDialog(openDialog) {
+  const resultPromise = poseChronoConfirmDialogQueue.then(() => openDialog());
+  poseChronoConfirmDialogQueue = resultPromise
+    .then(() => undefined)
+    .catch(() => undefined);
+  return resultPromise;
+}
 
 function isElementActuallyVisible(el) {
   if (!el) return false;
@@ -9858,20 +10863,13 @@ function schedulePoseChronoUndoAction(options = {}) {
 }
 
 function showPoseChronoConfirmDialog(options = {}) {
-  const i18nDefault = (key, fallback) => {
-    if (typeof i18next !== "undefined" && i18next.t) {
-      return i18next.t(key, { defaultValue: fallback });
-    }
-    return fallback;
-  };
-
   const openDialog = () =>
     new Promise((resolve) => {
       const {
         title = "",
         message = "",
-        confirmText = i18nDefault("notifications.deleteConfirm", "Confirm"),
-        cancelText = i18nDefault("notifications.deleteCancel", "Cancel"),
+        confirmText = getI18nText("notifications.deleteConfirm", "Confirm"),
+        cancelText = getI18nText("notifications.deleteCancel", "Cancel"),
         checkboxLabel = "",
         checkboxChecked = false,
         container = document.body,
@@ -10053,20 +11051,11 @@ function showPoseChronoConfirmDialog(options = {}) {
       confirmBtn.focus();
     });
 
-  const resultPromise = poseChronoConfirmDialogQueue.then(() => openDialog());
-  poseChronoConfirmDialogQueue = resultPromise
-    .then(() => undefined)
-    .catch(() => undefined);
-  return resultPromise;
+  return enqueuePoseChronoDialog(openDialog);
 }
 
 function showStorageRepairDialog(options = {}) {
-  const t = (key, fallback, vars = undefined) => {
-    if (typeof i18next !== "undefined" && typeof i18next.t === "function") {
-      return i18next.t(key, { defaultValue: fallback, ...(vars || {}) });
-    }
-    return fallback;
-  };
+  const t = getI18nText;
 
   const openDialog = () =>
     new Promise((resolve) => {
@@ -10272,20 +11261,11 @@ function showStorageRepairDialog(options = {}) {
       cbTimeline.focus();
     });
 
-  const resultPromise = poseChronoConfirmDialogQueue.then(() => openDialog());
-  poseChronoConfirmDialogQueue = resultPromise
-    .then(() => undefined)
-    .catch(() => undefined);
-  return resultPromise;
+  return enqueuePoseChronoDialog(openDialog);
 }
 
 function showPreferencesPackageDialog(options = {}) {
-  const t = (key, fallback, vars = undefined) => {
-    if (typeof i18next !== "undefined" && typeof i18next.t === "function") {
-      return i18next.t(key, { defaultValue: fallback, ...(vars || {}) });
-    }
-    return fallback;
-  };
+  const t = getI18nText;
 
   const mode = options.mode === "import" ? "import" : "export";
   const available = {
@@ -10515,11 +11495,7 @@ function showPreferencesPackageDialog(options = {}) {
       }
     });
 
-  const resultPromise = poseChronoConfirmDialogQueue.then(() => openDialog());
-  poseChronoConfirmDialogQueue = resultPromise
-    .then(() => undefined)
-    .catch(() => undefined);
-  return resultPromise;
+  return enqueuePoseChronoDialog(openDialog);
 }
 
 if (typeof window !== "undefined") {
@@ -10633,12 +11609,7 @@ function showHotkeysModal() {
   modal.className = "modal-overlay";
 
   // Helper pour obtenir les traductions
-  const t = (key, fallback = "") => {
-    if (typeof i18next !== "undefined" && i18next.isInitialized) {
-      return i18next.t(key, { defaultValue: fallback });
-    }
-    return fallback;
-  };
+  const t = createI18nTextGetter(true);
 
   // Générer le contenu des catégories
   const generateCategorySection = (categoryKey, hotkeyKeys) => {
@@ -10801,9 +11772,8 @@ function showHotkeysModal() {
       });
 
       if (confirmed) {
-        Object.keys(DEFAULT_HOTKEYS).forEach((key) => {
-          CONFIG.HOTKEYS[key] = DEFAULT_HOTKEYS[key];
-        });
+        resetConfigHotkeysToDefaults();
+        enforceNonCustomizableConfigHotkeys();
         try {
           await PoseChronoStorage.remove(STORAGE_KEYS.HOTKEYS_DB);
           localStorage.removeItem(HOTKEYS_STORAGE_KEY);
@@ -11093,15 +12063,7 @@ function showHotkeysModal() {
  */
 async function saveHotkeysToStorage() {
   try {
-    const hotkeysToSave = {};
-    Object.keys(DEFAULT_HOTKEYS).forEach((key) => {
-      if (NON_CUSTOMIZABLE_HOTKEYS.has(key)) {
-        return;
-      }
-      if (CONFIG.HOTKEYS[key] !== DEFAULT_HOTKEYS[key]) {
-        hotkeysToSave[key] = CONFIG.HOTKEYS[key];
-      }
-    });
+    const hotkeysToSave = collectCustomHotkeysBindings();
 
     const normalized = normalizeHotkeysPayload({
       schemaVersion: STORAGE_SCHEMA_VERSION,
@@ -11133,11 +12095,7 @@ async function saveHotkeysToStorage() {
 async function loadHotkeysFromStorage() {
   try {
     // Hotkeys internes non customisables: toujours forcés à leur valeur par défaut.
-    NON_CUSTOMIZABLE_HOTKEYS.forEach((key) => {
-      if (DEFAULT_HOTKEYS[key]) {
-        CONFIG.HOTKEYS[key] = DEFAULT_HOTKEYS[key];
-      }
-    });
+    enforceNonCustomizableConfigHotkeys();
 
     const stored = await PoseChronoStorage.migrateFromLocalStorage(
       HOTKEYS_STORAGE_KEY,
@@ -11161,16 +12119,7 @@ async function loadHotkeysFromStorage() {
       );
     }
 
-    if (normalized.bindings && typeof normalized.bindings === "object") {
-      Object.keys(normalized.bindings).forEach((key) => {
-        if (NON_CUSTOMIZABLE_HOTKEYS.has(key)) {
-          return;
-        }
-        if (CONFIG.HOTKEYS.hasOwnProperty(key)) {
-          CONFIG.HOTKEYS[key] = normalized.bindings[key];
-        }
-      });
-    }
+    applyCustomHotkeysToConfig(normalized.bindings, { resetToDefaults: false });
   } catch (e) {
     console.error("Error loading hotkeys from storage:", e);
   }
@@ -11181,6 +12130,15 @@ async function loadHotkeysFromStorage() {
  * Retourne le nom de la fonction en conflit ou null
  */
 function findHotkeyConflict(hotkeyName, newValue) {
+  const hotkeysUtils = getHotkeysUtils();
+  if (hotkeysUtils?.findHotkeyConflict) {
+    return hotkeysUtils.findHotkeyConflict(
+      CONFIG.HOTKEYS,
+      hotkeyName,
+      newValue,
+      { drawingPrefix: "DRAWING_" },
+    );
+  }
   if (!newValue) return null; // Pas de conflit si vide
 
   // Déterminer la "zone" du raccourci (drawing vs global)
@@ -11218,12 +12176,7 @@ function findHotkeyConflict(hotkeyName, newValue) {
  * Permet d'éditer un raccourci clavier
  */
 function editHotkey(hotkeyName, buttonElement) {
-  const t = (key, fallback = "") => {
-    if (typeof i18next !== "undefined" && i18next.isInitialized) {
-      return i18next.t(key, { defaultValue: fallback });
-    }
-    return fallback;
-  };
+  const t = createI18nTextGetter(true);
 
   // Obtenir la description de la fonction et la valeur actuelle
   const functionName = t(`hotkeys.descriptions.${hotkeyName}`, hotkeyName);
@@ -12742,40 +13695,19 @@ function showReview() {
   hideMemoryOverlay();
 
   // === ENREGISTRER LA SESSION DANS L'HISTORIQUE ===
-  const sessionPoses = state.imagesSeen.length;
-  const sessionTime = state.totalSessionTime;
-  if (
-    sessionPoses > 0 &&
-    sessionTime > 0 &&
-    typeof recordSession === "function"
-  ) {
-    // Récupérer les détails de la session
-    const sessionDetails = {
-      mode: state.sessionMode || "classique",
-      memoryType: state.sessionMode === "memory" ? state.memoryType : null,
-      customQueue:
-        state.sessionMode === "custom" && state.customQueue
-          ? state.customQueue.map((step) => ({
-              type: step.type,
-              count: step.count,
-              duration: step.duration,
-            }))
-          : null,
-      images: state.imagesSeen.map((img) => {
-        // Sauvegarder les infos nécessaires pour le zoom et l'API Eagle
-        return {
-          id: img.id,
-          filePath: img.filePath,
-          path: img.path || img.filePath,
-          file: img.file || img.filePath,
-          ext: img.ext,
-          thumbnailURL: img.thumbnailURL || img.thumbnail || "",
-          thumbnail: img.thumbnail || img.thumbnailURL || "",
-          url: img.url,
-          name: img.name,
-        };
-      }),
-    };
+  const reviewSummary = computeReviewSessionSummary(
+    state.imagesSeen,
+    state.totalSessionTime,
+  );
+  const sessionPoses = reviewSummary.sessionPoses;
+  const sessionTime = reviewSummary.sessionTime;
+  if (reviewSummary.shouldRecord && typeof recordSession === "function") {
+    const sessionDetails = buildReviewSessionDetailsPayload({
+      sessionMode: state.sessionMode || "classique",
+      memoryType: state.memoryType,
+      customQueue: state.customQueue,
+      imagesSeen: state.imagesSeen,
+    });
     recordSession(sessionPoses, sessionTime, sessionDetails);
   }
 
@@ -12790,11 +13722,9 @@ function showReview() {
 
   const statsText = document.getElementById("review-stats");
 
-  const totalSeconds = state.totalSessionTime;
-  const mins = Math.floor(totalSeconds / 60);
-  const secs = totalSeconds % 60;
-
-  const count = state.imagesSeen.length;
+  const mins = reviewSummary.mins;
+  const secs = reviewSummary.secs;
+  const count = reviewSummary.sessionPoses;
   const poseWord = count <= 1 ? "pose" : "poses";
 
   const secWord = secs <= 1 ? "seconde" : "secondes";
@@ -12826,9 +13756,8 @@ function showReview() {
 
   const updateReviewDurationToggleLabel = () => {
     if (!reviewDurationToggle) return;
-    const label = state.reviewDurationsVisible
-      ? i18next.t("drawing.hideDurations", { defaultValue: "Hide durations" })
-      : i18next.t("drawing.showDurations", { defaultValue: "Show durations" });
+    const copy = getReviewDurationToggleCopy(state.reviewDurationsVisible);
+    const label = i18next.t(copy.i18nKey, { defaultValue: copy.defaultValue });
     reviewDurationToggle.innerHTML = `
       <svg xmlns="http://www.w3.org/2000/svg" height="12" viewBox="0 -960 960 960" width="12" fill="currentColor" aria-hidden="true" focusable="false">
         <path d="M360-840v-80h240v80H360Zm80 440h80v-240h-80v240Zm40 320q-74 0-139.5-28.5T226-186q-49-49-77.5-114.5T120-440q0-74 28.5-139.5T226-694q49-49 114.5-77.5T480-800q62 0 119 20t107 58l56-56 56 56-56 56q38 50 58 107t20 119q0 74-28.5 139.5T734-186q-49 49-114.5 77.5T480-80Zm0-80q116 0 198-82t82-198q0-116-82-198t-198-82q-116 0-198 82t-82 198q0 116 82 198t198 82Zm0-280Z"/>
@@ -12885,24 +13814,22 @@ function showReview() {
   function renderReviewGrid() {
     reviewGrid.innerHTML = "";
 
-    state.imagesSeen.forEach((image, index) => {
+    const reviewItems = buildReviewGridItemsModel(state.imagesSeen, {
+      isVideoFile,
+      getDurationSeconds: getSeenImageDurationSeconds,
+      isAnnotated: isReviewImageAnnotated,
+      includeDurations: state.reviewDurationsVisible,
+      formatDuration: formatReviewDuration,
+    });
+
+    reviewItems.forEach((item) => {
       const div = document.createElement("div");
       div.className = "review-item";
-      const isVideo = isVideoFile(image);
       const img = document.createElement("img");
-      // Utiliser le thumbnailURL si disponible, sinon fallback sur filePath
-      // Pour les vidéos, Eagle fournit déjà un thumbnail
-      const thumbnailSrc = image.thumbnailURL || image.thumbnail;
-      if (thumbnailSrc) {
-        img.src = thumbnailSrc;
-      } else {
-        img.src = isVideo
-          ? `file:///${image.filePath}`
-          : `file:///${image.filePath}`;
-      }
+      img.src = item.src;
 
       // Ajouter un indicateur vidéo
-      if (isVideo) {
+      if (item.isVideo) {
         div.classList.add("is-video");
         const videoIndicator = document.createElement("div");
         videoIndicator.className = "video-indicator";
@@ -12912,31 +13839,26 @@ function showReview() {
 
       const metaBadges = document.createElement("div");
       metaBadges.className = "review-meta-badges";
-      let hasMetaBadge = false;
 
-      if (state.reviewDurationsVisible) {
+      if (item.durationText) {
         const durationBadge = document.createElement("div");
         durationBadge.className = "review-duration-badge";
-        durationBadge.textContent = formatReviewDuration(
-          getSeenImageDurationSeconds(image),
-        );
+        durationBadge.textContent = item.durationText;
         metaBadges.appendChild(durationBadge);
-        hasMetaBadge = true;
       }
 
-      if (isReviewImageAnnotated(image)) {
+      if (item.annotated) {
         const annotatedBadge = document.createElement("div");
         annotatedBadge.className = "review-annotated-badge";
         annotatedBadge.innerHTML = ICONS.PENCIL;
         metaBadges.appendChild(annotatedBadge);
-        hasMetaBadge = true;
       }
 
-      if (hasMetaBadge) {
+      if (item.hasMetaBadge) {
         div.appendChild(metaBadges);
       }
 
-      div.onclick = () => openZoom(index);
+      div.onclick = () => openZoom(item.index);
 
       div.appendChild(img);
       reviewGrid.appendChild(div);
@@ -12949,21 +13871,26 @@ function showReview() {
         clearTimeout(reviewDurationHideTimer);
         reviewDurationHideTimer = null;
       }
+      const transition = getReviewDurationToggleTransition(
+        state.reviewDurationsVisible,
+      );
+      state.reviewDurationsVisible = !!transition.nextVisible;
+      saveReviewDurationsVisibility(state.reviewDurationsVisible);
+      updateReviewDurationToggleLabel();
 
-      if (state.reviewDurationsVisible) {
-        state.reviewDurationsVisible = false;
-        saveReviewDurationsVisibility(state.reviewDurationsVisible);
-        updateReviewDurationToggleLabel();
+      if (transition.animateHide) {
         animateHideReviewDurationBadges(() => {
           if (!state.reviewDurationsVisible) {
             renderReviewGrid();
           }
         });
-      } else {
-        state.reviewDurationsVisible = true;
-        saveReviewDurationsVisibility(state.reviewDurationsVisible);
-        updateReviewDurationToggleLabel();
+        return;
+      }
+
+      if (transition.renderBeforeShow) {
         renderReviewGrid();
+      }
+      if (transition.animateShow) {
         animateShowReviewDurationBadges();
       }
     };
@@ -12984,7 +13911,7 @@ function showReview() {
   function openZoom(index) {
     currentZoomIndex = index;
     window.currentZoomIndex = index;
-    const safeIndex = Math.max(0, Math.min(index, state.imagesSeen.length - 1));
+    const safeIndex = normalizeReviewZoomIndex(index, state.imagesSeen.length);
     const zoomImage = state.imagesSeen[safeIndex];
     if (!zoomImage || typeof window.openZoomForImage !== "function") return;
 
@@ -13905,25 +14832,12 @@ function updateTimerDisplay() {
     let totalRemainingSeconds = 0;
 
     if (state.sessionMode === "custom") {
-      // Temps restant de l'étape actuelle
-      totalRemainingSeconds = state.timeRemaining;
-
-      // Ajouter le temps de toutes les étapes suivantes
-      for (
-        let i = state.currentStepIndex + 1;
-        i < state.customQueue.length;
-        i++
-      ) {
-        const step = state.customQueue[i];
-        totalRemainingSeconds +=
-          step.duration * (step.type === "pause" ? 1 : step.count);
-      }
-
-      // Ajouter les poses restantes dans l'étape actuelle
-      if (currentStep && currentStep.type === "pose") {
-        const posesRemaining = currentStep.count - state.currentPoseInStep;
-        totalRemainingSeconds += posesRemaining * currentStep.duration;
-      }
+      totalRemainingSeconds = calculateCustomTotalRemainingSeconds(
+        state.customQueue,
+        state.currentStepIndex,
+        state.currentPoseInStep,
+        state.timeRemaining,
+      );
     } else {
       // Mode classique : juste le temps restant actuel
       totalRemainingSeconds = state.timeRemaining;
@@ -15166,24 +16080,29 @@ function addStepToQueue(isPause = false) {
     const sInput = document.getElementById("custom-s-input");
     const countInput = document.getElementById("custom-count-input");
 
-    let h = parseInt(hInput?.value) || 0;
-    let m = parseInt(mInput?.value) || 0;
-    let s = parseInt(sInput?.value) || 0;
+    const {
+      hours: h,
+      minutes: m,
+      seconds: s,
+      totalSeconds: parsedTotalSeconds,
+    } = readHmsInputValues(hInput, mInput, sInput);
 
-    let totalSeconds = h * 3600 + m * 60 + s;
+    let totalSeconds = parsedTotalSeconds;
 
     // LOGIQUE PAUSE PAR DÉFAUT
     if (isPause && totalSeconds === 0) {
       totalSeconds = 300;
     }
 
-    if (totalSeconds > 0) {
-      state.customQueue.push({
-        type: isPause ? "pause" : "pose",
-        count: isPause ? 1 : parseInt(countInput?.value) || 5,
-        duration: totalSeconds,
-        id: Date.now(),
-      });
+    const nextStep = createCustomQueueStep({
+      isPause,
+      duration: totalSeconds,
+      count: parseIntegerValue(countInput?.value, 5),
+      now: () => Date.now(),
+    });
+
+    if (nextStep) {
+      state.customQueue.push(nextStep);
 
       // On vide les champs
       if (hInput) hInput.value = "";
@@ -15235,12 +16154,12 @@ function renderCustomQueue() {
   if (USE_VIRTUAL_SCROLL) {
     // Fonction pour rendre chaque item
     const renderItem = (step, index) => {
-      const isPause = step.type === "pause";
-      const groupTotalSeconds = (isPause ? 1 : step.count) * step.duration;
-
-      const h = Math.floor(step.duration / 3600);
-      const m = Math.floor((step.duration % 3600) / 60);
-      const s = step.duration % 60;
+      const stepModel = getCustomStepDisplayModel(step);
+      const isPause = stepModel.isPause;
+      const groupTotalSeconds = stepModel.groupTotalSeconds;
+      const h = stepModel.hours;
+      const m = stepModel.minutes;
+      const s = stepModel.seconds;
 
       const color = isPause ? "#ffa500" : "#667eea";
       const bg = isPause
@@ -15317,13 +16236,13 @@ function renderCustomQueue() {
 
     container.innerHTML = state.customQueue
       .map((step, index) => {
-        const isPause = step.type === "pause";
-        const groupTotalSeconds = (isPause ? 1 : step.count) * step.duration;
+        const stepModel = getCustomStepDisplayModel(step);
+        const isPause = stepModel.isPause;
+        const groupTotalSeconds = stepModel.groupTotalSeconds;
         totalSessionSeconds += groupTotalSeconds;
-
-        const h = Math.floor(step.duration / 3600);
-        const m = Math.floor((step.duration % 3600) / 60);
-        const s = step.duration % 60;
+        const h = stepModel.hours;
+        const m = stepModel.minutes;
+        const s = stepModel.seconds;
 
         const color = isPause ? "#ffa500" : "#667eea";
         const bg = isPause
@@ -15386,12 +16305,7 @@ function renderCustomQueue() {
 
   // Calculer et afficher le total de session
   if (USE_VIRTUAL_SCROLL) {
-    let totalSessionSeconds = 0;
-    state.customQueue.forEach((step) => {
-      const isPause = step.type === "pause";
-      const groupTotalSeconds = (isPause ? 1 : step.count) * step.duration;
-      totalSessionSeconds += groupTotalSeconds;
-    });
+    const totalSessionSeconds = calculateCustomQueueTotalSeconds(state.customQueue);
     updateTotalDisplay(totalSessionSeconds);
   }
 }
@@ -15436,9 +16350,7 @@ async function loadSessionImages(imageIds, options = {}) {
     console.log("[Plugin] Items récupérés:", items.length);
 
     // Charger les images dans le state
-    state.images = items.filter((item) =>
-      MEDIA_EXTENSIONS.includes(item.ext.toLowerCase()),
-    );
+    state.images = filterSessionMediaItems(items);
 
     // Sauvegarder l'ordre original
     state.originalImages = [...state.images];
@@ -15448,33 +16360,35 @@ async function loadSessionImages(imageIds, options = {}) {
 
     // Mélanger si l'option est activée
     if (state.randomShuffle && state.images.length > 1) {
-      for (let i = state.images.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [state.images[i], state.images[j]] = [state.images[j], state.images[i]];
-      }
+      state.images = shuffleSessionMediaItems(state.images);
     }
 
+    const replayOptions = normalizeSessionReplayLoadOptions(options);
+
     // Configurer le mode de session
-    if (options.mode) {
+    if (replayOptions.mode) {
       // Utiliser switchMode pour gérer correctement l'affichage des panneaux
       if (typeof switchMode === "function") {
-        switchMode(options.mode);
+        switchMode(replayOptions.mode);
       } else {
         // Fallback si switchMode n'est pas disponible
-        state.sessionMode = options.mode;
+        state.sessionMode = replayOptions.mode;
         document.querySelectorAll("[data-mode]").forEach((btn) => {
-          btn.classList.toggle("active", btn.dataset.mode === options.mode);
+          btn.classList.toggle(
+            "active",
+            btn.dataset.mode === replayOptions.mode,
+          );
         });
       }
     }
 
     // Restaurer la custom queue si mode custom
     if (
-      options.mode === "custom" &&
-      options.customQueue &&
-      options.customQueue.length > 0
+      replayOptions.mode === "custom" &&
+      replayOptions.customQueue &&
+      replayOptions.customQueue.length > 0
     ) {
-      state.customQueue = [...options.customQueue];
+      state.customQueue = [...replayOptions.customQueue];
       // Rafraîchir l'affichage de la custom queue
       if (typeof renderCustomQueue === "function") {
         renderCustomQueue();
@@ -15482,20 +16396,20 @@ async function loadSessionImages(imageIds, options = {}) {
     }
 
     // Restaurer le type de mémoire si mode memory
-    if (options.mode === "memory" && options.memoryType) {
-      state.memoryType = options.memoryType;
+    if (replayOptions.mode === "memory" && replayOptions.memoryType) {
+      state.memoryType = replayOptions.memoryType;
       // Mettre à jour l'UI du type de mémoire
       document.querySelectorAll("[data-memory-type]").forEach((btn) => {
         btn.classList.toggle(
           "active",
-          btn.dataset.memoryType === options.memoryType,
+          btn.dataset.memoryType === replayOptions.memoryType,
         );
       });
     }
 
     // Configurer la durée si fournie
-    if (options.duration) {
-      state.selectedDuration = Math.round(options.duration);
+    if (replayOptions.duration) {
+      state.selectedDuration = replayOptions.duration;
       const durationInput = document.getElementById("duration-input");
       if (durationInput) {
         durationInput.value = state.selectedDuration;
@@ -15505,12 +16419,9 @@ async function loadSessionImages(imageIds, options = {}) {
     // Mettre à jour l'affichage
     const folderInfo = document.getElementById("folder-info");
     if (folderInfo) {
-      const imageCount = state.images.filter((item) =>
-        IMAGE_EXTENSIONS.includes(item.ext.toLowerCase()),
-      ).length;
-      const videoCount = state.images.filter((item) =>
-        VIDEO_EXTENSIONS.includes(item.ext.toLowerCase()),
-      ).length;
+      const mediaCounts = countSessionMediaTypes(state.images);
+      const imageCount = mediaCounts.imageCount;
+      const videoCount = mediaCounts.videoCount;
 
       let countMessage = "";
       if (imageCount > 0) {
@@ -15562,33 +16473,13 @@ async function loadSessionImages(imageIds, options = {}) {
 // Exposer la fonction globalement
 window.loadSessionImages = loadSessionImages;
 
-// Met à jour le nombre de poses (count)
-window.updateStep = function (index, field, value) {
-  const val = parseInt(value) || 0;
-  if (state.customQueue[index]) {
-    state.customQueue[index][field] = val;
-    // On relance le rendu pour mettre à jour les totaux écrits
-    renderCustomQueue();
-    if (typeof saveCustomQueue === "function") saveCustomQueue();
-  }
-};
-
 // Met à jour les heures, minutes ou secondes d'une ligne
 window.updateStepHMS = function (index, type, value) {
   const step = state.customQueue[index];
   if (!step) return;
 
-  let h = Math.floor(step.duration / 3600);
-  let m = Math.floor((step.duration % 3600) / 60);
-  let s = step.duration % 60;
-
-  const val = parseInt(value) || 0;
-  if (type === "h") h = val;
-  if (type === "m") m = val;
-  if (type === "s") s = val;
-
-  step.duration = h * 3600 + m * 60 + s;
-  if (step.duration <= 0) step.duration = 1;
+  const result = updateCustomStepDurationFromUnit(step, type, value, 1);
+  if (!result.updated) return;
 
   // === IMPORTANT : Si la pause actuellement active est modifiée, mettre à jour le timer en direct ===
   if (state.isPlaying && state.sessionMode === "custom") {
@@ -15631,30 +16522,245 @@ window.removeStepFromQueue = function (index) {
 };
 
 function updateStartButtonState() {
-  if (state.sessionMode === "custom") {
-    startBtn.disabled = state.customQueue.length === 0;
-  } else if (state.sessionMode === "relax") {
-    startBtn.disabled = false;
-  } else {
-    startBtn.disabled = state.selectedDuration <= 0;
-  }
-
-  startBtn.style.opacity = startBtn.disabled ? "0.5" : "1";
+  const startState = SESSION_MODE_UI_UTILS?.resolveStartButtonUiState
+    ? SESSION_MODE_UI_UTILS.resolveStartButtonUiState({
+        sessionMode: state.sessionMode,
+        customQueueLength: state.customQueue.length,
+        selectedDuration: state.selectedDuration,
+      })
+    : (() => {
+        const disabled =
+          state.sessionMode === "custom"
+            ? state.customQueue.length === 0
+            : state.sessionMode === "relax"
+              ? false
+              : state.selectedDuration <= 0;
+        return {
+          disabled,
+          opacity: disabled ? "0.5" : "1",
+        };
+      })();
+  startBtn.disabled = !!startState.disabled;
+  startBtn.style.opacity = startState.opacity;
 
   // Disable progressive blur button in relax mode
   if (homeProgressiveBlurBtn) {
-    const isRelax = state.sessionMode === "relax";
-    homeProgressiveBlurBtn.disabled = isRelax;
-    homeProgressiveBlurBtn.style.opacity = isRelax ? "0.5" : "1";
-    homeProgressiveBlurBtn.classList.toggle("disabled", isRelax);
+    const relaxState = SESSION_MODE_UI_UTILS?.resolveHomeProgressiveBlurState
+      ? SESSION_MODE_UI_UTILS.resolveHomeProgressiveBlurState(state.sessionMode)
+      : {
+          disabled: state.sessionMode === "relax",
+          opacity: state.sessionMode === "relax" ? "0.5" : "1",
+          classDisabled: state.sessionMode === "relax",
+        };
+    homeProgressiveBlurBtn.disabled = !!relaxState.disabled;
+    homeProgressiveBlurBtn.style.opacity = relaxState.opacity;
+    homeProgressiveBlurBtn.classList.toggle(
+      "disabled",
+      !!relaxState.classDisabled,
+    );
   }
 }
 
-window.removeStepFromQueue = function (index) {
-  state.customQueue.splice(index, 1);
-  renderCustomQueue();
-  updateStartButtonState();
-};
+function parseIntegerValue(value, fallback = 0) {
+  if (SESSION_TIME_INPUT_UTILS?.toInt) {
+    return SESSION_TIME_INPUT_UTILS.toInt(value, fallback);
+  }
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function clampIntegerValue(value, min, max, fallback = 0) {
+  if (SESSION_TIME_INPUT_UTILS?.clampInt) {
+    return SESSION_TIME_INPUT_UTILS.clampInt(value, min, max, fallback);
+  }
+  const num = parseIntegerValue(value, fallback);
+  const safeMin = Math.min(Number(min) || 0, Number(max) || 0);
+  const safeMax = Math.max(Number(min) || 0, Number(max) || 0);
+  return Math.min(safeMax, Math.max(safeMin, num));
+}
+
+function readInputNumberBound(input, attrName, fallback = 0) {
+  if (SESSION_TIME_INPUT_UTILS?.readInputBound) {
+    return SESSION_TIME_INPUT_UTILS.readInputBound(input, attrName, fallback);
+  }
+  if (!input || typeof input.getAttribute !== "function") return fallback;
+  if (!input.hasAttribute(attrName)) return fallback;
+  return parseIntegerValue(input.getAttribute(attrName), fallback);
+}
+
+function readHmsInputValues(hoursInput, minutesInput, secondsInput) {
+  if (SESSION_TIME_INPUT_UTILS?.readHmsInputs) {
+    return SESSION_TIME_INPUT_UTILS.readHmsInputs(
+      hoursInput,
+      minutesInput,
+      secondsInput,
+    );
+  }
+  const hours = parseIntegerValue(hoursInput?.value, 0);
+  const minutes = parseIntegerValue(minutesInput?.value, 0);
+  const seconds = parseIntegerValue(secondsInput?.value, 0);
+  return {
+    hours,
+    minutes,
+    seconds,
+    totalSeconds: hours * 3600 + minutes * 60 + seconds,
+  };
+}
+
+function readMinutesSecondsInputValues(minutesInput, secondsInput) {
+  if (SESSION_TIME_INPUT_UTILS?.readMinutesSecondsInputs) {
+    return SESSION_TIME_INPUT_UTILS.readMinutesSecondsInputs(
+      minutesInput,
+      secondsInput,
+    );
+  }
+  const minutes = parseIntegerValue(minutesInput?.value, 0);
+  const seconds = parseIntegerValue(secondsInput?.value, 0);
+  return {
+    minutes,
+    seconds,
+    totalSeconds: minutes * 60 + seconds,
+  };
+}
+
+function hmsToTotalSeconds(hours, minutes, seconds) {
+  if (SESSION_TIME_INPUT_UTILS?.hmsToSeconds) {
+    return SESSION_TIME_INPUT_UTILS.hmsToSeconds(hours, minutes, seconds);
+  }
+  return (
+    parseIntegerValue(hours, 0) * 3600 +
+    parseIntegerValue(minutes, 0) * 60 +
+    parseIntegerValue(seconds, 0)
+  );
+}
+
+function resolveProgressiveBlurControlState(disabled, keepActive = false) {
+  if (SESSION_MODE_UI_UTILS?.resolveProgressiveBlurControlState) {
+    return SESSION_MODE_UI_UTILS.resolveProgressiveBlurControlState({
+      disabled,
+      keepActive,
+    });
+  }
+  return {
+    disabled: !!disabled,
+    opacity: disabled ? "0.3" : "1",
+    pointerEvents: disabled ? "none" : "all",
+    shouldClearActive: !!disabled && !keepActive,
+  };
+}
+
+function applyProgressiveBlurControlState(button, controlState) {
+  if (!button || !controlState) return;
+  if (controlState.shouldClearActive) {
+    button.classList.remove("active");
+  }
+  button.style.opacity = controlState.opacity;
+  button.style.pointerEvents = controlState.pointerEvents;
+}
+
+function getDurationFromButton(button, fallback = 0) {
+  if (SESSION_DURATION_BUTTONS_UTILS?.getButtonDuration) {
+    return SESSION_DURATION_BUTTONS_UTILS.getButtonDuration(button, fallback);
+  }
+  const parsed = Number.parseInt(button?.dataset?.duration, 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function clearDurationButtonsActive(buttons) {
+  if (SESSION_DURATION_BUTTONS_UTILS?.clearActiveDurationButtons) {
+    SESSION_DURATION_BUTTONS_UTILS.clearActiveDurationButtons(buttons);
+    return;
+  }
+  if (!buttons) return;
+  buttons.forEach((btn) => btn.classList.remove("active"));
+}
+
+function toggleDurationButtonsForValue(buttons, activeDuration) {
+  if (SESSION_DURATION_BUTTONS_UTILS?.setActiveDurationButtons) {
+    SESSION_DURATION_BUTTONS_UTILS.setActiveDurationButtons(
+      buttons,
+      activeDuration,
+    );
+    return;
+  }
+  if (!buttons) return;
+  buttons.forEach((btn) =>
+    btn.classList.toggle("active", getDurationFromButton(btn) === activeDuration),
+  );
+}
+
+function syncClassicDurationButtons(classicPanel) {
+  const classicBtns = classicPanel?.querySelectorAll(".duration-btn");
+  toggleDurationButtonsForValue(classicBtns, state.selectedDuration);
+}
+
+function resolveMemoryDurationTarget(memoryType, memoryDuration, selectedDuration) {
+  if (SESSION_MODE_UI_UTILS?.resolveMemoryDurationTarget) {
+    return SESSION_MODE_UI_UTILS.resolveMemoryDurationTarget({
+      memoryType,
+      memoryDuration,
+      selectedDuration,
+    });
+  }
+  const type =
+    String(memoryType || "flash").toLowerCase() === "progressive"
+      ? "progressive"
+      : "flash";
+  return {
+    memoryType: type,
+    duration: type === "flash" ? memoryDuration : selectedDuration,
+  };
+}
+
+function syncMemoryDurationButtons() {
+  const target = resolveMemoryDurationTarget(
+    state.memoryType,
+    state.memoryDuration,
+    state.selectedDuration,
+  );
+  const memoryFlashBtns = memoryFlashSettings?.querySelectorAll(".duration-btn");
+  const memoryProgressiveBtns =
+    memoryProgressiveSettings?.querySelectorAll(".duration-btn");
+  if (target.memoryType === "flash") {
+    toggleDurationButtonsForValue(memoryFlashBtns, target.duration);
+    return;
+  }
+  toggleDurationButtonsForValue(memoryProgressiveBtns, target.duration);
+}
+
+function resolveModeTransitionPlan(mode, previousMode) {
+  if (SESSION_MODE_UI_UTILS?.resolveModeTransition) {
+    return SESSION_MODE_UI_UTILS.resolveModeTransition(mode, previousMode);
+  }
+  const normalizedMode = String(mode || "classique").toLowerCase();
+  const previous = String(previousMode || "").toLowerCase();
+  const outgoingPanelKey =
+    previous === "classique" || previous === "custom" || previous === "memory"
+      ? previous
+      : null;
+  return {
+    mode: normalizedMode,
+    isRelax: normalizedMode === "relax",
+    incomingPanelKey:
+      normalizedMode === "classique" ||
+      normalizedMode === "custom" ||
+      normalizedMode === "memory"
+        ? normalizedMode
+        : null,
+    outgoingPanelKey,
+    hideAllPanelsFirst:
+      normalizedMode !== "relax" && (previous === "" || previous === "relax"),
+    relaxFrozenPanelKey:
+      normalizedMode === "relax"
+        ? previous === "memory"
+          ? "memory"
+          : previous === "custom"
+            ? "custom"
+            : "classique"
+        : null,
+    disableProgressiveBlur: normalizedMode === "memory" || normalizedMode === "relax",
+  };
+}
 
 function switchMode(mode) {
   const classicPanel = document.getElementById("mode-classique-settings");
@@ -15664,10 +16770,15 @@ function switchMode(mode) {
   const container = document.querySelector(".settings-modes-container");
 
   if (!classicPanel || !customPanel || !memoryPanel) return;
-
   if (state.sessionMode === mode) return;
 
   const previousMode = state.sessionMode;
+  const transitionPlan = resolveModeTransitionPlan(mode, previousMode);
+  const panelByKey = {
+    classique: classicPanel,
+    custom: customPanel,
+    memory: memoryPanel,
+  };
 
   state.sessionMode = mode;
 
@@ -15683,103 +16794,30 @@ function switchMode(mode) {
   customPanel.classList.remove("mode-frozen");
   memoryPanel.classList.remove("mode-frozen");
 
-  if (mode === "relax") {
-    // Au d\u00e9marrage (previousMode vide), geler le panneau classique par d\u00e9faut
-    const activePanel =
-      previousMode === "classique" || previousMode === ""
-        ? classicPanel
-        : previousMode === "memory"
-          ? memoryPanel
-          : customPanel;
-    if (activePanel) {
-      activePanel.classList.add("mode-frozen");
-      // S'assurer que le panneau gel\u00e9 est visible
-      activePanel.style.display = "block";
-      activePanel.classList.add("fade-in");
-      activePanel.classList.remove("fade-out");
-    }
+  if (transitionPlan.isRelax) {
+    const activePanel = panelByKey[transitionPlan.relaxFrozenPanelKey] || classicPanel;
+    activePanel.classList.add("mode-frozen");
+    activePanel.style.display = "block";
+    activePanel.classList.add("fade-in");
+    activePanel.classList.remove("fade-out");
   } else {
-    let incoming, outgoing;
+    let incoming = panelByKey[transitionPlan.incomingPanelKey] || null;
+    let outgoing = panelByKey[transitionPlan.outgoingPanelKey] || null;
 
-    // D\u00e9terminer quel panneau afficher
     if (mode === "classique") {
-      incoming = classicPanel;
-
-      // Activer les bons boutons de dur\u00e9e pour le mode classique
-      const classicBtns = classicPanel?.querySelectorAll(".duration-btn");
-      if (classicBtns) {
-        classicBtns.forEach((btn) => {
-          btn.classList.toggle(
-            "active",
-            parseInt(btn.dataset.duration) === state.selectedDuration,
-          );
-        });
-      }
-    } else if (mode === "custom") {
-      incoming = customPanel;
-
-      // Rafra\u00eechir l'affichage de la file personnalis\u00e9e
-      if (typeof renderCustomQueue === "function") {
-        renderCustomQueue();
-      }
-    } else if (mode === "memory") {
-      incoming = memoryPanel;
-
-      // Activer les bons boutons de durée pour le mode mémoire
-      const memoryFlashBtns =
-        memoryFlashSettings?.querySelectorAll(".duration-btn");
-      const memoryProgressiveBtns =
-        memoryProgressiveSettings?.querySelectorAll(".duration-btn");
-      if (state.memoryType === "flash" && memoryFlashBtns) {
-        memoryFlashBtns.forEach((btn) => {
-          btn.classList.toggle(
-            "active",
-            parseInt(btn.dataset.duration) === state.memoryDuration,
-          );
-        });
-      } else if (state.memoryType === "progressive" && memoryProgressiveBtns) {
-        memoryProgressiveBtns.forEach((btn) => {
-          btn.classList.toggle(
-            "active",
-            parseInt(btn.dataset.duration) === state.selectedDuration,
-          );
-        });
-      }
+      syncClassicDurationButtons(classicPanel);
+    } else if (mode === "custom" && typeof renderCustomQueue === "function") {
+      renderCustomQueue();
     }
 
-    // Activer les bons boutons de durée pour le mode mémoire
-    const memoryFlashBtns =
-      memoryFlashSettings?.querySelectorAll(".duration-btn");
-    const memoryProgressiveBtns =
-      memoryProgressiveSettings?.querySelectorAll(".duration-btn");
-    if (state.memoryType === "flash" && memoryFlashBtns) {
-      memoryFlashBtns.forEach((btn) => {
-        btn.classList.toggle(
-          "active",
-          parseInt(btn.dataset.duration) === state.memoryDuration,
-        );
-      });
-    } else if (state.memoryType === "progressive" && memoryProgressiveBtns) {
-      memoryProgressiveBtns.forEach((btn) => {
-        btn.classList.toggle(
-          "active",
-          parseInt(btn.dataset.duration) === state.selectedDuration,
-        );
-      });
-    }
-    // D\u00e9terminer quel panneau masquer
-    if (previousMode === "classique") {
-      outgoing = classicPanel;
-    } else if (previousMode === "custom") {
-      outgoing = customPanel;
-    } else if (previousMode === "memory") {
-      outgoing = memoryPanel;
-    } else if (previousMode === "" || previousMode === "relax") {
-      // Si on vient du mode relax, on masque tous les panneaux
-      [classicPanel, customPanel, memoryPanel].forEach((p) => {
-        p.classList.remove("mode-frozen");
-        p.style.display = "none";
-        p.classList.add("fade-out");
+    // Garder les états de boutons mémoire synchronisés même hors mode mémoire
+    syncMemoryDurationButtons();
+
+    if (transitionPlan.hideAllPanelsFirst) {
+      [classicPanel, customPanel, memoryPanel].forEach((panel) => {
+        panel.classList.remove("mode-frozen");
+        panel.style.display = "none";
+        panel.classList.add("fade-out");
       });
       outgoing = null;
     }
@@ -15817,7 +16855,6 @@ function switchMode(mode) {
         incoming.style.visibility = "visible";
         const newHeight = incoming.offsetHeight;
         if (container) container.style.minHeight = newHeight + "px";
-
         incoming.classList.replace("fade-out", "fade-in");
       }
 
@@ -15838,28 +16875,18 @@ function switchMode(mode) {
 
   updateStartButtonState();
 
-  // Gérer l'état du bouton flou progressif selon le mode
-  if (mode === "memory" || mode === "relax") {
-    // Désactiver le flou progressif en mode mémoire et relax
-    if (progressiveBlurBtn) {
-      progressiveBlurBtn.classList.remove("active");
-      progressiveBlurBtn.style.opacity = "0.3";
-      progressiveBlurBtn.style.pointerEvents = "none";
-    }
-    if (homeProgressiveBlurBtn) {
-      homeProgressiveBlurBtn.classList.remove("active");
-      homeProgressiveBlurBtn.style.opacity = "0.3";
-      homeProgressiveBlurBtn.style.pointerEvents = "none";
-    }
+  if (transitionPlan.disableProgressiveBlur) {
+    const disabledState = resolveProgressiveBlurControlState(true, false);
+    applyProgressiveBlurControlState(progressiveBlurBtn, disabledState);
+    applyProgressiveBlurControlState(homeProgressiveBlurBtn, disabledState);
   } else {
-    // Réactiver le flou progressif dans les autres modes (classique et custom)
     if (progressiveBlurBtn && !state.isBlurEnabled) {
-      progressiveBlurBtn.style.opacity = "1";
-      progressiveBlurBtn.style.pointerEvents = "all";
+      const enabledState = resolveProgressiveBlurControlState(false, true);
+      applyProgressiveBlurControlState(progressiveBlurBtn, enabledState);
     }
     if (homeProgressiveBlurBtn && !state.isBlurEnabled) {
-      homeProgressiveBlurBtn.style.opacity = "1";
-      homeProgressiveBlurBtn.style.pointerEvents = "all";
+      const enabledState = resolveProgressiveBlurControlState(false, true);
+      applyProgressiveBlurControlState(homeProgressiveBlurBtn, enabledState);
     }
   }
 }
@@ -15874,52 +16901,42 @@ function setupCustomModeEvents() {
 }
 
 function formatTime(seconds) {
-  if (seconds <= 0) return "0s";
-
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = seconds % 60;
-
-  let parts = [];
-  if (h > 0) parts.push(h + "h");
-  if (m > 0) parts.push(m + "m");
-  if (s > 0 || parts.length === 0) parts.push(s + "s");
-
+  if (SESSION_TIME_FORMAT_UTILS?.formatCompactDuration) {
+    return SESSION_TIME_FORMAT_UTILS.formatCompactDuration(seconds);
+  }
+  const safe = Math.max(0, Math.floor(Number(seconds) || 0));
+  if (safe <= 0) return "0s";
+  const h = Math.floor(safe / 3600);
+  const m = Math.floor((safe % 3600) / 60);
+  const s = safe % 60;
+  const parts = [];
+  if (h > 0) parts.push(`${h}h`);
+  if (m > 0) parts.push(`${m}m`);
+  if (s > 0 || parts.length === 0) parts.push(`${s}s`);
   return parts.join(" ");
 }
 
 function handleCustomNext() {
-  let currentStep = state.customQueue[state.currentStepIndex];
+  const advanced = advanceCustomSessionCursor(
+    state.customQueue,
+    state.currentStepIndex,
+    state.currentPoseInStep,
+  );
 
-  if (!currentStep) {
+  if (advanced.finished) {
     stopTimer();
     showReview();
     return;
   }
 
-  if (state.currentPoseInStep < currentStep.count) {
-    state.currentPoseInStep++;
-  } else {
-    state.currentStepIndex++;
-    state.currentPoseInStep = 1;
+  state.currentStepIndex = advanced.currentStepIndex;
+  state.currentPoseInStep = advanced.currentPoseInStep;
 
-    if (state.currentStepIndex < state.customQueue.length) {
-      const nextStep = state.customQueue[state.currentStepIndex];
-      if (nextStep.type === "pause") {
-        playSound("pause");
-      } else {
-        playSound("group");
-      }
-    }
+  if (advanced.soundCue) {
+    playSound(advanced.soundCue);
   }
 
-  if (state.currentStepIndex >= state.customQueue.length) {
-    stopTimer();
-    showReview();
-    return;
-  }
-
-  let nextStep = state.customQueue[state.currentStepIndex];
+  const nextStep = advanced.nextStep;
   state.selectedDuration = nextStep.duration;
   state.timeRemaining = nextStep.duration;
 
@@ -15937,10 +16954,10 @@ function handleCustomNext() {
 }
 
 window.updateStep = function (index, field, value) {
-  const newValue = parseInt(value);
-  if (isNaN(newValue) || newValue < 1) return;
-
-  state.customQueue[index][field] = newValue;
+  const step = state.customQueue[index];
+  if (!step) return;
+  const updated = updateCustomStepPositiveIntField(step, field, value, 1);
+  if (!updated.updated) return;
 
   renderCustomQueue();
 };
@@ -15954,25 +16971,18 @@ function makeInputScrubbable(input) {
 
   input.onmousedown = (e) => {
     startX = e.clientX;
-    startVal = parseInt(input.value) || 0;
+    startVal = parseIntegerValue(input.value, 0);
 
     const onMouseMove = (e) => {
       const delta = Math.round(
         (e.clientX - startX) / UI_CONSTANTS.SCRUB_SENSITIVITY,
       );
-      let newVal = startVal + delta;
+      const newVal = startVal + delta;
+      const min = readInputNumberBound(input, "min", 0);
+      const max = readInputNumberBound(input, "max", 999);
+      const clampedValue = clampIntegerValue(newVal, min, max, min);
 
-      const min = input.hasAttribute("min")
-        ? parseInt(input.getAttribute("min"))
-        : 0;
-      const max = input.hasAttribute("max")
-        ? parseInt(input.getAttribute("max"))
-        : 999;
-
-      if (newVal < min) newVal = min;
-      if (newVal > max) newVal = max;
-
-      input.value = newVal;
+      input.value = clampedValue;
 
       // Utilisation de la version debouncée pour éviter trop d'appels
       debouncedChronoSync();
@@ -15996,7 +17006,7 @@ function makeInputScrubbable(input) {
 // DRAG
 
 window.dragStep = function (e, index) {
-  dragSourceIndex = parseInt(index);
+  dragSourceIndex = parseIntegerValue(index, -1);
   isDuplicatingWithAlt = e.altKey;
 
   const row = e.target.closest(".step-item");
@@ -16040,42 +17050,27 @@ window.dropStep = function (e, targetIndex) {
 
   let sIdx = dragSourceIndex;
   if (sIdx === null) {
-    sIdx = parseInt(e.dataTransfer.getData("text/plain"));
+    sIdx = parseIntegerValue(e.dataTransfer.getData("text/plain"), -1);
   }
 
-  const tIdx = parseInt(targetIndex);
-  if (isNaN(sIdx) || isNaN(tIdx)) return;
+  const tIdx = parseIntegerValue(targetIndex, -1);
+  if (sIdx < 0 || tIdx < 0) return;
 
   const rect = e.currentTarget.getBoundingClientRect();
   const isBelow = e.clientY - rect.top > rect.height / 2;
 
-  let finalIndex = isBelow ? tIdx + 1 : tIdx;
+  const result = applyCustomQueueDropOperation(
+    state.customQueue,
+    sIdx,
+    tIdx,
+    isBelow,
+    isDuplicatingWithAlt,
+  );
 
-  if (isDuplicatingWithAlt) {
-    // Mode duplication : créer une copie de l'élément
-    const itemToDuplicate = state.customQueue[sIdx];
-    const duplicatedItem = { ...itemToDuplicate };
-
-    // Ajuster l'index final si on duplique après la source
-    if (sIdx < finalIndex) {
-      finalIndex--;
-    }
-
-    state.customQueue.splice(finalIndex, 0, duplicatedItem);
+  if (result.changed) {
     renderCustomQueue();
   } else {
-    // Mode déplacement (comportement par défaut)
-    if (sIdx < finalIndex) {
-      finalIndex--;
-    }
-
-    if (sIdx !== finalIndex) {
-      const item = state.customQueue.splice(sIdx, 1)[0];
-      state.customQueue.splice(finalIndex, 0, item);
-      renderCustomQueue();
-    } else {
-      handleDragEnd();
-    }
+    handleDragEnd();
   }
 };
 

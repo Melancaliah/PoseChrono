@@ -19,6 +19,7 @@
     "verify:eagle-dist": "node scripts/verify-eagle-dist.js",
     "verify:desktop-dist": "node scripts/verify-desktop-dist.js",
     "verify:locales": "node scripts/verify-locales.js",
+    "verify:smoke": "node scripts/verify-smoke.js",
     "verify:builds": "node scripts/verify-builds.js"
   }
 }
