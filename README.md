@@ -40,3 +40,55 @@ If you need to install it manually, follow these steps:
 3. **Deploy Files:** Download the latest release and copy all files into the folder **EXCEPT** `manifest.json`.
 4. **Update Manifest:** Copy settings (description, keywords...) from the release manifest to your local one. **Do not touch the `"id"` field.**
 5. **Finalize:** Restart Eagle and start drawing!
+
+#
+
+### 🧪 Clean Eagle Export Folder (no standalone files)
+
+To avoid shipping desktop/standalone files inside the Eagle package, generate a clean plugin folder:
+
+```bash
+node scripts/release-eagle.js
+node scripts/verify-eagle-dist.js
+# or
+npm run release:eagle
+npm run verify:eagle-dist
+```
+
+This creates:
+
+`dist/eagle-plugin/`
+
+If this folder is currently imported and locked by Eagle, the script will automatically fallback to:
+
+`dist/eagle-plugin-<timestamp>/`
+
+Then in Eagle:
+
+1. `Plugins` > `Developer Options` > `Import Local Project`
+2. Select the output folder printed by the script (`dist/eagle-plugin/` or fallback timestamp folder)
+3. Use Eagle's `Package Plugin` from this imported project
+
+### 🖥️ Standalone Scaffold
+
+A dedicated desktop shell is available in:
+
+`apps/desktop/`
+
+It is intentionally isolated from Eagle packaging.
+
+Desktop release/verification helpers:
+
+```bash
+npm run release:desktop
+npm run verify:desktop-dist
+```
+
+If `dist/desktop-app/` is locked, release will fallback to `dist/desktop-app-<timestamp>/`.
+
+### ✅ Project-level checks
+
+```bash
+npm run verify:locales
+npm run verify:builds
+```

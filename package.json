@@ -1,0 +1,14 @@
+{
+  "name": "posechrono-tooling",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Tooling scripts for PoseChrono release and verification",
+  "scripts": {
+    "release:eagle": "node scripts/release-eagle.js",
+    "release:desktop": "node scripts/release-desktop.js",
+    "verify:eagle-dist": "node scripts/verify-eagle-dist.js",
+    "verify:desktop-dist": "node scripts/verify-desktop-dist.js",
+    "verify:locales": "node scripts/verify-locales.js",
+    "verify:builds": "node scripts/verify-builds.js"
+  }
+}
