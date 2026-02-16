@@ -11,6 +11,11 @@ const DESKTOP_DIST_DIR = path.join(DESKTOP_DIR, "dist");
 const DIST_ROOT = path.join(ROOT, "dist");
 const MANIFEST_PATH = path.join(ROOT, "manifest.json");
 const DESKTOP_PACKAGE_PATH = path.join(DESKTOP_DIR, "package.json");
+const SYNC_DESKTOP_VERSION_SCRIPT = path.join(
+  ROOT,
+  "scripts",
+  "sync-desktop-version-from-manifest.js",
+);
 
 function isWindowsSetupFileName(name) {
   return (
@@ -26,6 +31,21 @@ function toSafeVersion(value) {
     .trim()
     .replace(/[^0-9A-Za-z._-]/g, "-");
   return raw || "0.0.0";
+}
+
+function extractVersionFromSetupName(filePath) {
+  const fileName = path.basename(String(filePath || ""));
+  const poseChronoMatch = fileName.match(/^PoseChrono-Setup-(.+)\.exe$/i);
+  if (poseChronoMatch && poseChronoMatch[1]) {
+    return String(poseChronoMatch[1]).trim();
+  }
+  const desktopMatch = fileName.match(
+    /^posechrono-desktop-([0-9A-Za-z._-]+)-setup\.exe$/i,
+  );
+  if (desktopMatch && desktopMatch[1]) {
+    return String(desktopMatch[1]).trim();
+  }
+  return "";
 }
 
 function isSpawnEpermBuildError(error) {
@@ -140,7 +160,15 @@ async function main() {
     );
   }
 
-  console.log("[release:windows] Step 1/2: build unsigned Windows installer");
+  console.log(
+    "[release:windows] Step 0/3: sync desktop package version from manifest",
+  );
+  await runCommand("node", [SYNC_DESKTOP_VERSION_SCRIPT]);
+
+  const desktopPkgAfterSync = await readJson(DESKTOP_PACKAGE_PATH);
+  const desktopVersionAfterSync = String(desktopPkgAfterSync?.version || "");
+
+  console.log("[release:windows] Step 1/3: build unsigned Windows installer");
   let buildSkippedUsingExistingInstaller = false;
   let latestSetup = null;
   try {
@@ -164,7 +192,7 @@ async function main() {
     );
   }
 
-  console.log("[release:windows] Step 2/2: collect artifacts to dist/windows");
+  console.log("[release:windows] Step 2/3: collect artifacts to dist/windows");
   if (!latestSetup) {
     latestSetup = await findLatestWindowsSetup();
   }
@@ -177,8 +205,21 @@ async function main() {
     throw new Error("No setup .exe found in apps/desktop/dist");
   }
 
+  const releaseVersion = toSafeVersion(
+    manifestVersion || desktopVersionAfterSync || desktopVersion,
+  );
+  const sourceSetupVersion = toSafeVersion(extractVersionFromSetupName(latestSetup));
+  if (sourceSetupVersion && sourceSetupVersion !== releaseVersion) {
+    throw new Error(
+      [
+        "Installer version mismatch.",
+        `Expected ${releaseVersion} from manifest/package, got ${sourceSetupVersion} in ${path.basename(latestSetup)}.`,
+        "Run the Windows build again and ensure no stale installer is reused.",
+      ].join(" "),
+    );
+  }
+
   const windowsDistDir = await createIncrementedOutputDir(DIST_ROOT, "windows");
-  const releaseVersion = toSafeVersion(manifestVersion || desktopVersion);
   const setupName = `posechrono-desktop-${releaseVersion}-setup.exe`;
   const setupDest = path.join(windowsDistDir, setupName);
   await fsp.copyFile(latestSetup, setupDest);
@@ -190,7 +231,7 @@ async function main() {
   const releaseMeta = {
     generatedAt: new Date().toISOString(),
     manifestVersion,
-    desktopVersion,
+    desktopVersion: desktopVersionAfterSync || desktopVersion,
     setupFile: path.basename(setupDest),
     blockmapFile: blockmapCopied ? path.basename(blockmapDest) : null,
     source: path.relative(ROOT, latestSetup),

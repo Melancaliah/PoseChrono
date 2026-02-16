@@ -70,6 +70,11 @@
         ? defaultsInput.globalSettingsCollapsedCategories
         : ["maintenance"],
     );
+    const BASE_DEFAULT_PREFERRED_LANGUAGE =
+      typeof defaultsInput.preferredLanguage === "string" &&
+      defaultsInput.preferredLanguage.trim()
+        ? defaultsInput.preferredLanguage.trim().toLowerCase()
+        : "";
 
     const getDefaultPrefs = () => ({
       schemaVersion,
@@ -79,6 +84,7 @@
       reviewDurationsVisible: BASE_DEFAULT_REVIEW_DURATIONS_VISIBLE,
       hotkeysCollapsedCategories: BASE_DEFAULT_HOTKEYS_COLLAPSED,
       globalSettingsCollapsedCategories: BASE_DEFAULT_GLOBAL_SETTINGS_COLLAPSED,
+      preferredLanguage: BASE_DEFAULT_PREFERRED_LANGUAGE,
     });
 
     let cache = null;
@@ -130,6 +136,10 @@
       cache.globalSettingsCollapsedCategories = normalizeStringArray(
         cache.globalSettingsCollapsedCategories,
       );
+      cache.preferredLanguage =
+        typeof cache.preferredLanguage === "string"
+          ? cache.preferredLanguage.trim().toLowerCase()
+          : "";
 
       if (
         !Object.prototype.hasOwnProperty.call(parsed, "reviewDurationsVisible")
@@ -197,6 +207,8 @@
         case "hotkeysCollapsedCategories":
         case "globalSettingsCollapsedCategories":
           return normalizeStringArray(value);
+        case "preferredLanguage":
+          return typeof value === "string" ? value.trim().toLowerCase() : "";
         default:
           return value;
       }
@@ -242,6 +254,10 @@
           globalSettingsCollapsedCategories: normalizeStringArray(
             prefs.globalSettingsCollapsedCategories,
           ),
+          preferredLanguage:
+            typeof prefs.preferredLanguage === "string"
+              ? prefs.preferredLanguage.trim().toLowerCase()
+              : "",
         };
       },
       importData(data, optionsArg = {}) {
@@ -255,6 +271,7 @@
           "reviewDurationsVisible",
           "hotkeysCollapsedCategories",
           "globalSettingsCollapsedCategories",
+          "preferredLanguage",
         ];
         let changed = false;
         knownKeys.forEach((key) => {

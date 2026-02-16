@@ -8,6 +8,7 @@ const { spawnSync } = require("child_process");
 const ROOT = path.resolve(__dirname, "..");
 const DIST_ROOT = path.join(ROOT, "dist");
 const EAGLE_ZIP_DIR = path.join(DIST_ROOT, "eagle");
+const EAGLE_LATEST_DIR = path.join(DIST_ROOT, "eagle-plugin");
 
 // Keep this list explicit to avoid desktop/standalone pollution.
 const REQUIRED_ENTRIES = [
@@ -149,6 +150,26 @@ async function listFilesRecursive(baseDir) {
   return out;
 }
 
+async function copyDirectoryRaw(srcDir, destDir) {
+  const stat = await fsp.stat(srcDir);
+  if (!stat.isDirectory()) {
+    throw new Error(`[release:eagle] copyDirectoryRaw source is not a directory: ${srcDir}`);
+  }
+
+  await fsp.mkdir(destDir, { recursive: true });
+  const entries = await fsp.readdir(srcDir, { withFileTypes: true });
+  for (const entry of entries) {
+    const srcPath = path.join(srcDir, entry.name);
+    const destPath = path.join(destDir, entry.name);
+    if (entry.isDirectory()) {
+      await copyDirectoryRaw(srcPath, destPath);
+    } else {
+      await fsp.mkdir(path.dirname(destPath), { recursive: true });
+      await fsp.copyFile(srcPath, destPath);
+    }
+  }
+}
+
 function bytesToHuman(size) {
   if (size < 1024) return `${size} B`;
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
@@ -193,6 +214,9 @@ async function createIncrementedOutputDir(rootDir, prefix) {
 }
 
 async function main() {
+  const args = new Set(process.argv.slice(2));
+  const shouldSyncLatestAlias = args.has("--update-latest");
+
   runNodeScriptOrThrow("scripts/build-shared-bundle.js");
 
   const missing = REQUIRED_ENTRIES.filter(
@@ -225,6 +249,23 @@ async function main() {
     copied.push(entry);
   }
 
+  let latestAliasSynced = false;
+  if (shouldSyncLatestAlias) {
+    try {
+      await fsp.rm(EAGLE_LATEST_DIR, { recursive: true, force: true });
+      await copyDirectoryRaw(outDir, EAGLE_LATEST_DIR);
+      latestAliasSynced = true;
+    } catch (err) {
+      if (!isLockError(err)) throw err;
+      console.warn(
+        `[release:eagle] Latest alias not updated (folder locked): ${EAGLE_LATEST_DIR}`,
+      );
+      console.warn(
+        "[release:eagle] Close Eagle (or release file locks) then rerun: npm run release:eagle:latest",
+      );
+    }
+  }
+
   const files = await listFilesRecursive(outDir);
   let totalBytes = 0;
   for (const file of files) {
@@ -249,6 +290,9 @@ async function main() {
 
   console.log("[release:eagle] Build complete");
   console.log(`[release:eagle] Output: ${outDir}`);
+  if (shouldSyncLatestAlias && latestAliasSynced) {
+    console.log(`[release:eagle] Latest alias updated: ${EAGLE_LATEST_DIR}`);
+  }
   console.log(`[release:eagle] Entries copied: ${copied.join(", ")}`);
   console.log(
     `[release:eagle] Files: ${files.length} | Size: ${bytesToHuman(totalBytes)}`,

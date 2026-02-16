@@ -1131,6 +1131,7 @@ const UI_PREFS_STORAGE_KEY = "posechrono-ui-prefs";
 const UI_PREFS_SCHEMA_VERSION = 1;
 const PREFS_PACKAGE_SCHEMA_VERSION = 1;
 const PREFS_PACKAGE_SECTION_KEYS = ["ui", "hotkeys", "plans", "timeline"];
+const PREF_KEY_PREFERRED_LANGUAGE = "preferredLanguage";
 const LEGACY_UI_PREF_KEYS = {
   REVIEW_DURATIONS_VISIBLE: "posechrono_review_durations_visible",
   GLOBAL_SETTINGS_COLLAPSED: "posechrono-global-settings-collapsed",
@@ -1158,6 +1159,17 @@ const I18N_LOCALE_FILE_BY_LANG = Object.freeze({
   ko: "ko_KR.json",
   ru: "ru_RU.json",
   zh: "zh_CN.json",
+});
+
+const I18N_LOCALE_TAG_BY_LANG = Object.freeze({
+  en: "en-US",
+  fr: "fr-FR",
+  de: "de-DE",
+  es: "es-ES",
+  ja: "ja-JP",
+  ko: "ko-KR",
+  ru: "ru-RU",
+  zh: "zh-CN",
 });
 
 function isBootTraceForcedByUser() {
@@ -1686,6 +1698,111 @@ const I18N_LOCALE_LANG_ALIASES = Object.freeze({
   "zh-hans": "zh",
 });
 
+const GLOBAL_SETTINGS_LANGUAGE_OPTIONS = Object.freeze([
+  {
+    value: "en",
+    key: "settings.global.languageEn",
+    fallback: "English",
+  },
+  {
+    value: "fr",
+    key: "settings.global.languageFr",
+    fallback: "Français",
+  },
+  {
+    value: "de",
+    key: "settings.global.languageDe",
+    fallback: "Deutsch",
+  },
+  {
+    value: "es",
+    key: "settings.global.languageEs",
+    fallback: "Español",
+  },
+  {
+    value: "ja",
+    key: "settings.global.languageJa",
+    fallback: "日本語",
+  },
+  {
+    value: "ko",
+    key: "settings.global.languageKo",
+    fallback: "한국어",
+  },
+  {
+    value: "ru",
+    key: "settings.global.languageRu",
+    fallback: "Русский",
+  },
+  {
+    value: "zh",
+    key: "settings.global.languageZh",
+    fallback: "中文 (简体)",
+  },
+]);
+
+function getGlobalSettingsLanguageOptionConfig(language) {
+  const normalizedLanguage = resolveI18nLanguage(language, "en");
+  return (
+    GLOBAL_SETTINGS_LANGUAGE_OPTIONS.find(
+      (entry) => entry.value === normalizedLanguage,
+    ) || GLOBAL_SETTINGS_LANGUAGE_OPTIONS[0]
+  );
+}
+
+function getGlobalSettingsLanguageLabel(language) {
+  const config = getGlobalSettingsLanguageOptionConfig(language);
+  return getGlobalSettingsText(
+    config?.key || "",
+    config?.fallback || String(language || "en"),
+  );
+}
+
+function resolveI18nLanguage(input, fallback = "en") {
+  const fallbackToken =
+    fallback === null || fallback === undefined
+      ? null
+      : String(fallback).trim().toLowerCase();
+
+  const normalized = String(input ?? "")
+    .trim()
+    .replace(/_/g, "-")
+    .toLowerCase();
+  if (!normalized) return fallbackToken;
+
+  if (Object.prototype.hasOwnProperty.call(I18N_LOCALE_FILE_BY_LANG, normalized)) {
+    return normalized;
+  }
+
+  const alias = I18N_LOCALE_LANG_ALIASES[normalized];
+  if (alias && Object.prototype.hasOwnProperty.call(I18N_LOCALE_FILE_BY_LANG, alias)) {
+    return alias;
+  }
+
+  const primary = normalized.split("-")[0];
+  if (
+    primary &&
+    Object.prototype.hasOwnProperty.call(I18N_LOCALE_FILE_BY_LANG, primary)
+  ) {
+    return primary;
+  }
+
+  return fallbackToken;
+}
+
+function readPreferredLanguageFromStorage() {
+  try {
+    if (typeof localStorage === "undefined") return null;
+    const raw = localStorage.getItem(UI_PREFS_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+    return resolveI18nLanguage(parsed[PREF_KEY_PREFERRED_LANGUAGE], null);
+  } catch (_) {
+    return null;
+  }
+}
+
 function initSharedFactory(factoryName, createArgs) {
   try {
     const factory = getSharedFactory(factoryName);
@@ -1751,10 +1868,23 @@ const SHARED_I18N_LOADER_UTILS = initSharedFactory(
     baseLang: "en",
     localeFileByLang: I18N_LOCALE_FILE_BY_LANG,
     localeAliases: I18N_LOCALE_LANG_ALIASES,
-    localeGetter:
-      typeof window !== "undefined" && typeof window.getLocale === "function"
-        ? () => window.getLocale()
-        : null,
+    localeGetter: () => {
+      const preferredLanguage = readPreferredLanguageFromStorage();
+      if (preferredLanguage) return preferredLanguage;
+      if (typeof window !== "undefined" && typeof window.getLocale === "function") {
+        return window.getLocale();
+      }
+      return null;
+    },
+    cacheEnabled: true,
+    cachePrefix: "posechrono-i18n-cache",
+    cacheTtlMs: 7 * 24 * 60 * 60 * 1000,
+    cacheVersion:
+      typeof window !== "undefined" &&
+      window.poseChronoDesktop &&
+      window.poseChronoDesktop.version
+        ? `desktop:${String(window.poseChronoDesktop.version)}`
+        : "",
   }),
 );
 
@@ -1920,6 +2050,7 @@ const UIPreferences = SHARED_UI_PREFERENCES_FACTORY
         reviewDurationsVisible: true,
         hotkeysCollapsedCategories: [],
         globalSettingsCollapsedCategories: ["maintenance"],
+        preferredLanguage: readPreferredLanguageFromStorage() || "",
       },
     })
   : {
@@ -1945,6 +2076,7 @@ const UIPreferences = SHARED_UI_PREFERENCES_FACTORY
           reviewDurationsVisible: true,
           hotkeysCollapsedCategories: [],
           globalSettingsCollapsedCategories: ["maintenance"],
+          preferredLanguage: "",
         };
       },
       importData() {
@@ -3936,6 +4068,13 @@ const GLOBAL_SETTINGS_ACTIONS = {
     fallback: "Change theme",
     icon: ICONS.THEME,
   },
+  language: {
+    id: "global-settings-language-select",
+    control: "language-select",
+    i18nKey: "settings.global.language",
+    fallback: "Language",
+    span: "full",
+  },
   titlebarAlwaysVisible: {
     id: "global-settings-titlebar-always-visible-btn",
     control: "checkbox",
@@ -3995,6 +4134,7 @@ const GLOBAL_SETTINGS_SECTIONS = [
         items: [
           { type: "action", key: "toggleGrid" },
           { type: "action", key: "toggleTheme" },
+          { type: "action", key: "language" },
         ],
       },
     ],
@@ -4200,6 +4340,102 @@ function renderGlobalSettingsSections() {
       const actionKey = item?.key || item?.actionKey || item?.id;
       const actionConfig = GLOBAL_SETTINGS_ACTIONS[actionKey];
       if (!actionConfig) return;
+      if (actionConfig.desktopOnly && !isDesktopStandaloneRuntime()) return;
+
+      if (actionConfig.control === "language-select") {
+        const languageRow = document.createElement("div");
+        languageRow.className = `global-settings-language-row ${
+          actionConfig.className || ""
+        } ${item.className || ""}`.trim();
+
+        const languageLabel = document.createElement("span");
+        const languageLabelId = `${actionConfig.id}-label`;
+        languageLabel.id = languageLabelId;
+        languageLabel.className = "global-settings-language-label hotkey-description";
+        if (actionConfig.i18nKey) {
+          languageLabel.setAttribute("data-i18n", actionConfig.i18nKey);
+        }
+        languageLabel.textContent = getGlobalSettingsText(
+          actionConfig.i18nKey || "",
+          actionConfig.fallback || "",
+        );
+        languageRow.appendChild(languageLabel);
+
+        const activeLanguage = resolveI18nLanguage(
+          typeof i18next !== "undefined"
+            ? i18next.resolvedLanguage || i18next.language
+            : UIPreferences.get(
+                PREF_KEY_PREFERRED_LANGUAGE,
+                readPreferredLanguageFromStorage() || "en",
+              ),
+          "en",
+        );
+        const activeLanguageConfig =
+          getGlobalSettingsLanguageOptionConfig(activeLanguage);
+
+        const languageSelect = document.createElement("div");
+        languageSelect.id = actionConfig.id;
+        languageSelect.className = "global-settings-language-select";
+        languageSelect.dataset.value = activeLanguageConfig.value;
+
+        const languageTrigger = document.createElement("button");
+        languageTrigger.type = "button";
+        languageTrigger.className = "global-settings-language-trigger";
+        languageTrigger.setAttribute("aria-haspopup", "listbox");
+        languageTrigger.setAttribute("aria-expanded", "false");
+        languageTrigger.setAttribute("aria-labelledby", languageLabelId);
+
+        const languageValue = document.createElement("span");
+        languageValue.className = "global-settings-language-value";
+        if (activeLanguageConfig.key) {
+          languageValue.setAttribute("data-i18n", activeLanguageConfig.key);
+        }
+        languageValue.textContent = getGlobalSettingsText(
+          activeLanguageConfig.key || "",
+          activeLanguageConfig.fallback || activeLanguageConfig.value,
+        );
+        languageTrigger.appendChild(languageValue);
+
+        const languageChevron = document.createElement("span");
+        languageChevron.className = "global-settings-language-chevron";
+        languageChevron.setAttribute("aria-hidden", "true");
+        languageChevron.textContent = "▾";
+        languageTrigger.appendChild(languageChevron);
+
+        const languageMenu = document.createElement("div");
+        languageMenu.className = "global-settings-language-menu";
+        languageMenu.setAttribute("role", "listbox");
+        languageMenu.hidden = true;
+
+        GLOBAL_SETTINGS_LANGUAGE_OPTIONS.forEach((languageOption) => {
+          const optionEl = document.createElement("button");
+          optionEl.type = "button";
+          optionEl.className = "global-settings-language-option";
+          optionEl.dataset.lang = languageOption.value;
+          optionEl.setAttribute("role", "option");
+          optionEl.setAttribute(
+            "aria-selected",
+            languageOption.value === activeLanguageConfig.value
+              ? "true"
+              : "false",
+          );
+          if (languageOption.key) {
+            optionEl.setAttribute("data-i18n", languageOption.key);
+          }
+          optionEl.textContent = getGlobalSettingsText(
+            languageOption.key || "",
+            languageOption.fallback || languageOption.value,
+          );
+          languageMenu.appendChild(optionEl);
+        });
+
+        languageSelect.appendChild(languageTrigger);
+        languageSelect.appendChild(languageMenu);
+        languageRow.appendChild(languageSelect);
+        applyGridSpan(languageRow, item, actionConfig);
+        actionsEl.appendChild(languageRow);
+        return;
+      }
 
       if (actionConfig.control === "mode-toggle") {
         const modeRow = document.createElement("div");
@@ -4844,6 +5080,7 @@ function updateGlobalSettingsModalState() {
   const defaultModeGroup = document.getElementById(
     "global-settings-default-mode-group",
   );
+  const languageSelect = document.getElementById("global-settings-language-select");
   const storageStatus = document.getElementById(
     "global-settings-storage-status",
   );
@@ -4890,6 +5127,67 @@ function updateGlobalSettingsModalState() {
         btn.classList.toggle("active", isActive);
         btn.setAttribute("aria-pressed", isActive ? "true" : "false");
       });
+  }
+
+  if (languageSelect) {
+    const activeLanguage = resolveI18nLanguage(
+      typeof i18next !== "undefined"
+        ? i18next.resolvedLanguage || i18next.language
+        : null,
+      resolveI18nLanguage(
+        UIPreferences.get(
+          PREF_KEY_PREFERRED_LANGUAGE,
+          readPreferredLanguageFromStorage() || "en",
+        ),
+        "en",
+      ),
+    );
+    const activeLanguageConfig =
+      getGlobalSettingsLanguageOptionConfig(activeLanguage);
+
+    if (languageSelect.tagName === "SELECT") {
+      if (languageSelect.value !== activeLanguageConfig.value) {
+        languageSelect.value = activeLanguageConfig.value;
+      }
+    } else {
+      languageSelect.dataset.value = activeLanguageConfig.value;
+
+      const languageValueEl = languageSelect.querySelector(
+        ".global-settings-language-value",
+      );
+      if (languageValueEl) {
+        if (activeLanguageConfig.key) {
+          languageValueEl.setAttribute("data-i18n", activeLanguageConfig.key);
+        } else {
+          languageValueEl.removeAttribute("data-i18n");
+        }
+        languageValueEl.textContent = getGlobalSettingsText(
+          activeLanguageConfig.key || "",
+          activeLanguageConfig.fallback || activeLanguageConfig.value,
+        );
+      }
+
+      const languageTrigger = languageSelect.querySelector(
+        ".global-settings-language-trigger",
+      );
+      const languageMenu = languageSelect.querySelector(
+        ".global-settings-language-menu",
+      );
+      if (languageTrigger) {
+        languageTrigger.setAttribute(
+          "aria-expanded",
+          languageMenu && !languageMenu.hidden ? "true" : "false",
+        );
+      }
+
+      languageSelect
+        .querySelectorAll(".global-settings-language-option[data-lang]")
+        .forEach((optionEl) => {
+          const isSelected = optionEl.dataset.lang === activeLanguageConfig.value;
+          optionEl.classList.toggle("active", isSelected);
+          optionEl.setAttribute("aria-selected", isSelected ? "true" : "false");
+        });
+    }
   }
 
   if (storageStatus) {
@@ -4962,17 +5260,166 @@ platformRuntimeOnHide(() => {
  * Charge manuellement les traductions depuis le fichier JSON
  * Eagle ne semble pas charger automatiquement les fichiers _locales
  */
+let runtimeI18nCacheVersionPromise = null;
 let translationsLoaded = false;
 
-async function loadBaseLocaleTranslations() {
-  if (typeof fetch !== "function") return null;
+async function resolveRuntimeI18nCacheVersion() {
+  if (runtimeI18nCacheVersionPromise) {
+    return runtimeI18nCacheVersionPromise;
+  }
+
+  runtimeI18nCacheVersionPromise = (async () => {
+    const desktopVersion =
+      typeof window !== "undefined" &&
+      window.poseChronoDesktop &&
+      window.poseChronoDesktop.version
+        ? String(window.poseChronoDesktop.version)
+        : "";
+
+    let manifestVersion = "";
+    if (typeof fetch === "function") {
+      try {
+        const response = await fetch("./manifest.json");
+        if (response && response.ok) {
+          const payload = await response.json();
+          if (payload && typeof payload.version === "string") {
+            manifestVersion = payload.version.trim();
+          }
+        }
+      } catch (_) {}
+    }
+
+    if (desktopVersion && manifestVersion) {
+      return `desktop:${desktopVersion}|manifest:${manifestVersion}`;
+    }
+    if (manifestVersion) return `manifest:${manifestVersion}`;
+    if (desktopVersion) return `desktop:${desktopVersion}`;
+    return "";
+  })();
+
+  return runtimeI18nCacheVersionPromise;
+}
+
+async function configureI18nLoaderCacheVersion() {
   try {
-    const response = await fetch(`./_locales/${I18N_LOCALE_FILE_BY_LANG.en}`);
+    const cacheVersion = await resolveRuntimeI18nCacheVersion();
+    if (!cacheVersion) return;
+    callPluginSharedMethod(
+      SHARED_I18N_LOADER_UTILS,
+      "setCacheVersion",
+      [cacheVersion],
+      null,
+      () => null,
+    );
+  } catch (_) {}
+}
+
+function getPreferredLanguageFromPreferences() {
+  return resolveI18nLanguage(
+    UIPreferences.get(
+      PREF_KEY_PREFERRED_LANGUAGE,
+      readPreferredLanguageFromStorage() || null,
+    ),
+    null,
+  );
+}
+
+function getCurrentI18nLanguage() {
+  const fromI18n = resolveI18nLanguage(
+    typeof i18next !== "undefined"
+      ? i18next.resolvedLanguage || i18next.language
+      : null,
+    null,
+  );
+  if (fromI18n) return fromI18n;
+  const fromPreferences = getPreferredLanguageFromPreferences();
+  if (fromPreferences) return fromPreferences;
+  return resolveI18nLanguage(
+    typeof window !== "undefined" && typeof window.getLocale === "function"
+      ? window.getLocale()
+      : null,
+    "en",
+  );
+}
+
+function getLocaleForLanguage(languageToken) {
+  const normalizedLanguage = resolveI18nLanguage(languageToken, "en");
+  const fallbackLocale =
+    typeof window !== "undefined" && typeof window.getLocale === "function"
+      ? String(window.getLocale() || I18N_LOCALE_TAG_BY_LANG.en)
+      : I18N_LOCALE_TAG_BY_LANG.en;
+
+  if (typeof i18next !== "undefined" && typeof i18next.t === "function") {
+    const localizedLocale = i18next.t("_locale", {
+      lng: normalizedLanguage,
+      defaultValue: fallbackLocale,
+    });
+    if (localizedLocale && localizedLocale !== "_locale") {
+      return String(localizedLocale);
+    }
+  }
+
+  return I18N_LOCALE_TAG_BY_LANG[normalizedLanguage] || fallbackLocale;
+}
+
+async function fetchLocaleTranslationsForLanguage(language) {
+  const normalizedLanguage = resolveI18nLanguage(language, null);
+  if (!normalizedLanguage) return null;
+
+  const fromShared = await callPluginSharedMethod(
+    SHARED_I18N_LOADER_UTILS,
+    "loadTranslationsForLanguage",
+    [normalizedLanguage],
+    null,
+    () => null,
+  );
+  if (fromShared && typeof fromShared === "object") {
+    return fromShared;
+  }
+
+  if (typeof fetch !== "function") return null;
+  const fileName = I18N_LOCALE_FILE_BY_LANG[normalizedLanguage];
+  if (!fileName) return null;
+  try {
+    const response = await fetch(`./_locales/${fileName}`);
     if (!response.ok) return null;
     return await response.json();
   } catch (_) {
     return null;
   }
+}
+
+async function ensureLocaleResourceLoaded(language) {
+  const normalizedLanguage = resolveI18nLanguage(language, null);
+  if (!normalizedLanguage) return false;
+  if (typeof i18next === "undefined") return false;
+
+  if (
+    typeof i18next.hasResourceBundle === "function" &&
+    i18next.hasResourceBundle(normalizedLanguage, "translation")
+  ) {
+    return true;
+  }
+
+  const payload = await fetchLocaleTranslationsForLanguage(normalizedLanguage);
+  if (!payload) return false;
+
+  if (typeof i18next.addResourceBundle === "function") {
+    i18next.addResourceBundle(
+      normalizedLanguage,
+      "translation",
+      payload,
+      true,
+      true,
+    );
+    return true;
+  }
+
+  return false;
+}
+
+async function loadBaseLocaleTranslations() {
+  return fetchLocaleTranslationsForLanguage("en");
 }
 
 async function loadTranslations() {
@@ -4982,6 +5429,8 @@ async function loadTranslations() {
   }
 
   try {
+    await configureI18nLoaderCacheVersion();
+
     const loadedByShared = await callPluginSharedMethod(
       SHARED_I18N_LOADER_UTILS,
       "loadTranslations",
@@ -5007,7 +5456,26 @@ async function loadTranslations() {
       },
     };
 
-    const activeLang = "en";
+    const preferredLanguage = resolveI18nLanguage(
+      getPreferredLanguageFromPreferences() ||
+        readPreferredLanguageFromStorage() ||
+        (typeof window !== "undefined" && typeof window.getLocale === "function"
+          ? window.getLocale()
+          : "en"),
+      "en",
+    );
+
+    if (preferredLanguage !== "en") {
+      const preferredTranslations =
+        await fetchLocaleTranslationsForLanguage(preferredLanguage);
+      if (preferredTranslations) {
+        resources[preferredLanguage] = {
+          translation: preferredTranslations,
+        };
+      }
+    }
+
+    const activeLang = resources[preferredLanguage] ? preferredLanguage : "en";
 
     if (typeof i18next !== "undefined") {
       const canInit = typeof i18next.init === "function";
@@ -5049,6 +5517,52 @@ async function loadTranslations() {
   } catch (error) {
     return false;
   }
+}
+
+async function applyPreferredLanguage(language, options = {}) {
+  const persist = options.persist !== false;
+  const preferredLanguage = resolveI18nLanguage(language, "en");
+
+  if (persist) {
+    UIPreferences.set(PREF_KEY_PREFERRED_LANGUAGE, preferredLanguage);
+  }
+
+  if (typeof i18next === "undefined") {
+    return false;
+  }
+
+  await loadTranslations();
+
+  let activeLanguage = preferredLanguage;
+  if (activeLanguage !== "en") {
+    const preferredLoaded = await ensureLocaleResourceLoaded(activeLanguage);
+    if (!preferredLoaded) {
+      activeLanguage = "en";
+    }
+  }
+  await ensureLocaleResourceLoaded("en");
+
+  if (typeof i18next.changeLanguage === "function") {
+    await i18next.changeLanguage(activeLanguage);
+  } else if (typeof i18next.init === "function") {
+    await i18next.init({
+      lng: activeLanguage,
+      fallbackLng: "en",
+    });
+  }
+
+  translateStaticHTML();
+  refreshSessionDescription(
+    state.sessionMode || CONFIG.defaultSessionMode || "classique",
+  );
+  updateButtonLabels();
+  updateSidebarTooltips();
+  updateGlobalSettingsModalState();
+  if (typeof updateFolderInfo === "function") {
+    updateFolderInfo();
+  }
+
+  return true;
 }
 
 /**
@@ -5222,8 +5736,9 @@ function translateStaticHTML() {
   });
 
   // Mettre à jour la langue du document et le titre
-  const locale = window.getLocale ? window.getLocale() : "fr-FR";
-  document.documentElement.lang = locale.split("-")[0];
+  const activeLanguage = getCurrentI18nLanguage();
+  const locale = getLocaleForLanguage(activeLanguage);
+  document.documentElement.lang = locale;
   document.title = `${i18next.t("app.title")} - ${i18next.t(getAppSubtitleI18nKey())}`;
   const metaDesc = document.querySelector('meta[name="description"]');
   if (metaDesc) metaDesc.setAttribute("content", i18next.t("app.description"));
@@ -5732,6 +6247,9 @@ function setupEventListeners() {
   const globalSettingsTitlebarAlwaysVisibleInput = document.getElementById(
     "global-settings-titlebar-always-visible-btn",
   );
+  const globalSettingsLanguageSelect = document.getElementById(
+    "global-settings-language-select",
+  );
   const globalSettingsDefaultModeGroup = document.getElementById(
     "global-settings-default-mode-group",
   );
@@ -5940,6 +6458,7 @@ function setupEventListeners() {
     globalSettingsToggleThemeBtn,
     globalSettingsOpenHotkeysBtn,
     globalSettingsTitlebarAlwaysVisibleInput,
+    globalSettingsLanguageSelect,
     globalSettingsDefaultModeGroup,
   });
 
@@ -6927,6 +7446,7 @@ function registerGlobalSettingsControlBindings(input = {}) {
   const globalSettingsOpenHotkeysBtn = input.globalSettingsOpenHotkeysBtn || null;
   const globalSettingsTitlebarAlwaysVisibleInput =
     input.globalSettingsTitlebarAlwaysVisibleInput || null;
+  const globalSettingsLanguageSelect = input.globalSettingsLanguageSelect || null;
   const globalSettingsDefaultModeGroup = input.globalSettingsDefaultModeGroup || null;
 
   if (!SESSION_CONTROLS_BINDINGS_UTILS?.bindGlobalSettingsControls) {
@@ -6934,12 +7454,14 @@ function registerGlobalSettingsControlBindings(input = {}) {
     return;
   }
   SESSION_CONTROLS_BINDINGS_UTILS.bindGlobalSettingsControls({
+    documentRef: document,
     globalSettingsModal,
     closeGlobalSettingsModalBtn,
     globalSettingsToggleGridBtn,
     globalSettingsToggleThemeBtn,
     globalSettingsOpenHotkeysBtn,
     globalSettingsTitlebarAlwaysVisibleInput,
+    globalSettingsLanguageSelect,
     globalSettingsDefaultModeGroup,
     onCloseGlobalSettingsModal: () => closeGlobalSettingsModal(),
     onToggleGrid: ({ isCheckboxControl, checked }) => {
@@ -6963,6 +7485,11 @@ function registerGlobalSettingsControlBindings(input = {}) {
     onTitlebarAlwaysVisibleChanged: (checked) => {
       setTitlebarAlwaysVisible(checked);
       updateGlobalSettingsModalState();
+    },
+    onLanguageSelected: (language) => {
+      void applyPreferredLanguage(language, { persist: true }).catch((error) => {
+        console.error("[i18n] Language switch failed:", error);
+      });
     },
     onDefaultModeSelected: (mode) => {
       const nextMode = savePreferredDefaultSessionMode(mode, true);

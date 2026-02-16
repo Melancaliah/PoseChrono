@@ -37,9 +37,86 @@
     const localeAliases = options.localeAliases || {};
     const localeGetter =
       typeof options.localeGetter === "function" ? options.localeGetter : null;
+    const cacheStorage =
+      options.cacheStorage ||
+      (windowObj && windowObj.localStorage ? windowObj.localStorage : null);
+    const cacheEnabled = options.cacheEnabled !== false && !!cacheStorage;
+    const cachePrefix = String(options.cachePrefix || "posechrono-i18n-cache");
+    const cacheTtlMsRaw = Number(options.cacheTtlMs);
+    const cacheTtlMs =
+      Number.isFinite(cacheTtlMsRaw) && cacheTtlMsRaw > 0
+        ? cacheTtlMsRaw
+        : 7 * 24 * 60 * 60 * 1000;
+    let cacheVersion =
+      options.cacheVersion === null || options.cacheVersion === undefined
+        ? ""
+        : String(options.cacheVersion);
+    const pendingRefreshByLang = new Map();
+
+    function normalizeLanguageToken(token) {
+      const lang = resolveLocaleLang(token, localeAliases, localeFileByLang);
+      if (!lang) return null;
+      if (!Object.prototype.hasOwnProperty.call(localeFileByLang, lang)) return null;
+      return lang;
+    }
+
+    function buildCacheKey(lang) {
+      const versionToken = String(cacheVersion || "").trim();
+      if (!versionToken) return `${cachePrefix}:${lang}`;
+      return `${cachePrefix}:${versionToken}:${lang}`;
+    }
+
+    function readCachedLocale(lang) {
+      if (!cacheEnabled || !cacheStorage) return null;
+      try {
+        const raw = cacheStorage.getItem(buildCacheKey(lang));
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== "object") return null;
+        const translation = parsed.translation;
+        if (!translation || typeof translation !== "object") return null;
+        const savedAt = Number(parsed.savedAt) || 0;
+        const expired = !savedAt || Date.now() - savedAt > cacheTtlMs;
+        return {
+          translation,
+          expired,
+          savedAt,
+        };
+      } catch (_) {
+        return null;
+      }
+    }
+
+    function writeCachedLocale(lang, translation) {
+      if (!cacheEnabled || !cacheStorage) return;
+      if (!translation || typeof translation !== "object") return;
+      try {
+        cacheStorage.setItem(
+          buildCacheKey(lang),
+          JSON.stringify({
+            lang,
+            version: String(cacheVersion || ""),
+            savedAt: Date.now(),
+            translation,
+          }),
+        );
+      } catch (_) {}
+    }
+
+    function setCacheVersion(nextVersion) {
+      cacheVersion =
+        nextVersion === null || nextVersion === undefined
+          ? ""
+          : String(nextVersion);
+      return cacheVersion;
+    }
 
     function getPreferredLocaleLang() {
       const candidates = [];
+
+      if (typeof localeGetter === "function") {
+        candidates.push(localeGetter());
+      }
 
       if (i18nextInstance && typeof i18nextInstance.language === "string") {
         candidates.push(i18nextInstance.language);
@@ -62,9 +139,7 @@
         }
       }
 
-      if (typeof localeGetter === "function") {
-        candidates.push(localeGetter());
-      } else if (windowObj && typeof windowObj.getLocale === "function") {
+      if (windowObj && typeof windowObj.getLocale === "function") {
         candidates.push(windowObj.getLocale());
       }
 
@@ -87,6 +162,48 @@
       }
     }
 
+    async function fetchAndCacheLocale(language) {
+      const normalizedLanguage = normalizeLanguageToken(language);
+      if (!normalizedLanguage) return null;
+
+      if (pendingRefreshByLang.has(normalizedLanguage)) {
+        return pendingRefreshByLang.get(normalizedLanguage);
+      }
+
+      const run = (async () => {
+        const fileName = localeFileByLang[normalizedLanguage];
+        if (!fileName) return null;
+        const payload = await fetchLocaleTranslations(fileName);
+        if (payload && typeof payload === "object") {
+          writeCachedLocale(normalizedLanguage, payload);
+          return payload;
+        }
+        return null;
+      })();
+
+      pendingRefreshByLang.set(normalizedLanguage, run);
+      try {
+        return await run;
+      } finally {
+        pendingRefreshByLang.delete(normalizedLanguage);
+      }
+    }
+
+    async function loadTranslationsForLanguage(language) {
+      const normalizedLanguage = normalizeLanguageToken(language);
+      if (!normalizedLanguage) return null;
+
+      const cached = readCachedLocale(normalizedLanguage);
+      if (cached && cached.translation) {
+        if (cached.expired) {
+          void fetchAndCacheLocale(normalizedLanguage);
+        }
+        return cached.translation;
+      }
+
+      return await fetchAndCacheLocale(normalizedLanguage);
+    }
+
     async function loadTranslations() {
       if (!i18nextInstance) return false;
 
@@ -94,7 +211,7 @@
       const baseFileName = localeFileByLang[baseLang];
       if (!baseFileName) return false;
 
-      const baseTranslations = await fetchLocaleTranslations(baseFileName);
+      const baseTranslations = await loadTranslationsForLanguage(baseLang);
       if (!baseTranslations) return false;
 
       const resources = {
@@ -107,9 +224,8 @@
         preferredLang !== baseLang &&
         Object.prototype.hasOwnProperty.call(localeFileByLang, preferredLang)
       ) {
-        const preferredTranslations = await fetchLocaleTranslations(
-          localeFileByLang[preferredLang],
-        );
+        const preferredTranslations =
+          await loadTranslationsForLanguage(preferredLang);
         if (preferredTranslations) {
           resources[preferredLang] = {
             translation: preferredTranslations,
@@ -162,6 +278,8 @@
     return {
       loadTranslations,
       getPreferredLocaleLang,
+      loadTranslationsForLanguage,
+      setCacheVersion,
     };
   }
 

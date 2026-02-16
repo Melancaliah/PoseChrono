@@ -821,6 +821,8 @@
   }
 
   function bindGlobalSettingsControls(input = {}) {
+    const documentRef =
+      input.documentRef || (typeof document !== "undefined" ? document : null);
     const globalSettingsModal = input.globalSettingsModal || null;
     const closeGlobalSettingsModalBtn = input.closeGlobalSettingsModalBtn || null;
     const globalSettingsToggleGridBtn = input.globalSettingsToggleGridBtn || null;
@@ -828,6 +830,7 @@
     const globalSettingsOpenHotkeysBtn = input.globalSettingsOpenHotkeysBtn || null;
     const globalSettingsTitlebarAlwaysVisibleInput =
       input.globalSettingsTitlebarAlwaysVisibleInput || null;
+    const globalSettingsLanguageSelect = input.globalSettingsLanguageSelect || null;
     const globalSettingsDefaultModeGroup = input.globalSettingsDefaultModeGroup || null;
 
     const onCloseGlobalSettingsModal =
@@ -843,6 +846,10 @@
     const onTitlebarAlwaysVisibleChanged =
       typeof input.onTitlebarAlwaysVisibleChanged === "function"
         ? input.onTitlebarAlwaysVisibleChanged
+        : null;
+    const onLanguageSelected =
+      typeof input.onLanguageSelected === "function"
+        ? input.onLanguageSelected
         : null;
     const onDefaultModeSelected =
       typeof input.onDefaultModeSelected === "function"
@@ -901,6 +908,122 @@
         );
       });
       bound = true;
+    }
+
+    if (globalSettingsLanguageSelect && onLanguageSelected) {
+      const isNativeSelect =
+        globalSettingsLanguageSelect.tagName === "SELECT" &&
+        typeof globalSettingsLanguageSelect.addEventListener === "function";
+
+      if (isNativeSelect) {
+        globalSettingsLanguageSelect.addEventListener("change", () => {
+          onLanguageSelected(globalSettingsLanguageSelect.value);
+        });
+        bound = true;
+      } else {
+        const languageTrigger = globalSettingsLanguageSelect.querySelector(
+          ".global-settings-language-trigger",
+        );
+        const languageMenu = globalSettingsLanguageSelect.querySelector(
+          ".global-settings-language-menu",
+        );
+        const languageOptions = Array.from(
+          globalSettingsLanguageSelect.querySelectorAll(
+            ".global-settings-language-option[data-lang]",
+          ),
+        );
+
+        const closeLanguageMenu = () => {
+          if (!languageMenu) return;
+          languageMenu.hidden = true;
+          globalSettingsLanguageSelect.classList.remove("is-open");
+          if (languageTrigger) {
+            languageTrigger.setAttribute("aria-expanded", "false");
+          }
+        };
+
+        const openLanguageMenu = () => {
+          if (!languageMenu || languageOptions.length === 0) return;
+          languageMenu.hidden = false;
+          globalSettingsLanguageSelect.classList.add("is-open");
+          if (languageTrigger) {
+            languageTrigger.setAttribute("aria-expanded", "true");
+          }
+        };
+
+        const toggleLanguageMenu = () => {
+          if (!languageMenu) return;
+          if (languageMenu.hidden) {
+            openLanguageMenu();
+          } else {
+            closeLanguageMenu();
+          }
+        };
+
+        if (languageTrigger) {
+          languageTrigger.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            toggleLanguageMenu();
+          });
+          languageTrigger.addEventListener("keydown", (event) => {
+            if (
+              event.key === "Enter" ||
+              event.key === " " ||
+              event.key === "ArrowDown"
+            ) {
+              event.preventDefault();
+              openLanguageMenu();
+            }
+          });
+          bound = true;
+        }
+
+        languageOptions.forEach((optionEl) => {
+          optionEl.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const nextLanguage = String(optionEl.dataset.lang || "").trim();
+            if (!nextLanguage) return;
+            globalSettingsLanguageSelect.dataset.value = nextLanguage;
+            closeLanguageMenu();
+            onLanguageSelected(nextLanguage);
+          });
+          optionEl.addEventListener("keydown", (event) => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              closeLanguageMenu();
+              if (languageTrigger && typeof languageTrigger.focus === "function") {
+                languageTrigger.focus();
+              }
+              return;
+            }
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              const nextLanguage = String(optionEl.dataset.lang || "").trim();
+              if (!nextLanguage) return;
+              globalSettingsLanguageSelect.dataset.value = nextLanguage;
+              closeLanguageMenu();
+              onLanguageSelected(nextLanguage);
+            }
+          });
+        });
+        bound = bound || languageOptions.length > 0;
+
+        if (documentRef && typeof documentRef.addEventListener === "function") {
+          documentRef.addEventListener("click", (event) => {
+            if (!globalSettingsLanguageSelect.contains(event.target)) {
+              closeLanguageMenu();
+            }
+          });
+          documentRef.addEventListener("keydown", (event) => {
+            if (event.key === "Escape") {
+              closeLanguageMenu();
+            }
+          });
+          bound = true;
+        }
+      }
     }
 
     if (globalSettingsDefaultModeGroup && onDefaultModeSelected) {

@@ -1,6 +1,6 @@
 {
   "name": "posechrono-desktop",
-  "version": "1.0.2",
+  "version": "1.0.5",
   "private": true,
   "author": "PoseChrono",
   "description": "PoseChrono standalone desktop app (Electron)",

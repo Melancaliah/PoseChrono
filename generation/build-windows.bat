@@ -11,6 +11,14 @@ if not exist "package.json" (
   exit /b 1
 )
 
+echo [PoseChrono] Sync version desktop depuis manifest.json...
+call npm run version:sync-desktop
+if errorlevel 1 (
+  echo [PoseChrono] Echec version:sync-desktop.
+  pause
+  exit /b 1
+)
+
 echo [PoseChrono] Build release Windows...
 call npm run release:windows
 if errorlevel 1 (

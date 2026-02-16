@@ -3,7 +3,7 @@
 
 # PoseChrono
 
-**The ultimate assistant for your figure drawing sessions in Eagle.**
+**The ultimate assistant for your figure drawing sessions**
 
 </div>
 
@@ -31,7 +31,10 @@ English, Chinese (Simplified), Japanese, German, Spanish, Korean, Russian, Frenc
 
 #
 
-### 🚀 Manual Installation (Developer Mode)
+### 🚀 Installation
+
+### Windows (Version Standalone)
+
 
 If you need to install it manually, follow these steps:
 
@@ -42,9 +45,3 @@ If you need to install it manually, follow these steps:
 5. **Finalize:** Restart Eagle and start drawing!
 
 #
-
-### 🧭 Developer Documentation
-
-Technical architecture/build/release docs are here:
-
-- `docs/README.md`

@@ -174,6 +174,11 @@
         ? defaultsInput.globalSettingsCollapsedCategories
         : ["maintenance"],
     );
+    const BASE_DEFAULT_PREFERRED_LANGUAGE =
+      typeof defaultsInput.preferredLanguage === "string" &&
+      defaultsInput.preferredLanguage.trim()
+        ? defaultsInput.preferredLanguage.trim().toLowerCase()
+        : "";
 
     const getDefaultPrefs = () => ({
       schemaVersion,
@@ -183,6 +188,7 @@
       reviewDurationsVisible: BASE_DEFAULT_REVIEW_DURATIONS_VISIBLE,
       hotkeysCollapsedCategories: BASE_DEFAULT_HOTKEYS_COLLAPSED,
       globalSettingsCollapsedCategories: BASE_DEFAULT_GLOBAL_SETTINGS_COLLAPSED,
+      preferredLanguage: BASE_DEFAULT_PREFERRED_LANGUAGE,
     });
 
     let cache = null;
@@ -234,6 +240,10 @@
       cache.globalSettingsCollapsedCategories = normalizeStringArray(
         cache.globalSettingsCollapsedCategories,
       );
+      cache.preferredLanguage =
+        typeof cache.preferredLanguage === "string"
+          ? cache.preferredLanguage.trim().toLowerCase()
+          : "";
 
       if (
         !Object.prototype.hasOwnProperty.call(parsed, "reviewDurationsVisible")
@@ -301,6 +311,8 @@
         case "hotkeysCollapsedCategories":
         case "globalSettingsCollapsedCategories":
           return normalizeStringArray(value);
+        case "preferredLanguage":
+          return typeof value === "string" ? value.trim().toLowerCase() : "";
         default:
           return value;
       }
@@ -346,6 +358,10 @@
           globalSettingsCollapsedCategories: normalizeStringArray(
             prefs.globalSettingsCollapsedCategories,
           ),
+          preferredLanguage:
+            typeof prefs.preferredLanguage === "string"
+              ? prefs.preferredLanguage.trim().toLowerCase()
+              : "",
         };
       },
       importData(data, optionsArg = {}) {
@@ -359,6 +375,7 @@
           "reviewDurationsVisible",
           "hotkeysCollapsedCategories",
           "globalSettingsCollapsedCategories",
+          "preferredLanguage",
         ];
         let changed = false;
         knownKeys.forEach((key) => {
@@ -471,9 +488,86 @@
     const localeAliases = options.localeAliases || {};
     const localeGetter =
       typeof options.localeGetter === "function" ? options.localeGetter : null;
+    const cacheStorage =
+      options.cacheStorage ||
+      (windowObj && windowObj.localStorage ? windowObj.localStorage : null);
+    const cacheEnabled = options.cacheEnabled !== false && !!cacheStorage;
+    const cachePrefix = String(options.cachePrefix || "posechrono-i18n-cache");
+    const cacheTtlMsRaw = Number(options.cacheTtlMs);
+    const cacheTtlMs =
+      Number.isFinite(cacheTtlMsRaw) && cacheTtlMsRaw > 0
+        ? cacheTtlMsRaw
+        : 7 * 24 * 60 * 60 * 1000;
+    let cacheVersion =
+      options.cacheVersion === null || options.cacheVersion === undefined
+        ? ""
+        : String(options.cacheVersion);
+    const pendingRefreshByLang = new Map();
+
+    function normalizeLanguageToken(token) {
+      const lang = resolveLocaleLang(token, localeAliases, localeFileByLang);
+      if (!lang) return null;
+      if (!Object.prototype.hasOwnProperty.call(localeFileByLang, lang)) return null;
+      return lang;
+    }
+
+    function buildCacheKey(lang) {
+      const versionToken = String(cacheVersion || "").trim();
+      if (!versionToken) return `${cachePrefix}:${lang}`;
+      return `${cachePrefix}:${versionToken}:${lang}`;
+    }
+
+    function readCachedLocale(lang) {
+      if (!cacheEnabled || !cacheStorage) return null;
+      try {
+        const raw = cacheStorage.getItem(buildCacheKey(lang));
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== "object") return null;
+        const translation = parsed.translation;
+        if (!translation || typeof translation !== "object") return null;
+        const savedAt = Number(parsed.savedAt) || 0;
+        const expired = !savedAt || Date.now() - savedAt > cacheTtlMs;
+        return {
+          translation,
+          expired,
+          savedAt,
+        };
+      } catch (_) {
+        return null;
+      }
+    }
+
+    function writeCachedLocale(lang, translation) {
+      if (!cacheEnabled || !cacheStorage) return;
+      if (!translation || typeof translation !== "object") return;
+      try {
+        cacheStorage.setItem(
+          buildCacheKey(lang),
+          JSON.stringify({
+            lang,
+            version: String(cacheVersion || ""),
+            savedAt: Date.now(),
+            translation,
+          }),
+        );
+      } catch (_) {}
+    }
+
+    function setCacheVersion(nextVersion) {
+      cacheVersion =
+        nextVersion === null || nextVersion === undefined
+          ? ""
+          : String(nextVersion);
+      return cacheVersion;
+    }
 
     function getPreferredLocaleLang() {
       const candidates = [];
+
+      if (typeof localeGetter === "function") {
+        candidates.push(localeGetter());
+      }
 
       if (i18nextInstance && typeof i18nextInstance.language === "string") {
         candidates.push(i18nextInstance.language);
@@ -496,9 +590,7 @@
         }
       }
 
-      if (typeof localeGetter === "function") {
-        candidates.push(localeGetter());
-      } else if (windowObj && typeof windowObj.getLocale === "function") {
+      if (windowObj && typeof windowObj.getLocale === "function") {
         candidates.push(windowObj.getLocale());
       }
 
@@ -521,6 +613,48 @@
       }
     }
 
+    async function fetchAndCacheLocale(language) {
+      const normalizedLanguage = normalizeLanguageToken(language);
+      if (!normalizedLanguage) return null;
+
+      if (pendingRefreshByLang.has(normalizedLanguage)) {
+        return pendingRefreshByLang.get(normalizedLanguage);
+      }
+
+      const run = (async () => {
+        const fileName = localeFileByLang[normalizedLanguage];
+        if (!fileName) return null;
+        const payload = await fetchLocaleTranslations(fileName);
+        if (payload && typeof payload === "object") {
+          writeCachedLocale(normalizedLanguage, payload);
+          return payload;
+        }
+        return null;
+      })();
+
+      pendingRefreshByLang.set(normalizedLanguage, run);
+      try {
+        return await run;
+      } finally {
+        pendingRefreshByLang.delete(normalizedLanguage);
+      }
+    }
+
+    async function loadTranslationsForLanguage(language) {
+      const normalizedLanguage = normalizeLanguageToken(language);
+      if (!normalizedLanguage) return null;
+
+      const cached = readCachedLocale(normalizedLanguage);
+      if (cached && cached.translation) {
+        if (cached.expired) {
+          void fetchAndCacheLocale(normalizedLanguage);
+        }
+        return cached.translation;
+      }
+
+      return await fetchAndCacheLocale(normalizedLanguage);
+    }
+
     async function loadTranslations() {
       if (!i18nextInstance) return false;
 
@@ -528,7 +662,7 @@
       const baseFileName = localeFileByLang[baseLang];
       if (!baseFileName) return false;
 
-      const baseTranslations = await fetchLocaleTranslations(baseFileName);
+      const baseTranslations = await loadTranslationsForLanguage(baseLang);
       if (!baseTranslations) return false;
 
       const resources = {
@@ -541,9 +675,8 @@
         preferredLang !== baseLang &&
         Object.prototype.hasOwnProperty.call(localeFileByLang, preferredLang)
       ) {
-        const preferredTranslations = await fetchLocaleTranslations(
-          localeFileByLang[preferredLang],
-        );
+        const preferredTranslations =
+          await loadTranslationsForLanguage(preferredLang);
         if (preferredTranslations) {
           resources[preferredLang] = {
             translation: preferredTranslations,
@@ -596,6 +729,8 @@
     return {
       loadTranslations,
       getPreferredLocaleLang,
+      loadTranslationsForLanguage,
+      setCacheVersion,
     };
   }
 
@@ -2596,6 +2731,8 @@
   }
 
   function bindGlobalSettingsControls(input = {}) {
+    const documentRef =
+      input.documentRef || (typeof document !== "undefined" ? document : null);
     const globalSettingsModal = input.globalSettingsModal || null;
     const closeGlobalSettingsModalBtn = input.closeGlobalSettingsModalBtn || null;
     const globalSettingsToggleGridBtn = input.globalSettingsToggleGridBtn || null;
@@ -2603,6 +2740,7 @@
     const globalSettingsOpenHotkeysBtn = input.globalSettingsOpenHotkeysBtn || null;
     const globalSettingsTitlebarAlwaysVisibleInput =
       input.globalSettingsTitlebarAlwaysVisibleInput || null;
+    const globalSettingsLanguageSelect = input.globalSettingsLanguageSelect || null;
     const globalSettingsDefaultModeGroup = input.globalSettingsDefaultModeGroup || null;
 
     const onCloseGlobalSettingsModal =
@@ -2618,6 +2756,10 @@
     const onTitlebarAlwaysVisibleChanged =
       typeof input.onTitlebarAlwaysVisibleChanged === "function"
         ? input.onTitlebarAlwaysVisibleChanged
+        : null;
+    const onLanguageSelected =
+      typeof input.onLanguageSelected === "function"
+        ? input.onLanguageSelected
         : null;
     const onDefaultModeSelected =
       typeof input.onDefaultModeSelected === "function"
@@ -2676,6 +2818,122 @@
         );
       });
       bound = true;
+    }
+
+    if (globalSettingsLanguageSelect && onLanguageSelected) {
+      const isNativeSelect =
+        globalSettingsLanguageSelect.tagName === "SELECT" &&
+        typeof globalSettingsLanguageSelect.addEventListener === "function";
+
+      if (isNativeSelect) {
+        globalSettingsLanguageSelect.addEventListener("change", () => {
+          onLanguageSelected(globalSettingsLanguageSelect.value);
+        });
+        bound = true;
+      } else {
+        const languageTrigger = globalSettingsLanguageSelect.querySelector(
+          ".global-settings-language-trigger",
+        );
+        const languageMenu = globalSettingsLanguageSelect.querySelector(
+          ".global-settings-language-menu",
+        );
+        const languageOptions = Array.from(
+          globalSettingsLanguageSelect.querySelectorAll(
+            ".global-settings-language-option[data-lang]",
+          ),
+        );
+
+        const closeLanguageMenu = () => {
+          if (!languageMenu) return;
+          languageMenu.hidden = true;
+          globalSettingsLanguageSelect.classList.remove("is-open");
+          if (languageTrigger) {
+            languageTrigger.setAttribute("aria-expanded", "false");
+          }
+        };
+
+        const openLanguageMenu = () => {
+          if (!languageMenu || languageOptions.length === 0) return;
+          languageMenu.hidden = false;
+          globalSettingsLanguageSelect.classList.add("is-open");
+          if (languageTrigger) {
+            languageTrigger.setAttribute("aria-expanded", "true");
+          }
+        };
+
+        const toggleLanguageMenu = () => {
+          if (!languageMenu) return;
+          if (languageMenu.hidden) {
+            openLanguageMenu();
+          } else {
+            closeLanguageMenu();
+          }
+        };
+
+        if (languageTrigger) {
+          languageTrigger.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            toggleLanguageMenu();
+          });
+          languageTrigger.addEventListener("keydown", (event) => {
+            if (
+              event.key === "Enter" ||
+              event.key === " " ||
+              event.key === "ArrowDown"
+            ) {
+              event.preventDefault();
+              openLanguageMenu();
+            }
+          });
+          bound = true;
+        }
+
+        languageOptions.forEach((optionEl) => {
+          optionEl.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const nextLanguage = String(optionEl.dataset.lang || "").trim();
+            if (!nextLanguage) return;
+            globalSettingsLanguageSelect.dataset.value = nextLanguage;
+            closeLanguageMenu();
+            onLanguageSelected(nextLanguage);
+          });
+          optionEl.addEventListener("keydown", (event) => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              closeLanguageMenu();
+              if (languageTrigger && typeof languageTrigger.focus === "function") {
+                languageTrigger.focus();
+              }
+              return;
+            }
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              const nextLanguage = String(optionEl.dataset.lang || "").trim();
+              if (!nextLanguage) return;
+              globalSettingsLanguageSelect.dataset.value = nextLanguage;
+              closeLanguageMenu();
+              onLanguageSelected(nextLanguage);
+            }
+          });
+        });
+        bound = bound || languageOptions.length > 0;
+
+        if (documentRef && typeof documentRef.addEventListener === "function") {
+          documentRef.addEventListener("click", (event) => {
+            if (!globalSettingsLanguageSelect.contains(event.target)) {
+              closeLanguageMenu();
+            }
+          });
+          documentRef.addEventListener("keydown", (event) => {
+            if (event.key === "Escape") {
+              closeLanguageMenu();
+            }
+          });
+          bound = true;
+        }
+      }
     }
 
     if (globalSettingsDefaultModeGroup && onDefaultModeSelected) {

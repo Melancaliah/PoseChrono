@@ -54,6 +54,12 @@ npm run release:eagle
 npm run verify:eagle-dist
 ```
 
+Build clean Eagle plugin output + update fixed import folder:
+
+```bash
+npm run release:eagle:latest
+```
+
 Full smoke gate:
 
 ```bash
@@ -64,7 +70,8 @@ npm run verify:smoke
 
 1. Eagle > `Plugins` > `Developer Options` > `Import Local Project`
 2. Select generated folder:
-   - latest `dist/eagle-plugin-YYYY-MM-DD_THH-mm_NN/`
+   - recommended fixed path: `dist/eagle-plugin/` (with `release:eagle:latest`)
+   - or latest timestamped build: `dist/eagle-plugin-YYYY-MM-DD_THH-mm_NN/`
 3. Run Eagle `Package Plugin` from that imported project.
 
 ## Notes

@@ -47,7 +47,7 @@
     "posesLabel": "POSES",
     "durationLabelShort": "DURATION",
     "timerLabel": "TIMER",
-    "repairStorage": "Repair storage",
+    "repairStorage": "Reset storage",
     "repairStorageTooltip": "Repair timeline/plans/hotkeys storage",
     "global": {
       "title": "Global settings",
@@ -89,7 +89,16 @@
       "resetSettingsDone": "All settings reset to defaults.",
       "defaultSessionMode": "Default session mode",
       "preferencesSection": "Preferences",
-      "dataSection": "Data"
+      "dataSection": "Data",
+      "language": "Language",
+      "languageEn": "English",
+      "languageFr": "Français",
+      "languageDe": "Deutsch",
+      "languageEs": "Español",
+      "languageJa": "日本語",
+      "languageKo": "한국어",
+      "languageRu": "Русский",
+      "languageZh": "中文 (简体)"
     }
   },
   "modes": {

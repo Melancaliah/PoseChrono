@@ -47,8 +47,8 @@
     "posesLabel": "POSES",
     "durationLabelShort": "DURÉE",
     "timerLabel": "CHRONO",
-    "repairStorage": "Reparer le stockage",
-    "repairStorageTooltip": "Reparer le stockage timeline/plans/raccourcis",
+    "repairStorage": "Réinitialiser le stockage",
+    "repairStorageTooltip": "Réinitialiser le stockage (historique/plans/raccourcis)",
     "global": {
       "title": "Paramètres globaux",
       "appearance": "Apparence",
@@ -60,7 +60,7 @@
       "titlebarAlwaysVisible": "Barre de titre toujours visible",
       "changeTheme": "Changer le thème",
       "openTimeline": "Ouvrir l'historique",
-      "repairStorage": "Réparer le stockage",
+      "repairStorage": "Réinitialiser le stockage",
       "openHotkeys": "Configurer les raccourcis",
       "exportPreferences": "Exporter les préférences",
       "importPreferences": "Importer les préférences",
@@ -75,11 +75,11 @@
       "preferencesImportDone": "Préférences importées : {{targets}}",
       "preferencesImportError": "Échec de l'import des préférences.",
       "preferencesImportInvalid": "Fichier de sauvegarde invalide.",
-      "storageStatusReady": "Backend stockage : IndexedDB (mode normal).",
-      "storageStatusFallback": "Backend stockage : fallback localStorage actif.",
+      "storageStatusReady": "Backend de stockage : IndexedDB (mode normal).",
+      "storageStatusFallback": "Backend de stockage : mode de secours localStorage actif.",
       "maintenance": "Maintenance",
-      "preferencesHint": "L'export cree un JSON unique. L'import applique seulement les sections selectionnees.",
-      "maintenanceHint": "Les actions de maintenance peuvent supprimer des donnees locales. Pense a exporter une sauvegarde avant.",
+      "preferencesHint": "L'export crée un JSON unique. L'import applique seulement les sections sélectionnées.",
+      "maintenanceHint": "Les actions de maintenance peuvent supprimer des données locales. Pense à exporter une sauvegarde avant.",
       "storageDiagDays": "Jours",
       "storageDiagSessions": "Sessions",
       "storageDiagPlans": "Plans",
@@ -89,7 +89,16 @@
       "resetSettingsDone": "Tous les paramètres ont été réinitialisés.",
       "defaultSessionMode": "Mode de session par défaut",
       "preferencesSection": "Préférences",
-      "dataSection": "Données"
+      "dataSection": "Données",
+      "language": "Langue",
+      "languageEn": "English",
+      "languageFr": "Français",
+      "languageDe": "Deutsch",
+      "languageEs": "Español",
+      "languageJa": "日本語",
+      "languageKo": "한국어",
+      "languageRu": "Русский",
+      "languageZh": "中文 (简体)"
     }
   },
   "modes": {
@@ -485,15 +494,7 @@
     }
   },
   "timeline": {
-    "dayLabels": [
-      "L",
-      "M",
-      "M",
-      "J",
-      "V",
-      "S",
-      "D"
-    ],
+    "dayLabels": ["L", "M", "M", "J", "V", "S", "D"],
     "monthLabels": [
       "Jan",
       "Fév",
@@ -558,19 +559,19 @@
     "history": "Historique des sessions"
   },
   "storage": {
-    "fallbackActive": "Mode de secours active: IndexedDB indisponible, utilisation du stockage local.",
-    "repairTitle": "Reparer le stockage",
-    "repairMessage": "Choisis ce que tu veux reinitialiser. Cette action est irreversible.",
-    "repairConfirm": "Reparer",
+    "fallbackActive": "Mode de secours actif : IndexedDB indisponible, utilisation du stockage local.",
+    "repairTitle": "Réinitialiser le stockage",
+    "repairMessage": "Choisis ce que tu veux réinitialiser. Cette action est irréversible.",
+    "repairConfirm": "Réinitialiser",
     "targetTimeline": "Historique timeline",
     "targetPlans": "Plans de session",
     "targetHotkeys": "Raccourcis clavier",
-    "repairDone": "Stockage repare: {{targets}}",
-    "nothingSelected": "Aucune section de stockage selectionnee.",
-    "repairError": "La reparation du stockage a echoue.",
-    "repairMessageDetailed": "Choisis ce que tu veux reinitialiser. Les donnees cochees seront supprimees localement et ne pourront pas etre recuperees automatiquement.",
-    "repairImpactTimeline": "Timeline : supprime l'historique des jours/sessions et les references d'images associees.",
-    "repairImpactPlans": "Plans : supprime les plans de session sauvegardes.",
-    "repairImpactHotkeys": "Raccourcis : restaure les raccourcis par defaut."
+    "repairDone": "Stockage réinitialisé : {{targets}}",
+    "nothingSelected": "Aucune section de stockage sélectionnée.",
+    "repairError": "La réinitialisation du stockage a échoué.",
+    "repairMessageDetailed": "Choisis ce que tu veux réinitialiser. Les données cochées seront supprimées localement et ne pourront pas être récupérées automatiquement.",
+    "repairImpactTimeline": "Timeline : supprime l'historique des jours/sessions et les références d'images associées.",
+    "repairImpactPlans": "Plans : supprime les plans de session sauvegardés.",
+    "repairImpactHotkeys": "Raccourcis : restaure les raccourcis par défaut."
   }
 }

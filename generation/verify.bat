@@ -19,6 +19,18 @@ if errorlevel 1 (
   exit /b 1
 )
 
+if exist "dist\eagle-plugin\manifest.json" (
+  echo [PoseChrono] Verification dossier Eagle fixe (dist\eagle-plugin)...
+  call npm run verify:eagle-dist -- dist/eagle-plugin
+  if errorlevel 1 (
+    echo [PoseChrono] Echec verify:eagle-dist sur dist\eagle-plugin.
+    pause
+    exit /b 1
+  )
+) else (
+  echo [PoseChrono] Dossier dist\eagle-plugin absent: lance generation\build-eagle.bat.
+)
+
 if exist "dist\windows\release.json" (
   echo [PoseChrono] Verification artefact Windows...
   call npm run verify:windows-dist

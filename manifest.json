@@ -1,6 +1,6 @@
 {
   "id": "b459df53-4b7c-4116-a996-647c1ef63dc9",
-  "version": "1.0.2",
+  "version": "1.0.5",
   "platform": "all",
   "arch": "all",
   "name": "{{manifest.app.name}}",
