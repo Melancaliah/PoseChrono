@@ -20,9 +20,8 @@ const SYNC_DESKTOP_VERSION_SCRIPT = path.join(
 function isWindowsSetupFileName(name) {
   return (
     /^PoseChrono-Setup-.*\.exe$/i.test(String(name || "")) ||
-    /^posechrono-desktop-[0-9A-Za-z._-]+-setup\.exe$/i.test(
-      String(name || ""),
-    )
+    /^posechrono-desktop-[0-9A-Za-z._-]+-setup\.exe$/i.test(String(name || "")) ||
+    /^PoseChrono_v[0-9A-Za-z._-]+_[0-9]{4}-[0-9]{2}-[0-9]{2}_windows_T[0-9]{2}-[0-9]{2}_[0-9]{2}\.exe$/i.test(String(name || ""))
   );
 }
 
@@ -59,24 +58,26 @@ function toShellArg(value) {
   return `"${str.replace(/"/g, '""')}"`;
 }
 
-function formatReleaseStamp(date = new Date()) {
+function formatArtifactBaseName(version, platform, date = new Date()) {
+  const safe = String(version || "0.0.0").trim().replace(/[^0-9A-Za-z._-]/g, "-");
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   const hours = String(date.getHours()).padStart(2, "0");
   const minutes = String(date.getMinutes()).padStart(2, "0");
-  return `${year}-${month}-${day}_T${hours}-${minutes}`;
+  return `PoseChrono_v${safe}_${year}-${month}-${day}_${platform}_T${hours}-${minutes}`;
 }
 
-async function createIncrementedOutputDir(rootDir, prefix) {
+async function createArtifactDir(rootDir, version, platform) {
   await fsp.mkdir(rootDir, { recursive: true });
-  const stamp = formatReleaseStamp();
+  const base = formatArtifactBaseName(version, platform);
   for (let index = 1; index < 1000; index += 1) {
     const suffix = String(index).padStart(2, "0");
-    const candidate = path.join(rootDir, `${prefix}-${stamp}_${suffix}`);
+    const fullName = `${base}_${suffix}`;
+    const candidate = path.join(rootDir, fullName);
     try {
       await fsp.mkdir(candidate, { recursive: false });
-      return candidate;
+      return { dirPath: candidate, baseName: fullName };
     } catch (err) {
       if (err && err.code === "EEXIST") {
         continue;
@@ -85,7 +86,7 @@ async function createIncrementedOutputDir(rootDir, prefix) {
     }
   }
   throw new Error(
-    `[release:windows] Unable to allocate output folder for prefix '${prefix}'.`,
+    `[release:windows] Unable to allocate output folder for '${platform}'.`,
   );
 }
 
@@ -219,8 +220,8 @@ async function main() {
     );
   }
 
-  const windowsDistDir = await createIncrementedOutputDir(DIST_ROOT, "windows");
-  const setupName = `posechrono-desktop-${releaseVersion}-setup.exe`;
+  const { dirPath: windowsDistDir, baseName } = await createArtifactDir(DIST_ROOT, releaseVersion, "windows");
+  const setupName = `${baseName}.exe`;
   const setupDest = path.join(windowsDistDir, setupName);
   await fsp.copyFile(latestSetup, setupDest);
 

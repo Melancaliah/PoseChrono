@@ -1,2 +1,33 @@
-# Auto detect text files and perform LF normalization
+# Auto detect text files and normalize by default.
 * text=auto
+
+# Keep source and data files in LF.
+*.js text eol=lf
+*.json text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.txt text eol=lf
+*.svg text eol=lf
+*.sh text eol=lf
+
+# Keep Windows scripts in CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Common binary assets.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.mp4 binary
+*.webm binary
+*.mov binary
+*.zip binary
+*.woff binary
+*.woff2 binary

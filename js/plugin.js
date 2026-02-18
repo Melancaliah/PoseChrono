@@ -66,26 +66,49 @@ class StateManager {
       console.log(`[State] ${key}: ${oldValue} → ${value}`);
     }
 
-    // Historique (limité aux 50 derniers changements)
-    this._history.push({
-      key,
-      oldValue,
-      newValue: value,
-      timestamp: Date.now(),
-    });
-    if (this._history.length > 50) this._history.shift();
+    // Historique (limité aux 50 derniers changements, debug seulement)
+    if (this._enableLogging) {
+      this._history.push({
+        key,
+        oldValue,
+        newValue: value,
+        timestamp: Date.now(),
+      });
+      if (this._history.length > 50) this._history.shift();
+    }
 
     // Notifier les listeners
     this._notify(key, value, oldValue);
   }
 
   /**
-   * Modifie plusieurs valeurs en batch
+   * Modifie plusieurs valeurs en batch.
+   * Tous les changements sont appliqués à l'état avant que les notifications partent,
+   * évitant N cycles de notification indépendants.
    */
   setBatch(updates) {
-    Object.entries(updates).forEach(([key, value]) => {
-      this.set(key, value);
-    });
+    const changed = [];
+
+    for (const [key, value] of Object.entries(updates)) {
+      const oldValue = this._state[key];
+      if (oldValue === value) continue;
+      this._state[key] = value;
+      if (this._enableLogging) {
+        console.log(`[State] ${key}: ${oldValue} → ${value}`);
+        this._history.push({
+          key,
+          oldValue,
+          newValue: value,
+          timestamp: Date.now(),
+        });
+        if (this._history.length > 50) this._history.shift();
+      }
+      changed.push({ key, value, oldValue });
+    }
+
+    for (const { key, value, oldValue } of changed) {
+      this._notify(key, value, oldValue);
+    }
   }
 
   /**
@@ -166,7 +189,6 @@ const stateManager = new StateManager({
 
   // Contrôle du lecteur
   isPlaying: false,
-  showTimer: true,
   showSidebar: true,
 
   // Chronomètrage
@@ -174,6 +196,7 @@ const stateManager = new StateManager({
   timeRemaining: 60,
   timerInterval: null,
   sessionStartTime: null,
+  sessionWasOnline: false,
   totalSessionTime: 0,
 
   // Filtres d'image
@@ -653,6 +676,49 @@ async function platformFolderGetSelected() {
   return [];
 }
 
+async function platformFolderGetAll() {
+  const fromShared = await platformOpsCallShared(
+    "callArray",
+    "folder.getAll",
+    [],
+    {
+      capability: "folders",
+      operationLabel: "folder.getAll",
+    },
+    null,
+  );
+  if (fromShared !== undefined) {
+    return fromShared;
+  }
+  const platform = getPlatformAdapter();
+  try {
+    if (platform?.folder?.getAll) {
+      return (await platform.folder.getAll()) || [];
+    }
+  } catch (_) {}
+  return [];
+}
+
+async function platformFolderBrowseAndAdd() {
+  const platform = getPlatformAdapter();
+  try {
+    if (platform?.folder?.browseAndAdd) {
+      return (await platform.folder.browseAndAdd()) || null;
+    }
+  } catch (_) {}
+  return null;
+}
+
+async function platformFolderRemove(folderId) {
+  const platform = getPlatformAdapter();
+  try {
+    if (platform?.folder?.removeFolder) {
+      return (await platform.folder.removeFolder(folderId)) || [];
+    }
+  } catch (_) {}
+  return [];
+}
+
 async function platformItemGet(query = {}) {
   const fromShared = await platformOpsCallShared(
     "callArray",
@@ -874,6 +940,8 @@ async function platformItemShowInFolder(id) {
   platformWarnMissingCapability("items", "item.showInFolder");
   return false;
 }
+let platformWindowToggleFallbackMaximizedState = false;
+
 async function platformWindowToggleMaximize() {
   const fromShared = await callPluginSharedMethod(
     SHARED_PLATFORM_WINDOW_UTILS,
@@ -888,13 +956,48 @@ async function platformWindowToggleMaximize() {
   const platform = getPlatformAdapter();
   try {
     if (platform?.window) {
-      const isMaximized = await (platform.window.isMaximized?.() || false);
-      if (isMaximized && platform.window.unmaximize) {
-        await platform.window.unmaximize();
-      } else if (platform.window.maximize) {
-        await platform.window.maximize();
+      const canMaximize = typeof platform.window.maximize === "function";
+      const canUnmaximize = typeof platform.window.unmaximize === "function";
+      const canReadMaximized =
+        typeof platform.window.isMaximized === "function";
+
+      if (canReadMaximized) {
+        try {
+          const isMaximized = !!(await platform.window.isMaximized());
+          platformWindowToggleFallbackMaximizedState = isMaximized;
+          if (isMaximized && canUnmaximize) {
+            await platform.window.unmaximize();
+            platformWindowToggleFallbackMaximizedState = false;
+            return;
+          }
+          if (!isMaximized && canMaximize) {
+            await platform.window.maximize();
+            platformWindowToggleFallbackMaximizedState = true;
+            return;
+          }
+        } catch (_) {}
       }
-      return;
+
+      if (canMaximize && canUnmaximize) {
+        if (platformWindowToggleFallbackMaximizedState) {
+          await platform.window.unmaximize();
+          platformWindowToggleFallbackMaximizedState = false;
+        } else {
+          await platform.window.maximize();
+          platformWindowToggleFallbackMaximizedState = true;
+        }
+        return;
+      }
+      if (canMaximize) {
+        await platform.window.maximize();
+        platformWindowToggleFallbackMaximizedState = true;
+        return;
+      }
+      if (canUnmaximize) {
+        await platform.window.unmaximize();
+        platformWindowToggleFallbackMaximizedState = false;
+        return;
+      }
     }
   } catch (_) {}
   platformWarnMissingCapability("windowControls", "window.toggleMaximize");
@@ -921,13 +1024,9 @@ async function platformWindowToggleAlwaysOnTop() {
       return !isOnTop;
     }
   } catch (_) {}
-  platformWarnMissingCapability(
-    "windowControls",
-    "window.toggleAlwaysOnTop",
-  );
+  platformWarnMissingCapability("windowControls", "window.toggleAlwaysOnTop");
   return false;
 }
-
 
 function isDesktopStandaloneRuntime() {
   return callPluginSharedMethod(
@@ -968,7 +1067,8 @@ function getAppSubtitleI18nKey() {
     "getAppSubtitleI18nKey",
     [],
     null,
-    () => (isDesktopStandaloneRuntime() ? "app.subtitleDesktop" : "app.subtitle"),
+    () =>
+      isDesktopStandaloneRuntime() ? "app.subtitleDesktop" : "app.subtitle",
   );
 }
 
@@ -997,7 +1097,8 @@ function isTagsFeatureAvailable() {
     [platform],
     null,
     () => {
-      if (!platform || !platform.capabilities) return !isDesktopStandaloneRuntime();
+      if (!platform || !platform.capabilities)
+        return !isDesktopStandaloneRuntime();
       if (Object.prototype.hasOwnProperty.call(platform.capabilities, "tags")) {
         return !!platform.capabilities.tags;
       }
@@ -1063,10 +1164,7 @@ function isDevStorageBackupEnabled() {
   try {
     if (typeof window === "undefined") return false;
     const search = String(window.location?.search || "");
-    if (
-      search.includes("devBackup=1") ||
-      search.includes("devAutoBackup=1")
-    ) {
+    if (search.includes("devBackup=1") || search.includes("devAutoBackup=1")) {
       return true;
     }
     const flag = localStorage.getItem("posechrono-dev-auto-backup");
@@ -1132,11 +1230,35 @@ const UI_PREFS_SCHEMA_VERSION = 1;
 const PREFS_PACKAGE_SCHEMA_VERSION = 1;
 const PREFS_PACKAGE_SECTION_KEYS = ["ui", "hotkeys", "plans", "timeline"];
 const PREF_KEY_PREFERRED_LANGUAGE = "preferredLanguage";
+const SYNCRO_MODULE =
+  typeof window !== "undefined" ? window.PoseChronoSyncroModule || null : null;
+const SYNC_SESSION_MODAL_HELPERS =
+  SYNCRO_MODULE?.syncSessionModalHelpers || null;
+const SYNC_SESSION_STATUS_UI = SYNCRO_MODULE?.syncSessionStatusUi || null;
+const SYNC_RUNTIME_HELPERS = SYNCRO_MODULE?.syncRuntimeHelpers || null;
+const SYNC_SESSION_CONTROLLER = SYNCRO_MODULE?.syncSessionController || null;
+const PREF_KEY_SYNC_GUEST_ACTION_NOTIFICATIONS =
+  SYNCRO_MODULE?.PREF_KEYS?.syncGuestActionNotificationsEnabled ||
+  "syncGuestActionNotificationsEnabled";
+const PREF_KEY_SOUND_ENABLED_BY_DEFAULT = "soundEnabledByDefault";
+const PREF_KEY_SIDEBAR_HIDDEN_BUTTONS = "sidebarHiddenButtons";
+const PREF_KEY_SIDEBAR_BUTTON_ORDER = "sidebarButtonOrder";
+const PREF_KEY_SIDEBAR_PROGRESSIVE_BLUR_HIDDEN_MIGRATED =
+  "sidebarProgressiveBlurHiddenMigrated";
+const PREF_KEY_SIDEBAR_PROGRESSIVE_BLUR_ORDER_MIGRATED =
+  "sidebarProgressiveBlurOrderMigrated";
+const PREF_KEY_SOUND_TICK = "soundTick";
+const PREF_KEY_TICK_SOUND_THRESHOLD = "tickSoundThreshold";
+const PREF_KEY_SOUND_END = "soundEnd";
+const PREF_KEY_SOUND_IMAGE_CHANGE = "soundImageChange";
+const PREF_KEY_SOUND_PAUSE = "soundPause";
+const PREF_KEY_CONFIRM_DELETE_IMAGE = "confirmDeleteImage";
 const LEGACY_UI_PREF_KEYS = {
   REVIEW_DURATIONS_VISIBLE: "posechrono_review_durations_visible",
   GLOBAL_SETTINGS_COLLAPSED: "posechrono-global-settings-collapsed",
 };
-const LEGACY_DEFAULT_SESSION_MODE_STORAGE_KEY = "posechrono-default-session-mode";
+const LEGACY_DEFAULT_SESSION_MODE_STORAGE_KEY =
+  "posechrono-default-session-mode";
 
 function getSharedNamespaceValue(key) {
   try {
@@ -1366,7 +1488,8 @@ function ensureTimelineModuleLoaded(reason = "manual") {
       return;
     }
     const startMs =
-      typeof performance !== "undefined" && typeof performance.now === "function"
+      typeof performance !== "undefined" &&
+      typeof performance.now === "function"
         ? performance.now()
         : Date.now();
     bootTrace("timeline.load.start", { reason });
@@ -1487,7 +1610,8 @@ function ensureDrawBundleLoaded(reason = "manual") {
       return;
     }
     const startMs =
-      typeof performance !== "undefined" && typeof performance.now === "function"
+      typeof performance !== "undefined" &&
+      typeof performance.now === "function"
         ? performance.now()
         : Date.now();
     bootTrace("drawBundle.load.start", { reason });
@@ -1544,11 +1668,10 @@ function ensureDrawBundleLoaded(reason = "manual") {
     script.addEventListener("load", handleLoad, { once: true });
     script.addEventListener("error", handleError, { once: true });
     document.body.appendChild(script);
-  })
-    .catch((error) => {
-      drawBundleLoadPromise = null;
-      throw error;
-    });
+  }).catch((error) => {
+    drawBundleLoadPromise = null;
+    throw error;
+  });
 
   return drawBundleLoadPromise;
 }
@@ -1594,6 +1717,7 @@ function schedulePostBootPreloads() {
 }
 
 async function openDrawingModeSafely() {
+  if (state.isVideoFile || state.isGifFile) return false;
   try {
     await ensureDrawBundleLoaded("open-main");
   } catch (error) {
@@ -1619,7 +1743,11 @@ function closeDrawingModeSafely() {
 
 async function toggleDrawingModeSafely() {
   const root = getDrawBundleWindow();
-  if (root && root.isDrawingModeActive && typeof root.closeDrawingMode === "function") {
+  if (
+    root &&
+    root.isDrawingModeActive &&
+    typeof root.closeDrawingMode === "function"
+  ) {
     root.closeDrawingMode();
     return;
   }
@@ -1658,10 +1786,7 @@ function callPluginSharedMethod(
   missingKey,
   fallbackFn,
 ) {
-  if (
-    sharedInstance &&
-    typeof sharedInstance[methodName] === "function"
-  ) {
+  if (sharedInstance && typeof sharedInstance[methodName] === "function") {
     return sharedInstance[methodName](...(Array.isArray(args) ? args : []));
   }
   if (missingKey) logMissingShared(missingKey);
@@ -1770,12 +1895,17 @@ function resolveI18nLanguage(input, fallback = "en") {
     .toLowerCase();
   if (!normalized) return fallbackToken;
 
-  if (Object.prototype.hasOwnProperty.call(I18N_LOCALE_FILE_BY_LANG, normalized)) {
+  if (
+    Object.prototype.hasOwnProperty.call(I18N_LOCALE_FILE_BY_LANG, normalized)
+  ) {
     return normalized;
   }
 
   const alias = I18N_LOCALE_LANG_ALIASES[normalized];
-  if (alias && Object.prototype.hasOwnProperty.call(I18N_LOCALE_FILE_BY_LANG, alias)) {
+  if (
+    alias &&
+    Object.prototype.hasOwnProperty.call(I18N_LOCALE_FILE_BY_LANG, alias)
+  ) {
     return alias;
   }
 
@@ -1871,7 +2001,10 @@ const SHARED_I18N_LOADER_UTILS = initSharedFactory(
     localeGetter: () => {
       const preferredLanguage = readPreferredLanguageFromStorage();
       if (preferredLanguage) return preferredLanguage;
-      if (typeof window !== "undefined" && typeof window.getLocale === "function") {
+      if (
+        typeof window !== "undefined" &&
+        typeof window.getLocale === "function"
+      ) {
         return window.getLocale();
       }
       return null;
@@ -2040,17 +2173,39 @@ const UIPreferences = SHARED_UI_PREFERENCES_FACTORY
       normalizeStringArray,
       defaults: {
         backgroundGridEnabled:
-          typeof CONFIG !== "undefined" ? !!(CONFIG?.backgroundGrid ?? false) : false,
+          typeof CONFIG !== "undefined"
+            ? !!(CONFIG?.backgroundGrid ?? false)
+            : false,
         titlebarAlwaysVisible:
           typeof CONFIG !== "undefined"
             ? !!(CONFIG?.titlebarAlwaysVisible ?? false)
             : false,
         defaultSessionMode:
-          typeof CONFIG !== "undefined" ? CONFIG?.defaultSessionMode : "classique",
+          typeof CONFIG !== "undefined"
+            ? CONFIG?.defaultSessionMode
+            : "classique",
         reviewDurationsVisible: true,
+        syncGuestActionNotificationsEnabled: true,
         hotkeysCollapsedCategories: [],
-        globalSettingsCollapsedCategories: ["maintenance"],
+        globalSettingsCollapsedCategories: ["maintenance", "son"],
         preferredLanguage: readPreferredLanguageFromStorage() || "",
+        animationsEnabled:
+          typeof CONFIG !== "undefined"
+            ? !!(CONFIG?.enableAnimations ?? true)
+            : true,
+        ignoreVideoFiles: false,
+        soundEnabledByDefault: true,
+        soundTick: true,
+        tickSoundThreshold: 15,
+        soundEnd: true,
+        soundImageChange: true,
+        soundPause: true,
+        sidebarHiddenButtons: [
+          "grid-btn",
+          "silhouette-btn",
+          "progressive-blur-btn",
+        ],
+        sidebarButtonOrder: [],
       },
     })
   : {
@@ -2074,9 +2229,12 @@ const UIPreferences = SHARED_UI_PREFERENCES_FACTORY
           titlebarAlwaysVisible: false,
           defaultSessionMode: "classique",
           reviewDurationsVisible: true,
+          syncGuestActionNotificationsEnabled: true,
           hotkeysCollapsedCategories: [],
           globalSettingsCollapsedCategories: ["maintenance"],
           preferredLanguage: "",
+          animationsEnabled: true,
+          ignoreVideoFiles: false,
         };
       },
       importData() {
@@ -2138,7 +2296,8 @@ const SESSION_SURFACE_INTERACTIONS_BINDINGS_UTILS =
 const SHARED_CUSTOM_SESSION_MODULE = createSharedFactoryModule(
   "createCustomSessionUtils",
 );
-const SHARED_CUSTOM_SESSION_UTILS_FACTORY = SHARED_CUSTOM_SESSION_MODULE.factory;
+const SHARED_CUSTOM_SESSION_UTILS_FACTORY =
+  SHARED_CUSTOM_SESSION_MODULE.factory;
 const CUSTOM_SESSION_UTILS = SHARED_CUSTOM_SESSION_MODULE.module;
 
 const SHARED_SESSION_FLOW_MODULE = createSharedFactoryModule(
@@ -2156,7 +2315,8 @@ const TIMER_TICK_UTILS = SHARED_TIMER_TICK_MODULE.module;
 const SHARED_REVIEW_SESSION_MODULE = createSharedFactoryModule(
   "createReviewSessionUtils",
 );
-const SHARED_REVIEW_SESSION_UTILS_FACTORY = SHARED_REVIEW_SESSION_MODULE.factory;
+const SHARED_REVIEW_SESSION_UTILS_FACTORY =
+  SHARED_REVIEW_SESSION_MODULE.factory;
 const REVIEW_SESSION_UTILS = SHARED_REVIEW_SESSION_MODULE.module;
 
 const SHARED_REVIEW_GRID_MODULE = createSharedFactoryModule(
@@ -2183,7 +2343,8 @@ const SCREEN_CONTEXT_MENU_BINDINGS_UTILS =
 const SHARED_SESSION_REPLAY_MODULE = createSharedFactoryModule(
   "createSessionReplayUtils",
 );
-const SHARED_SESSION_REPLAY_UTILS_FACTORY = SHARED_SESSION_REPLAY_MODULE.factory;
+const SHARED_SESSION_REPLAY_UTILS_FACTORY =
+  SHARED_SESSION_REPLAY_MODULE.factory;
 const SESSION_REPLAY_UTILS = SHARED_SESSION_REPLAY_MODULE.module;
 
 const SHARED_SESSION_MEDIA_MODULE = createSharedFactoryModule(
@@ -2282,10 +2443,22 @@ const ACTION_BUTTONS_BINDINGS_UTILS =
 const SHARED_STORAGE_DIAGNOSTICS_UTILS_FACTORY = getSharedFactory(
   "createStorageDiagnosticsUtils",
 );
-const STORAGE_DIAGNOSTICS_UTILS =
-  SHARED_STORAGE_DIAGNOSTICS_UTILS_FACTORY
-    ? SHARED_STORAGE_DIAGNOSTICS_UTILS_FACTORY()
-    : null;
+const STORAGE_DIAGNOSTICS_UTILS = SHARED_STORAGE_DIAGNOSTICS_UTILS_FACTORY
+  ? SHARED_STORAGE_DIAGNOSTICS_UTILS_FACTORY()
+  : null;
+
+const SHARED_SYNC_TRANSPORT_MOCK_FACTORY = getSharedFactory(
+  "createSyncTransportMock",
+);
+const SHARED_SYNC_TRANSPORT_WEBSOCKET_FACTORY = getSharedFactory(
+  "createSyncTransportWebSocket",
+);
+const SHARED_SYNC_TRANSPORT_WEBRTC_FACTORY = getSharedFactory(
+  "createSyncTransportWebRTC",
+);
+const SHARED_SYNC_SESSION_SERVICE_FACTORY = getSharedFactory(
+  "createSyncSessionService",
+);
 
 function calculateSessionPlanDuration(steps) {
   if (!SESSION_METRICS_UTILS?.calculatePlanDuration) {
@@ -2303,7 +2476,11 @@ function calculateSessionPlanPoses(steps) {
   return SESSION_METRICS_UTILS.calculatePlanPoses(steps);
 }
 
-function clampMemorySessionPosesCount(requestedCount, imagesCount, fallback = 1) {
+function clampMemorySessionPosesCount(
+  requestedCount,
+  imagesCount,
+  fallback = 1,
+) {
   if (!SESSION_METRICS_UTILS?.clampMemoryPosesCount) {
     logMissingShared("SESSION_METRICS_UTILS.clampMemoryPosesCount");
     return Math.max(1, Math.round(Number(fallback) || 1));
@@ -2371,10 +2548,19 @@ function hasPrevCustomPoseGroup(queue, fromIndex) {
   return CUSTOM_SESSION_UTILS.hasPrevPoseGroup(queue, fromIndex);
 }
 
-function getCustomPoseSessionProgress(queue, currentStepIndex, currentPoseInStep) {
+function getCustomPoseSessionProgress(
+  queue,
+  currentStepIndex,
+  currentPoseInStep,
+) {
   if (!CUSTOM_SESSION_UTILS?.getCustomPoseSessionProgress) {
     logMissingShared("CUSTOM_SESSION_UTILS.getCustomPoseSessionProgress");
-    return { totalPoses: 0, globalPoseIndex: 0, poseGroupCount: 0, showGlobal: false };
+    return {
+      totalPoses: 0,
+      globalPoseIndex: 0,
+      poseGroupCount: 0,
+      showGlobal: false,
+    };
   }
   return CUSTOM_SESSION_UTILS.getCustomPoseSessionProgress(
     queue,
@@ -2390,7 +2576,9 @@ function calculateCustomTotalRemainingSeconds(
   timeRemaining,
 ) {
   if (!CUSTOM_SESSION_UTILS?.calculateCustomTotalRemainingSeconds) {
-    logMissingShared("CUSTOM_SESSION_UTILS.calculateCustomTotalRemainingSeconds");
+    logMissingShared(
+      "CUSTOM_SESSION_UTILS.calculateCustomTotalRemainingSeconds",
+    );
     return Math.max(0, Number(timeRemaining) || 0);
   }
   return CUSTOM_SESSION_UTILS.calculateCustomTotalRemainingSeconds(
@@ -2532,7 +2720,11 @@ function resolveSessionModeStartState(input) {
   return SESSION_FLOW_UTILS.resolveSessionStartState(input);
 }
 
-function advanceCustomSessionCursor(queue, currentStepIndex, currentPoseInStep) {
+function advanceCustomSessionCursor(
+  queue,
+  currentStepIndex,
+  currentPoseInStep,
+) {
   if (!SESSION_FLOW_UTILS?.advanceCustomCursor) {
     logMissingShared("SESSION_FLOW_UTILS.advanceCustomCursor");
     return {
@@ -2556,7 +2748,10 @@ function shouldEndMemorySessionAtIndex(currentIndex, memoryPosesCount) {
     logMissingShared("SESSION_FLOW_UTILS.shouldEndMemorySession");
     return false;
   }
-  return SESSION_FLOW_UTILS.shouldEndMemorySession(currentIndex, memoryPosesCount);
+  return SESSION_FLOW_UTILS.shouldEndMemorySession(
+    currentIndex,
+    memoryPosesCount,
+  );
 }
 
 function getNextCyclicIndex(currentIndex, length) {
@@ -2622,7 +2817,12 @@ function shouldAutoAdvanceOnTimerEndTick(input) {
 function buildReviewSessionDetailsPayload(input) {
   if (!REVIEW_SESSION_UTILS?.buildSessionDetails) {
     logMissingShared("REVIEW_SESSION_UTILS.buildSessionDetails");
-    return { mode: "classique", memoryType: null, customQueue: null, images: [] };
+    return {
+      mode: "classique",
+      memoryType: null,
+      customQueue: null,
+      images: [],
+    };
   }
   return REVIEW_SESSION_UTILS.buildSessionDetails(input);
 }
@@ -2638,7 +2838,10 @@ function computeReviewSessionSummary(imagesSeen, totalSessionTime) {
       shouldRecord: false,
     };
   }
-  return REVIEW_SESSION_UTILS.computeReviewSummary(imagesSeen, totalSessionTime);
+  return REVIEW_SESSION_UTILS.computeReviewSummary(
+    imagesSeen,
+    totalSessionTime,
+  );
 }
 
 function buildReviewGridItemsModel(imagesSeen, options = {}) {
@@ -2684,7 +2887,12 @@ function normalizeReviewZoomIndex(index, length) {
 function normalizeSessionReplayLoadOptions(options = {}) {
   if (!SESSION_REPLAY_UTILS?.normalizeLoadSessionOptions) {
     logMissingShared("SESSION_REPLAY_UTILS.normalizeLoadSessionOptions");
-    return { mode: "classique", duration: null, customQueue: [], memoryType: null };
+    return {
+      mode: "classique",
+      duration: null,
+      customQueue: [],
+      memoryType: null,
+    };
   }
   return SESSION_REPLAY_UTILS.normalizeLoadSessionOptions(options);
 }
@@ -2694,7 +2902,9 @@ function filterSessionMediaItems(items) {
     logMissingShared("SESSION_MEDIA_UTILS.filterByExtensions");
     return [];
   }
-  return SESSION_MEDIA_UTILS.filterByExtensions(items, MEDIA_EXTENSIONS);
+  const ignoreVideo = UIPreferences.get("ignoreVideoFiles", false);
+  const extensions = ignoreVideo ? IMAGE_EXTENSIONS : MEDIA_EXTENSIONS;
+  return SESSION_MEDIA_UTILS.filterByExtensions(items, extensions);
 }
 
 function shuffleSessionMediaItems(items) {
@@ -2740,6 +2950,47 @@ function formatSessionMediaCountLabel(mediaCounts) {
   });
 }
 
+async function collectFolderIdsWithDescendants(selectedFolders) {
+  const ids = [];
+  function collectFromObject(folder) {
+    if (!folder || typeof folder !== "object") return;
+    const id = folder.id;
+    if (id !== undefined && id !== null && id !== "") ids.push(id);
+    if (Array.isArray(folder.children))
+      folder.children.forEach(collectFromObject);
+  }
+  selectedFolders.forEach(collectFromObject);
+
+  // Si les children n'étaient pas peuplés (seulement les IDs directs récupérés),
+  // on utilise l'API plateforme pour obtenir l'arbre complet.
+  if (ids.length === selectedFolders.length) {
+    try {
+      const allFolders = await platformFolderGetAll();
+      if (Array.isArray(allFolders) && allFolders.length > 0) {
+        const targetIds = new Set(ids);
+        ids.length = 0;
+        function findAndCollect(folder) {
+          if (!folder?.id) return;
+          if (targetIds.has(folder.id)) {
+            function deepCollect(f) {
+              if (!f?.id) return;
+              ids.push(f.id);
+              if (Array.isArray(f.children)) f.children.forEach(deepCollect);
+            }
+            deepCollect(folder);
+          } else if (Array.isArray(folder.children)) {
+            folder.children.forEach(findAndCollect);
+          }
+        }
+        allFolders.forEach(findAndCollect);
+        if (ids.length === 0)
+          selectedFolders.forEach((f) => f?.id && ids.push(f.id));
+      }
+    } catch (_) {}
+  }
+  return ids;
+}
+
 async function resolveSessionMediaSelection() {
   const traceStart =
     typeof performance !== "undefined" && typeof performance.now === "function"
@@ -2750,9 +3001,20 @@ async function resolveSessionMediaSelection() {
     logMissingShared("SESSION_MEDIA_UTILS.resolveMediaSelection");
     return { items: [], source: "unknown" };
   }
+
+  // Pré-calculer les IDs de dossiers (parent + tous descendants) pour Eagle
+  let expandedFolderIds = null;
+  const selectedFolders = await platformFolderGetSelected();
+  if (Array.isArray(selectedFolders) && selectedFolders.length > 0) {
+    expandedFolderIds = await collectFolderIdsWithDescendants(selectedFolders);
+  }
+
   const result = await SESSION_MEDIA_UTILS.resolveMediaSelection({
     getSelectedItems: () => platformItemGetSelected(),
-    getSelectedFolders: () => platformFolderGetSelected(),
+    getSelectedFolders: () =>
+      Array.isArray(expandedFolderIds) && expandedFolderIds.length > 0
+        ? expandedFolderIds.map((id) => ({ id }))
+        : Promise.resolve([]),
     queryItems: (query) => platformItemGet(query),
     toFolderIds: (folders) =>
       (Array.isArray(folders) ? folders : [])
@@ -2763,7 +3025,8 @@ async function resolveSessionMediaSelection() {
     source: result?.source || "unknown",
     totalItems: Array.isArray(result?.items) ? result.items.length : 0,
     durationMs: Math.round(
-      (typeof performance !== "undefined" && typeof performance.now === "function"
+      (typeof performance !== "undefined" &&
+      typeof performance.now === "function"
         ? performance.now()
         : Date.now()) - traceStart,
     ),
@@ -3007,7 +3270,7 @@ class ImageCache {
       console.warn(`ImageCache: Erreur chargement image ${index}`);
     };
 
-    img.src = `file:///${imageData.filePath}`;
+    img.src = getRuntimeMediaSourceFromItem(imageData);
 
     // Ajouter au cache
     this.cache.set(index, {
@@ -3289,7 +3552,11 @@ let startBtn, playPauseBtn, prevBtn, nextBtn, stopBtn, settingsBtn;
 
 // Affichage
 let timerDisplay, imageCounter, currentImage, progressBar, progressFill;
-let pauseTimerDisplay, nextStepInfoDisplay, folderInfo, chooseMediaFolderBtn, pauseBadge;
+let pauseTimerDisplay,
+  nextStepInfoDisplay,
+  folderInfo,
+  chooseMediaFolderBtn,
+  pauseBadge;
 
 // Barre latérale
 let sidebar, imageContainer, pauseOverlay, memoryOverlay;
@@ -3304,6 +3571,7 @@ let durationBtns, hoursInput, minutesInput, secondsInput, inputGroups;
 let flipHorizontalBtn, flipVerticalBtn, grayscaleBtn;
 let soundBtn, soundIcon, randomShuffleBtn, autoFlipBtn, blurBtn;
 let progressiveBlurBtn, homeProgressiveBlurBtn, annotateBtn;
+let gridSidebarBtn, silhouetteSidebarBtn;
 
 // Boutons d'action
 let deleteBtn, revealBtn;
@@ -3341,6 +3609,8 @@ let memoryTypeBtns, memoryFlashSettings, memoryProgressiveSettings;
 // Drag & drop
 let dragSourceIndex = null;
 let isDuplicatingWithAlt = false;
+let isCustomStepInputScrubbing = false;
+let hasCustomStepInputScrubChanges = false;
 
 // Virtual Scroller pour customQueue (initialisé après le DOM loading)
 let customQueueScroller = null;
@@ -3390,6 +3660,8 @@ const ICONS = {
     '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>',
   TIMER_OFF:
     '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>',
+  SOUND_PREVIEW:
+    '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polyline><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>',
   SOUND_ON:
     '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polyline><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>',
   SOUND_OFF:
@@ -3498,6 +3770,8 @@ const ICONS = {
     '<svg xmlns="http://www.w3.org/2000/svg" height="16px" viewBox="0 -960 960 960" width="16px" fill="currentColor"><path d="m400-80-20-360-127-73-14 52 81 141-69 40-99-170 48-172 230-132-110-110 56-56 184 183-144 83 48 42 328-268 48 56-340 344-20 400h-80ZM200-680q-33 0-56.5-23.5T120-760q0-33 23.5-56.5T200-840q33 0 56.5 23.5T280-760q0 33-23.5 56.5T200-680Z"/></svg>',
   TIMERCHRONO:
     '<svg xmlns="http://www.w3.org/2000/svg" height="16px" viewBox="0 -960 960 960" width="16px" fill="currentColor"><path d="M360-840v-80h240v80H360Zm80 440h80v-240h-80v240Zm40 320q-74 0-139.5-28.5T226-186q-49-49-77.5-114.5T120-440q0-74 28.5-139.5T226-694q49-49 114.5-77.5T480-800q62 0 119 20t107 58l56-56 56 56-56 56q38 50 58 107t20 119q0 74-28.5 139.5T734-186q-49 49-114.5 77.5T480-80Zm0-80q116 0 198-82t82-198q0-116-82-198t-198-82q-116 0-198 82t-82 198q0 116 82 198t198 82Zm0-280Z"/></svg>',
+  SIDEBAR:
+    '<svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="currentColor"><path d="M160-160q-33 0-56.5-23.5T80-240v-480q0-33 23.5-56.5T160-800h640q33 0 56.5 23.5T880-720v480q0 33-23.5 56.5T800-160H160Zm540-453h100v-107H700v107Zm0 186h100v-106H700v106ZM160-240h460v-480H160v480Zm540 0h100v-107H700v107Z"/></svg>',
 };
 
 // ================================================================
@@ -3520,7 +3794,8 @@ function getModeDescription(mode) {
 }
 
 function refreshSessionDescription(mode, targetElement = null) {
-  const descEl = targetElement || document.getElementById("session-description");
+  const descEl =
+    targetElement || document.getElementById("session-description");
   if (!descEl) return;
   descEl.textContent = getModeDescription(mode);
 }
@@ -3539,6 +3814,12 @@ const DOMCache = {
   hoursInput: null,
   minutesInput: null,
   secondsInput: null,
+  // Custom queue
+  customStepsList: null,
+  customHInput: null,
+  customMInput: null,
+  customSInput: null,
+  customCountInput: null,
 
   init() {
     this.durationBtns = document.querySelectorAll(".duration-btn");
@@ -3546,6 +3827,12 @@ const DOMCache = {
     this.hoursInput = document.getElementById("hours-input");
     this.minutesInput = document.getElementById("minutes-input");
     this.secondsInput = document.getElementById("seconds-input");
+    // Custom queue — éléments appelés à chaque addStepToQueue / renderCustomQueue
+    this.customStepsList = document.getElementById("custom-steps-list");
+    this.customHInput = document.getElementById("custom-h-input");
+    this.customMInput = document.getElementById("custom-m-input");
+    this.customSInput = document.getElementById("custom-s-input");
+    this.customCountInput = document.getElementById("custom-count-input");
   },
 };
 
@@ -3676,6 +3963,19 @@ const SoundManager = {
     try {
       if (!state || !state.soundEnabled) return;
 
+      // Vérifier les préférences par type de son
+      if (type === "tick" && !UIPreferences.get(PREF_KEY_SOUND_TICK, true))
+        return;
+      if (type === "end" && !UIPreferences.get(PREF_KEY_SOUND_END, true))
+        return;
+      if (
+        type === "group" &&
+        !UIPreferences.get(PREF_KEY_SOUND_IMAGE_CHANGE, true)
+      )
+        return;
+      if (type === "pause" && !UIPreferences.get(PREF_KEY_SOUND_PAUSE, true))
+        return;
+
       let sound = this.sounds[type];
 
       if (!sound && type !== "random") {
@@ -3707,6 +4007,20 @@ const SoundManager = {
       const randomIndex = Math.floor(Math.random() * soundArray.length);
       this.play("random", { path: soundArray[randomIndex] });
     }
+  },
+
+  // Prévisualiser un son indépendamment du mute global
+  preview(type) {
+    try {
+      const sound = this.sounds[type];
+      if (!sound) return;
+      sound.currentTime = 0;
+      sound.volume = this.volumes[type] ?? 0.5;
+      const playPromise = sound.play();
+      if (playPromise && typeof playPromise.catch === "function") {
+        playPromise.catch(() => {});
+      }
+    } catch (_) {}
   },
 
   // Débloquer le contexte audio du navigateur
@@ -3780,6 +4094,36 @@ function forceChronoSync() {
 // Hooks runtime
 let createLifecyclePromise = null;
 let runLifecyclePromise = null;
+let runtimeLifecycleCompleted = false;
+let runtimeRunSettingsRefreshPromise = null;
+
+function isSettingsScreenVisibleForRuntimeRefresh() {
+  const settingsScreenEl =
+    settingsScreen || document.getElementById("settings-screen");
+  return !!settingsScreenEl && !settingsScreenEl.classList.contains("hidden");
+}
+
+async function refreshSelectionOnRuntimeRunIfNeeded() {
+  if (!runtimeLifecycleCompleted) return false;
+  if (!isSettingsScreenVisibleForRuntimeRefresh()) return false;
+  if (runtimeRunSettingsRefreshPromise) {
+    await runtimeRunSettingsRefreshPromise;
+    return true;
+  }
+
+  runtimeRunSettingsRefreshPromise = (async () => {
+    bootTrace("runtimeOnRun.settingsRefresh.start");
+    await loadImages();
+    bootTrace("runtimeOnRun.settingsRefresh.done");
+  })();
+
+  try {
+    await runtimeRunSettingsRefreshPromise;
+    return true;
+  } finally {
+    runtimeRunSettingsRefreshPromise = null;
+  }
+}
 
 async function runCreateLifecycle() {
   if (createLifecyclePromise) return createLifecyclePromise;
@@ -3822,6 +4166,7 @@ async function runRuntimeLifecycle() {
     await loadImages();
     bootTrace("runRuntimeLifecycle.afterLoadImages");
     schedulePostBootPreloads();
+    runtimeLifecycleCompleted = true;
   })();
   return runLifecyclePromise;
 }
@@ -3843,7 +4188,19 @@ function setupTitlebarControls() {
   const minimizeBtn = document.getElementById("minimize-btn");
   const maximizeBtn = document.getElementById("maximize-btn");
   const settingsBtn = document.getElementById("titlebar-settings-btn");
+  const syncBtn = document.getElementById("titlebar-sync-btn");
   const pinBtn = document.getElementById("pin-btn");
+  const syncEnabled = isSyncFeatureEnabled();
+
+  // Apply allowPublicSync config immediately so the CSS can hide the internet
+  // button before the sync modal is ever opened.
+  if (CONFIG?.SYNC?.allowPublicSync === false) {
+    document.body.classList.add("sync-no-public");
+  }
+
+  if (syncEnabled) {
+    setupSyncSessionModalBindings();
+  }
 
   if (settingsBtn) {
     settingsBtn.innerHTML = ICONS.SETTINGS;
@@ -3851,6 +4208,23 @@ function setupTitlebarControls() {
       openGlobalSettingsModal();
     });
   }
+
+  if (syncBtn) {
+    syncBtn.addEventListener("click", () => {
+      if (isSyncFeatureEnabled()) openSyncSessionModal();
+    });
+    if (syncEnabled) {
+      syncBtn.classList.remove("hidden");
+      syncBtn.removeAttribute("aria-hidden");
+      syncBtn.removeAttribute("tabindex");
+    } else {
+      syncBtn.classList.add("hidden");
+      syncBtn.setAttribute("aria-hidden", "true");
+      syncBtn.setAttribute("tabindex", "-1");
+    }
+  }
+
+  updateSyncSessionVisualIndicators(syncSessionServiceState);
 
   // Fermer la fenetre
   if (closeBtn) {
@@ -3991,7 +4365,12 @@ function toggleTheme() {
   applyTheme(THEMES[nextIndex]);
 }
 
-function getI18nText(key, fallback = "", vars = undefined, options = undefined) {
+function getI18nText(
+  key,
+  fallback = "",
+  vars = undefined,
+  options = undefined,
+) {
   const requireInitialized = !!options?.requireInitialized;
   const i18nInstance =
     typeof i18next !== "undefined" &&
@@ -4008,7 +4387,10 @@ function getI18nText(key, fallback = "", vars = undefined, options = undefined) 
     () => {
       try {
         if (i18nInstance) {
-          return i18nInstance.t(key, { defaultValue: fallback, ...(vars || {}) });
+          return i18nInstance.t(key, {
+            defaultValue: fallback,
+            ...(vars || {}),
+          });
         }
       } catch (_) {}
       return fallback;
@@ -4023,6 +4405,14 @@ function createI18nTextGetter(requireInitialized = false) {
 
 function getGlobalSettingsText(key, fallback, vars = undefined) {
   return getI18nText(key, fallback, vars);
+}
+
+function decodeHtmlEntities(input) {
+  const text = String(input ?? "");
+  if (!text || typeof document === "undefined") return text;
+  const textarea = document.createElement("textarea");
+  textarea.innerHTML = text;
+  return textarea.value;
 }
 
 const GLOBAL_SETTINGS_SECTION_ICONS = {
@@ -4082,6 +4472,13 @@ const GLOBAL_SETTINGS_ACTIONS = {
     fallback: "Titlebar always visible",
     span: "full",
   },
+  showProgressBar: {
+    id: "global-settings-show-progress-bar-btn",
+    control: "checkbox",
+    i18nKey: "settings.global.showProgressBar",
+    fallback: "Show progress bar",
+    span: "full",
+  },
   openHotkeys: {
     id: "global-settings-open-hotkeys-btn",
     role: "nav",
@@ -4096,18 +4493,91 @@ const GLOBAL_SETTINGS_ACTIONS = {
     fallback: "Default session mode",
     span: "full",
   },
+  toggleAnimations: {
+    id: "global-settings-toggle-animations-btn",
+    control: "checkbox",
+    i18nKey: "settings.global.disableAnimations",
+    fallback: "Disable animations",
+    span: "full",
+  },
+  ignoreVideoFiles: {
+    id: "global-settings-ignore-video-files-btn",
+    control: "checkbox",
+    i18nKey: "settings.global.ignoreVideoFiles",
+    fallback: "Ignore video files",
+    span: "full",
+  },
+  confirmDeleteImage: {
+    id: "global-settings-confirm-delete-image-btn",
+    control: "checkbox",
+    i18nKey: "settings.global.confirmDeleteImage",
+    fallback: "Ask confirmation before deleting an image",
+    span: "full",
+  },
+  enableOnlineSync: {
+    id: "global-settings-enable-online-sync-btn",
+    control: "checkbox",
+    i18nKey: "settings.global.enableOnlineSync",
+    fallback: "Enable online synchronization",
+    span: "full",
+  },
+  soundEnabledByDefault: {
+    id: "global-settings-sound-enabled-by-default-btn",
+    control: "checkbox",
+    i18nKey: "settings.global.soundEnabledByDefault",
+    fallback: "Enable sound by default",
+    span: "full",
+  },
+  soundTick: {
+    id: "global-settings-sound-tick-btn",
+    control: "checkbox",
+    i18nKey: "settings.global.soundTick",
+    fallback: "Countdown sound",
+    span: "full",
+  },
+  tickSoundThreshold: {
+    id: "global-settings-tick-threshold-group",
+    control: "threshold-toggle",
+    i18nKey: "settings.global.tickSoundThreshold",
+    fallback: "Countdown trigger",
+    span: "full",
+  },
+  soundEnd: {
+    id: "global-settings-sound-end-btn",
+    control: "checkbox",
+    i18nKey: "settings.global.soundEnd",
+    fallback: "End-of-timer sound",
+    span: "full",
+    playPreview: "end",
+  },
+  soundImageChange: {
+    id: "global-settings-sound-image-change-btn",
+    control: "checkbox",
+    i18nKey: "settings.global.soundImageChange",
+    fallback: "Pose group change sound",
+    span: "full",
+    playPreview: "group",
+  },
+  soundPause: {
+    id: "global-settings-sound-pause-btn",
+    control: "checkbox",
+    i18nKey: "settings.global.soundPause",
+    fallback: "Break arrival sound",
+    span: "full",
+    playPreview: "pause",
+  },
   exportPrefs: {
     id: "global-settings-export-prefs-btn",
     role: "primary",
     i18nKey: "settings.global.exportPreferences",
-    fallback: "Export preferences",
+    fallback: "Export",
     icon: ICONS.GLOBAL_SETTINGS_ACTIONS.export,
   },
   importPrefs: {
     id: "global-settings-import-prefs-btn",
     role: "primary",
     i18nKey: "settings.global.importPreferences",
-    fallback: "Import preferences",
+    fallback: "Import",
     icon: ICONS.GLOBAL_SETTINGS_ACTIONS.import,
   },
   repairStorage: {
@@ -4120,25 +4590,99 @@ const GLOBAL_SETTINGS_ACTIONS = {
   },
 };
 
+// Boutons masquables de la sidebar (groupe, id, clé i18n, fallback)
+const SIDEBAR_CONFIGURABLE_BUTTONS = [
+  {
+    id: "sound-btn",
+    group: "standalone",
+    i18nKey: "sidebar.config.soundBtn",
+    fallback: "Son",
+  },
+  {
+    id: "flip-horizontal-btn",
+    group: "filters",
+    i18nKey: "sidebar.config.flipH",
+    fallback: "Miroir horizontal",
+  },
+  {
+    id: "flip-vertical-btn",
+    group: "filters",
+    i18nKey: "sidebar.config.flipV",
+    fallback: "Miroir vertical",
+  },
+  {
+    id: "grayscale-btn",
+    group: "filters",
+    i18nKey: "sidebar.config.grayscale",
+    fallback: "Noir et blanc",
+  },
+  {
+    id: "silhouette-btn",
+    group: "filters",
+    i18nKey: "sidebar.config.silhouette",
+    fallback: "Silhouette",
+  },
+  {
+    id: "blur-btn",
+    group: "filters",
+    i18nKey: "sidebar.config.blur",
+    fallback: "Flou / Focus",
+  },
+  {
+    id: "progressive-blur-btn",
+    group: "filters",
+    i18nKey: "filters.progressiveBlur",
+    fallback: "Flou progressif",
+  },
+  {
+    id: "grid-btn",
+    group: "filters",
+    i18nKey: "sidebar.config.grid",
+    fallback: "Grille",
+  },
+  {
+    id: "annotate-btn",
+    group: "filters",
+    i18nKey: "sidebar.config.annotate",
+    fallback: "Dessin",
+  },
+  {
+    id: "reveal-btn",
+    group: "actions",
+    i18nKey: "sidebar.config.reveal",
+    fallback: "Ouvrir dans Eagle",
+  },
+  {
+    id: "delete-btn",
+    group: "actions",
+    i18nKey: "sidebar.config.delete",
+    fallback: "Supprimer",
+  },
+  {
+    id: "stop-btn",
+    group: "secondary",
+    i18nKey: "sidebar.config.stop",
+    fallback: "Terminer session",
+  },
+  {
+    id: "settings-btn",
+    group: "secondary",
+    i18nKey: "sidebar.config.settings",
+    fallback: "Accueil",
+  },
+];
+const SIDEBAR_DEFAULT_BUTTON_ORDER = SIDEBAR_CONFIGURABLE_BUTTONS.map(
+  ({ id }) => id,
+);
+const SIDEBAR_CONFIGURABLE_BUTTONS_BY_ID = Object.freeze(
+  Object.fromEntries(
+    SIDEBAR_CONFIGURABLE_BUTTONS.map((button) => [button.id, button]),
+  ),
+);
+const SIDEBAR_CONFIGURABLE_BUTTON_IDS = new Set(SIDEBAR_DEFAULT_BUTTON_ORDER);
+
 // Config compacte: change l'ordre des sections et des options ici.
 const GLOBAL_SETTINGS_SECTIONS = [
-  {
-    id: "appearance",
-    titleKey: "settings.global.appearance",
-    fallbackTitle: "Appearance",
-    icon: "",
-    actionGroups: [
-      {
-        columns: 1,
-        align: "start",
-        items: [
-          { type: "action", key: "toggleGrid" },
-          { type: "action", key: "toggleTheme" },
-          { type: "action", key: "language" },
-        ],
-      },
-    ],
-  },
   {
     id: "general",
     titleKey: "settings.global.general",
@@ -4149,9 +4693,59 @@ const GLOBAL_SETTINGS_SECTIONS = [
         columns: 1,
         align: "start",
         items: [
-          { type: "action", key: "openHotkeys" },
-          { type: "action", key: "titlebarAlwaysVisible" },
           { type: "action", key: "defaultSessionMode" },
+          { type: "action", key: "ignoreVideoFiles" },
+          { type: "action", key: "confirmDeleteImage" },
+          { type: "action", key: "enableOnlineSync" },
+        ],
+      },
+      {
+        align: "end",
+        items: [{ type: "action", key: "openHotkeys" }],
+      },
+    ],
+  },
+  {
+    id: "appearance",
+    titleKey: "settings.global.appearance",
+    fallbackTitle: "Appearance",
+    icon: "",
+    actionGroups: [
+      {
+        columns: 1,
+        align: "start",
+        items: [
+          { type: "action", key: "titlebarAlwaysVisible" },
+          { type: "action", key: "showProgressBar" },
+          { type: "action", key: "toggleGrid" },
+          { type: "action", key: "toggleAnimations" },
+          { type: "action", key: "toggleTheme" },
+          { type: "action", key: "language" },
+        ],
+      },
+    ],
+  },
+  {
+    id: "son",
+    titleKey: "settings.global.soundSection",
+    fallbackTitle: "Sound",
+    icon: "",
+    actionGroups: [
+      {
+        columns: 1,
+        align: "start",
+        items: [
+          { type: "action", key: "soundEnabledByDefault" },
+          { type: "separator" },
+          { type: "action", key: "soundTick" },
+          {
+            type: "action",
+            key: "tickSoundThreshold",
+            className: "gs-child-setting",
+          },
+          { type: "action", key: "soundEnd" },
+          { type: "action", key: "soundImageChange" },
+          { type: "action", key: "soundPause" },
         ],
       },
     ],
@@ -4164,7 +4758,8 @@ const GLOBAL_SETTINGS_SECTIONS = [
     sectionClassName: "global-settings-section-maintenance",
     actionGroups: [
       {
-        className: "global-settings-actions-inline global-settings-actions-segmented",
+        className:
+          "global-settings-actions-inline global-settings-actions-segmented",
         align: "start",
         items: [
           {
@@ -4351,7 +4946,8 @@ function renderGlobalSettingsSections() {
         const languageLabel = document.createElement("span");
         const languageLabelId = `${actionConfig.id}-label`;
         languageLabel.id = languageLabelId;
-        languageLabel.className = "global-settings-language-label hotkey-description";
+        languageLabel.className =
+          "global-settings-language-label hotkey-description";
         if (actionConfig.i18nKey) {
           languageLabel.setAttribute("data-i18n", actionConfig.i18nKey);
         }
@@ -4456,12 +5052,17 @@ function renderGlobalSettingsSections() {
 
         const modeGroup = document.createElement("div");
         modeGroup.id = actionConfig.id;
-        modeGroup.className = "hotkeys-search-toggle global-settings-mode-toggle";
+        modeGroup.className =
+          "hotkeys-search-toggle global-settings-mode-toggle";
         modeGroup.setAttribute("role", "group");
         modeGroup.setAttribute("aria-label", modeLabel.textContent);
 
         const sessionModes = [
-          { value: "classique", key: "modes.classic.title", fallback: "Classic" },
+          {
+            value: "classique",
+            key: "modes.classic.title",
+            fallback: "Classic",
+          },
           { value: "custom", key: "modes.custom.title", fallback: "Custom" },
           { value: "relax", key: "modes.relax.title", fallback: "Relax" },
           { value: "memory", key: "modes.memory.title", fallback: "Memory" },
@@ -4483,6 +5084,46 @@ function renderGlobalSettingsSections() {
         modeRow.appendChild(modeGroup);
         applyGridSpan(modeRow, item, actionConfig);
         actionsEl.appendChild(modeRow);
+        return;
+      }
+
+      if (actionConfig.control === "threshold-toggle") {
+        const thresholdRow = document.createElement("div");
+        thresholdRow.className = `global-settings-mode-toggle-row ${
+          actionConfig.className || ""
+        } ${item.className || ""}`.trim();
+
+        const thresholdLabel = document.createElement("span");
+        thresholdLabel.className =
+          "global-settings-mode-label hotkey-description";
+        if (actionConfig.i18nKey) {
+          thresholdLabel.setAttribute("data-i18n", actionConfig.i18nKey);
+        }
+        thresholdLabel.textContent = getGlobalSettingsText(
+          actionConfig.i18nKey || "",
+          actionConfig.fallback || "",
+        );
+        thresholdRow.appendChild(thresholdLabel);
+
+        const thresholdGroup = document.createElement("div");
+        thresholdGroup.id = actionConfig.id;
+        thresholdGroup.className =
+          "hotkeys-search-toggle global-settings-mode-toggle";
+        thresholdGroup.setAttribute("role", "group");
+        thresholdGroup.setAttribute("aria-label", thresholdLabel.textContent);
+
+        [5, 10, 15, 20].forEach((seconds) => {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "search-toggle-btn";
+          btn.dataset.threshold = String(seconds);
+          btn.textContent = `${seconds}s`;
+          thresholdGroup.appendChild(btn);
+        });
+
+        thresholdRow.appendChild(thresholdGroup);
+        applyGridSpan(thresholdRow, item, actionConfig);
+        actionsEl.appendChild(thresholdRow);
         return;
       }
 
@@ -4528,6 +5169,21 @@ function renderGlobalSettingsSections() {
           actionConfig.fallback || "",
         );
         checkboxWrap.appendChild(textEl);
+
+        if (actionConfig.playPreview) {
+          const previewBtn = document.createElement("button");
+          previewBtn.type = "button";
+          previewBtn.className = "global-settings-sound-preview-btn";
+          previewBtn.setAttribute("aria-label", "Preview sound");
+          previewBtn.innerHTML = ICONS.SOUND_PREVIEW;
+          const previewType = actionConfig.playPreview;
+          previewBtn.addEventListener("click", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            SoundManager.preview(previewType);
+          });
+          checkboxWrap.appendChild(previewBtn);
+        }
 
         applyGridSpan(checkboxWrap, item, actionConfig);
         actionsEl.appendChild(checkboxWrap);
@@ -4676,6 +5332,7 @@ function renderGlobalSettingsSections() {
 const globalSettingsCollapsed = new Set();
 const globalSettingsTransitionState = new WeakMap();
 const globalSettingsTransitionDurationMs = 240;
+let globalSettingsExpandScrollRafId = 0;
 let globalSettingsCategoriesInitialized = false;
 let globalSettingsFocusTrapHandler = null;
 let globalSettingsLastFocusedElement = null;
@@ -4824,6 +5481,82 @@ function setGlobalSettingsCategoryCollapsed(
   globalSettingsTransitionState.set(listEl, { onEnd, timeoutId });
 }
 
+function smoothScrollExpandedGlobalSettingsCategory(categoryEl) {
+  if (!categoryEl) return;
+  const listEl = categoryEl.querySelector(".global-settings-list");
+  const modal = document.getElementById("global-settings-modal");
+  const scrollContainer =
+    categoryEl.closest(".global-settings-modal-body") ||
+    modal?.querySelector(".global-settings-modal-body");
+
+  if (!listEl || !scrollContainer) {
+    categoryEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    return;
+  }
+
+  const margin = 12;
+  const containerRect = scrollContainer.getBoundingClientRect();
+  const categoryRect = categoryEl.getBoundingClientRect();
+  const currentListHeight = Math.max(listEl.getBoundingClientRect().height, 0);
+  const categoryHeaderHeight = Math.max(categoryRect.height - currentListHeight, 0);
+  const projectedBottom =
+    categoryRect.top + categoryHeaderHeight + Math.max(listEl.scrollHeight, 0);
+
+  const topSafe = containerRect.top + margin;
+  const bottomSafe = containerRect.bottom - margin;
+  let delta = 0;
+
+  if (categoryRect.top < topSafe) {
+    delta = categoryRect.top - topSafe;
+  } else if (projectedBottom > bottomSafe) {
+    delta = projectedBottom - bottomSafe;
+  }
+
+  if (Math.abs(delta) < 1) return;
+
+  const maxScrollTop = Math.max(
+    0,
+    scrollContainer.scrollHeight - scrollContainer.clientHeight,
+  );
+  const targetTop = Math.max(
+    0,
+    Math.min(maxScrollTop, scrollContainer.scrollTop + delta),
+  );
+  scrollContainer.scrollTop = targetTop;
+}
+
+function cancelGlobalSettingsExpandScrollTracking() {
+  if (!globalSettingsExpandScrollRafId) return;
+  cancelAnimationFrame(globalSettingsExpandScrollRafId);
+  globalSettingsExpandScrollRafId = 0;
+}
+
+function trackExpandedGlobalSettingsCategoryVisibility(categoryEl) {
+  cancelGlobalSettingsExpandScrollTracking();
+  if (!categoryEl) return;
+
+  const startTs = performance.now();
+  const trackDurationMs = globalSettingsTransitionDurationMs + 140;
+
+  const tick = () => {
+    if (!categoryEl.isConnected || categoryEl.classList.contains("collapsed")) {
+      cancelGlobalSettingsExpandScrollTracking();
+      return;
+    }
+
+    smoothScrollExpandedGlobalSettingsCategory(categoryEl);
+
+    if (performance.now() - startTs >= trackDurationMs) {
+      cancelGlobalSettingsExpandScrollTracking();
+      return;
+    }
+
+    globalSettingsExpandScrollRafId = requestAnimationFrame(tick);
+  };
+
+  globalSettingsExpandScrollRafId = requestAnimationFrame(tick);
+}
+
 function initGlobalSettingsCategoryToggles() {
   if (globalSettingsCategoriesInitialized) return;
   const modal = document.getElementById("global-settings-modal");
@@ -4844,6 +5577,11 @@ function initGlobalSettingsCategoryToggles() {
       const willCollapse = !categoryEl.classList.contains("collapsed");
       setGlobalSettingsCategoryCollapsed(categoryEl, willCollapse, true, true);
       if (typeof toggle.blur === "function") toggle.blur();
+      if (!willCollapse) {
+        trackExpandedGlobalSettingsCategoryVisibility(categoryEl);
+      } else {
+        cancelGlobalSettingsExpandScrollTracking();
+      }
     });
   });
 
@@ -4905,7 +5643,10 @@ async function collectGlobalSettingsStorageDiagnostics() {
       ) {
         return undefined;
       }
-      return PoseChronoStorage.getJson(STORAGE_KEYS.SESSION_PLANS_DB, undefined);
+      return PoseChronoStorage.getJson(
+        STORAGE_KEYS.SESSION_PLANS_DB,
+        undefined,
+      );
     },
     loadLegacyPlansPayload: () => {
       const localRaw = localStorage.getItem("posechrono_session_plans");
@@ -5080,7 +5821,9 @@ function updateGlobalSettingsModalState() {
   const defaultModeGroup = document.getElementById(
     "global-settings-default-mode-group",
   );
-  const languageSelect = document.getElementById("global-settings-language-select");
+  const languageSelect = document.getElementById(
+    "global-settings-language-select",
+  );
   const storageStatus = document.getElementById(
     "global-settings-storage-status",
   );
@@ -5183,11 +5926,163 @@ function updateGlobalSettingsModalState() {
       languageSelect
         .querySelectorAll(".global-settings-language-option[data-lang]")
         .forEach((optionEl) => {
-          const isSelected = optionEl.dataset.lang === activeLanguageConfig.value;
+          const isSelected =
+            optionEl.dataset.lang === activeLanguageConfig.value;
           optionEl.classList.toggle("active", isSelected);
           optionEl.setAttribute("aria-selected", isSelected ? "true" : "false");
         });
     }
+  }
+
+  const toggleAnimationsInput = document.getElementById(
+    "global-settings-toggle-animations-btn",
+  );
+  if (
+    toggleAnimationsInput &&
+    toggleAnimationsInput.tagName === "INPUT" &&
+    String(toggleAnimationsInput.type || "").toLowerCase() === "checkbox"
+  ) {
+    // "Disable animations": checked = animations disabled = !animationsEnabled
+    toggleAnimationsInput.checked = !UIPreferences.get(
+      "animationsEnabled",
+      true,
+    );
+  }
+
+  const ignoreVideoFilesInput = document.getElementById(
+    "global-settings-ignore-video-files-btn",
+  );
+  const confirmDeleteImageInput = document.getElementById(
+    "global-settings-confirm-delete-image-btn",
+  );
+  if (
+    ignoreVideoFilesInput &&
+    ignoreVideoFilesInput.tagName === "INPUT" &&
+    String(ignoreVideoFilesInput.type || "").toLowerCase() === "checkbox"
+  ) {
+    ignoreVideoFilesInput.checked = !!UIPreferences.get(
+      "ignoreVideoFiles",
+      false,
+    );
+  }
+
+  if (
+    confirmDeleteImageInput &&
+    confirmDeleteImageInput.tagName === "INPUT" &&
+    String(confirmDeleteImageInput.type || "").toLowerCase() === "checkbox"
+  ) {
+    confirmDeleteImageInput.checked = !!UIPreferences.get(
+      PREF_KEY_CONFIRM_DELETE_IMAGE,
+      true,
+    );
+  }
+
+  const enableOnlineSyncInput = document.getElementById(
+    "global-settings-enable-online-sync-btn",
+  );
+  if (
+    enableOnlineSyncInput &&
+    enableOnlineSyncInput.tagName === "INPUT" &&
+    String(enableOnlineSyncInput.type || "").toLowerCase() === "checkbox"
+  ) {
+    enableOnlineSyncInput.checked = isSyncFeatureEnabled();
+  }
+
+  const showProgressBarInput = document.getElementById(
+    "global-settings-show-progress-bar-btn",
+  );
+  if (
+    showProgressBarInput &&
+    showProgressBarInput.tagName === "INPUT" &&
+    String(showProgressBarInput.type || "").toLowerCase() === "checkbox"
+  ) {
+    showProgressBarInput.checked = !!UIPreferences.get("showProgressBar", true);
+  }
+
+  const soundEnabledByDefaultInput = document.getElementById(
+    "global-settings-sound-enabled-by-default-btn",
+  );
+  if (
+    soundEnabledByDefaultInput &&
+    soundEnabledByDefaultInput.tagName === "INPUT" &&
+    String(soundEnabledByDefaultInput.type || "").toLowerCase() === "checkbox"
+  ) {
+    soundEnabledByDefaultInput.checked = !!UIPreferences.get(
+      PREF_KEY_SOUND_ENABLED_BY_DEFAULT,
+      true,
+    );
+  }
+
+  const soundTickInput = document.getElementById(
+    "global-settings-sound-tick-btn",
+  );
+  if (
+    soundTickInput &&
+    soundTickInput.tagName === "INPUT" &&
+    String(soundTickInput.type || "").toLowerCase() === "checkbox"
+  ) {
+    soundTickInput.checked = !!UIPreferences.get(PREF_KEY_SOUND_TICK, true);
+  }
+
+  const tickThresholdGroup = document.getElementById(
+    "global-settings-tick-threshold-group",
+  );
+  if (tickThresholdGroup) {
+    const activeThreshold = UIPreferences.get(
+      PREF_KEY_TICK_SOUND_THRESHOLD,
+      15,
+    );
+    tickThresholdGroup
+      .querySelectorAll(".search-toggle-btn[data-threshold]")
+      .forEach((btn) => {
+        const isActive =
+          Number(btn.dataset.threshold) === Number(activeThreshold);
+        btn.classList.toggle("active", isActive);
+        btn.setAttribute("aria-pressed", isActive ? "true" : "false");
+      });
+    const tickEnabled = !!UIPreferences.get(PREF_KEY_SOUND_TICK, true);
+    const thresholdRow = tickThresholdGroup.closest(
+      ".global-settings-mode-toggle-row",
+    );
+    if (thresholdRow) {
+      thresholdRow.classList.toggle("is-disabled", !tickEnabled);
+    }
+  }
+
+  const soundEndInput = document.getElementById(
+    "global-settings-sound-end-btn",
+  );
+  if (
+    soundEndInput &&
+    soundEndInput.tagName === "INPUT" &&
+    String(soundEndInput.type || "").toLowerCase() === "checkbox"
+  ) {
+    soundEndInput.checked = !!UIPreferences.get(PREF_KEY_SOUND_END, true);
+  }
+
+  const soundImageChangeInput = document.getElementById(
+    "global-settings-sound-image-change-btn",
+  );
+  if (
+    soundImageChangeInput &&
+    soundImageChangeInput.tagName === "INPUT" &&
+    String(soundImageChangeInput.type || "").toLowerCase() === "checkbox"
+  ) {
+    soundImageChangeInput.checked = !!UIPreferences.get(
+      PREF_KEY_SOUND_IMAGE_CHANGE,
+      true,
+    );
+  }
+
+  const soundPauseInput = document.getElementById(
+    "global-settings-sound-pause-btn",
+  );
+  if (
+    soundPauseInput &&
+    soundPauseInput.tagName === "INPUT" &&
+    String(soundPauseInput.type || "").toLowerCase() === "checkbox"
+  ) {
+    soundPauseInput.checked = !!UIPreferences.get(PREF_KEY_SOUND_PAUSE, true);
   }
 
   if (storageStatus) {
@@ -5221,12 +6116,65 @@ function openGlobalSettingsModal() {
       focusTarget.focus();
     }
   }, 0);
+
+  // Drag par le header (initialiser une seule fois)
+  const modalHeader = document.getElementById("global-settings-modal-header");
+  const modalContent = modal.querySelector(".modal-content");
+
+  if (modalHeader && modalContent && !modalHeader.dataset.dragInitialized) {
+    modalHeader.dataset.dragInitialized = "true";
+
+    let isDragging = false;
+    let startX, startY;
+    let offsetX = 0,
+      offsetY = 0;
+
+    modalHeader.addEventListener("mousedown", (e) => {
+      if (e.target.closest(".modal-close-btn")) return;
+      isDragging = true;
+      startX = e.clientX - offsetX;
+      startY = e.clientY - offsetY;
+      modalContent.style.transition = "none";
+      document.body.style.userSelect = "none";
+    });
+
+    document.addEventListener("mousemove", (e) => {
+      if (!isDragging) return;
+      e.preventDefault();
+      offsetX = e.clientX - startX;
+      offsetY = e.clientY - startY;
+      modalContent.style.transform = `translate(${offsetX}px, ${offsetY}px)`;
+    });
+
+    document.addEventListener("mouseup", () => {
+      if (!isDragging) return;
+      isDragging = false;
+      modalContent.style.transition = "";
+      document.body.style.userSelect = "";
+    });
+
+    new MutationObserver((mutations) => {
+      mutations.forEach((mutation) => {
+        if (
+          mutation.type === "attributes" &&
+          mutation.attributeName === "class"
+        ) {
+          if (modal.classList.contains("hidden")) {
+            offsetX = 0;
+            offsetY = 0;
+            modalContent.style.transform = "";
+          }
+        }
+      });
+    }).observe(modal, { attributes: true });
+  }
 }
 
 function closeGlobalSettingsModal(options = {}) {
   const { restoreFocus = true } = options;
   const modal = document.getElementById("global-settings-modal");
   if (!modal) return;
+  cancelGlobalSettingsExpandScrollTracking();
   disableGlobalSettingsFocusTrap(modal);
   modal.classList.add("hidden");
   if (
@@ -5239,8 +6187,6927 @@ function closeGlobalSettingsModal(options = {}) {
   globalSettingsLastFocusedElement = null;
 }
 
+let syncSessionLastFocusedElement = null;
+let syncSessionModalRole = "host";
+let syncSessionModalBindingsReady = false;
+let syncConnectingStartedAt = 0;
+
+/** Hash a password string with SHA-256, returning hex. Empty string → empty string. */
+async function syncHashPassword(plainText) {
+  const trimmed = String(plainText || "").trim();
+  if (!trimmed) return "";
+  try {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(trimmed);
+    const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+    return Array.from(new Uint8Array(hashBuffer))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+  } catch (_) {
+    // Fallback: return the raw value if SubtleCrypto is unavailable (HTTP context)
+    return trimmed;
+  }
+}
+let syncSessionService = null;
+let syncSessionServiceState = null;
+let syncSessionServiceUnsubscribe = null;
+let syncSessionTransportMode = "mock";
+let syncSessionTransportUrl = "";
+let syncSessionSuggestedLocalRelayUrl = "";
+let syncSessionMediaTransferEnabled = true;
+let syncRuntimeApplyInProgress = false;
+let syncRuntimeLastSentFingerprint = "";
+let syncRuntimeLastSentAt = 0;
+let syncRuntimeLastAppliedRevision = 0;
+let syncRuntimeLastAppliedCustomQueueFingerprint = "";
+let syncRuntimeLastHeartbeatAt = 0;
+let syncRuntimePublishScheduled = false;
+let syncRuntimePendingReason = "";
+let syncRuntimePendingOptions = {
+  includeMediaOrder: false,
+  force: false,
+};
+let syncRuntimeStatusBadgeEl = null;
+let syncSessionParticipantsTooltipEl = null;
+let syncSessionLastParticipantsCount = null;
+let syncSessionLastInvalidPasswordToastAt = 0;
+let syncSessionLastPseudoValidationToastAt = 0;
+let syncSharedPlaybackFeedbackToastAt = 0;
+let syncHostActionFeedbackToastAt = 0;
+let syncParticipantTransferInProgress = false;
+let syncParticipantLastPublishedSyncState = "";
+let syncParticipantLastPublishedSessionCode = "";
+let syncTransferModalAutoCloseTimer = null;
+let syncTransferAbortController = null;
+const SYNC_ERROR_TOAST_LIMIT_DEFAULT = 2;
+const SYNC_ERROR_TOAST_LIMIT_MIN = 1;
+const SYNC_ERROR_TOAST_LIMIT_MAX = 10;
+const SYNC_SESSION_PACK_SCHEMA = "posechrono-session-pack";
+const SYNC_SESSION_PACK_VERSION = 1;
+const SYNC_SESSION_PACK_MAX_TEXT_LENGTH = 2 * 1024 * 1024;
+const SYNC_SESSION_PACK_MAX_MEDIA_REFS = 50000;
+const SYNC_SESSION_MEDIA_MAX_FILES = 300;
+const SYNC_SESSION_MEDIA_MAX_FILE_BYTES = 2 * 1024 * 1024;
+const SYNC_SESSION_MEDIA_MAX_TOTAL_BYTES = 256 * 1024 * 1024;
+const SYNC_SESSION_MEDIA_TRANSFER_MAX_RETRIES = 4;
+const SYNC_SESSION_MEDIA_TRANSFER_BASE_DELAY_MS = 140;
+const SYNC_SESSION_MEDIA_TRANSFER_MAX_DELAY_MS = 1400;
+const SYNC_SESSION_MEDIA_TRANSFER_REQUEST_INTERVAL_MS = 35;
+const SYNC_SESSION_MEDIA_ALLOWED_EXTENSIONS = new Set([
+  "jpg",
+  "jpeg",
+  "png",
+  "webp",
+  "mp4",
+  "webm",
+]);
+const SYNC_SESSION_MEDIA_MIME_BY_EXT = {
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  webp: "image/webp",
+  mp4: "video/mp4",
+  webm: "video/webm",
+};
+let syncPendingSessionPackMediaOrderKeys = null;
+let syncPendingRuntimeMediaOrderKeys = null;
+let syncOnlineMediaCacheByIdentity = new Map();
+let syncParticipantPackValidationState = {
+  sessionCode: "",
+  packHash: "",
+  packUpdatedAt: 0,
+  mediaUpdatedAt: 0,
+  validatedAt: 0,
+};
+let syncParticipantPackValidationWarningAt = 0;
+const SYNC_SESSION_CONTROL_MODE_OPTIONS =
+  SYNC_SESSION_MODAL_HELPERS?.CONTROL_MODE_OPTIONS ||
+  Object.freeze([
+    {
+      value: "host-only",
+      key: "sync.controlModeHostOnly",
+      fallback: "Hôte uniquement",
+    },
+    {
+      value: "shared-pause",
+      key: "sync.controlModeSharedPause",
+      fallback: "Pause partagée",
+    },
+  ]);
+
+function getSyncSessionControlModeConfig(controlMode) {
+  if (
+    SYNC_SESSION_MODAL_HELPERS &&
+    typeof SYNC_SESSION_MODAL_HELPERS.getControlModeConfig === "function"
+  ) {
+    return (
+      SYNC_SESSION_MODAL_HELPERS.getControlModeConfig(
+        controlMode,
+        SYNC_SESSION_CONTROL_MODE_OPTIONS,
+      ) || SYNC_SESSION_CONTROL_MODE_OPTIONS[0]
+    );
+  }
+  const normalized = String(controlMode || "").trim();
+  return (
+    SYNC_SESSION_CONTROL_MODE_OPTIONS.find(
+      (option) => option.value === normalized,
+    ) || SYNC_SESSION_CONTROL_MODE_OPTIONS[0]
+  );
+}
+
+function normalizeSyncSessionCode(input) {
+  if (
+    SYNC_SESSION_MODAL_HELPERS &&
+    typeof SYNC_SESSION_MODAL_HELPERS.normalizeSessionCode === "function"
+  ) {
+    return SYNC_SESSION_MODAL_HELPERS.normalizeSessionCode(input);
+  }
+  return String(input || "")
+    .trim()
+    .toUpperCase();
+}
+
+function isSyncSessionCodeFormatValid(code) {
+  if (
+    SYNC_SESSION_MODAL_HELPERS &&
+    typeof SYNC_SESSION_MODAL_HELPERS.isSessionCodeFormatValid === "function"
+  ) {
+    return SYNC_SESSION_MODAL_HELPERS.isSessionCodeFormatValid(code);
+  }
+  return /^[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(String(code || "").trim());
+}
+
+function isSyncGuestActionNotificationsEnabled() {
+  if (SYNCRO_MODULE && typeof SYNCRO_MODULE.readPreference === "function") {
+    return !!SYNCRO_MODULE.readPreference(UIPreferences, true);
+  }
+  return (
+    UIPreferences.get(PREF_KEY_SYNC_GUEST_ACTION_NOTIFICATIONS, true) !== false
+  );
+}
+
+function setSyncGuestActionNotificationsEnabled(enabled) {
+  if (SYNCRO_MODULE && typeof SYNCRO_MODULE.writePreference === "function") {
+    return !!SYNCRO_MODULE.writePreference(UIPreferences, !!enabled);
+  }
+  return (
+    UIPreferences.set(PREF_KEY_SYNC_GUEST_ACTION_NOTIFICATIONS, !!enabled) !==
+    false
+  );
+}
+
+function updateSyncSessionGuestActionNotificationsUi(modal) {
+  if (!modal) return;
+  const inputEl = modal.querySelector(
+    "#sync-session-guest-action-notifications-btn",
+  );
+  const labelEl = modal.querySelector(
+    "#sync-session-guest-action-notifications-label",
+  );
+  const hintEl = modal.querySelector(
+    "#sync-session-guest-action-notifications-hint",
+  );
+  if (labelEl) {
+    const fallbackLabel =
+      getCurrentI18nLanguage() === "fr"
+        ? "Notifier les actions de l'hôte"
+        : "Notify me about host actions";
+    labelEl.textContent = getI18nText(
+      "sync.showHostActionsNotifications",
+      fallbackLabel,
+    );
+  }
+  if (hintEl) {
+    const fallbackHint =
+      getCurrentI18nLanguage() === "fr"
+        ? "Pause, reprise et changements de poses/images."
+        : "Pause, resume and pose/image changes.";
+    hintEl.textContent = getI18nText(
+      "sync.showHostActionsNotificationsHint",
+      fallbackHint,
+    );
+  }
+  if (!inputEl) return;
+  if (SYNCRO_MODULE && typeof SYNCRO_MODULE.syncCheckbox === "function") {
+    SYNCRO_MODULE.syncCheckbox(inputEl, UIPreferences, true);
+    return;
+  }
+  inputEl.checked = isSyncGuestActionNotificationsEnabled();
+}
+
+function resolveSyncQueryParam(key) {
+  try {
+    const search = String(window?.location?.search || "");
+    if (!search) return "";
+    const params = new URLSearchParams(search);
+    return String(params.get(key) || "").trim();
+  } catch (_) {
+    return "";
+  }
+}
+
+function isSyncFeatureEnabled() {
+  try {
+    if (!CONFIG?.SYNC || typeof CONFIG.SYNC !== "object") return true;
+    if (CONFIG.SYNC.enabled === false) return false;
+    return UIPreferences.get("syncEnabled", true);
+  } catch (_) {
+    return true;
+  }
+}
+
+function resolveSyncTransportMode() {
+  // 1. Query param (highest priority, for debug)
+  const queryMode = resolveSyncQueryParam("syncTransport").toLowerCase();
+  if (queryMode === "mock" || queryMode === "ws" || queryMode === "webrtc") {
+    return queryMode;
+  }
+
+  // 2. CONFIG.SYNC (app config file — highest after query param)
+  try {
+    const configMode = String(CONFIG?.SYNC?.transport || "")
+      .trim()
+      .toLowerCase();
+    if (
+      configMode === "mock" ||
+      configMode === "ws" ||
+      configMode === "webrtc"
+    ) {
+      return configMode;
+    }
+  } catch (_) {}
+
+  // 3. Desktop app bridge
+  try {
+    const desktopMode = String(window?.poseChronoDesktop?.sync?.transport || "")
+      .trim()
+      .toLowerCase();
+    if (
+      desktopMode === "mock" ||
+      desktopMode === "ws" ||
+      desktopMode === "webrtc"
+    ) {
+      return desktopMode;
+    }
+  } catch (_) {}
+
+  // 4. localStorage (legacy override, lowest priority)
+  try {
+    const storedMode = String(
+      localStorage.getItem("posechrono-sync-transport") || "",
+    )
+      .trim()
+      .toLowerCase();
+    if (
+      storedMode === "mock" ||
+      storedMode === "ws" ||
+      storedMode === "webrtc"
+    ) {
+      return storedMode;
+    }
+  } catch (_) {}
+
+  return "mock";
+}
+
+function resolveSyncWebSocketUrl() {
+  const fromQuery =
+    resolveSyncQueryParam("syncWsUrl") || resolveSyncQueryParam("sync_ws_url");
+  if (fromQuery) return fromQuery;
+
+  try {
+    const fromStorage = String(
+      localStorage.getItem("posechrono-sync-ws-url") || "",
+    ).trim();
+    if (fromStorage) return fromStorage;
+  } catch (_) {}
+
+  try {
+    const fromDesktop = String(
+      window?.poseChronoDesktop?.sync?.wsUrl || "",
+    ).trim();
+    if (fromDesktop) return fromDesktop;
+  } catch (_) {}
+
+  try {
+    const fromConfig = String(CONFIG?.SYNC?.wsUrl || "").trim();
+    if (fromConfig) return fromConfig;
+  } catch (_) {}
+
+  return "";
+}
+
+function resolveSyncWebRtcSignalingUrl() {
+  const fromQuery =
+    resolveSyncQueryParam("syncWebRtcUrl") ||
+    resolveSyncQueryParam("sync_webrtc_url") ||
+    resolveSyncQueryParam("syncSignalingUrl") ||
+    resolveSyncQueryParam("sync_signaling_url");
+  if (fromQuery) return fromQuery;
+
+  try {
+    const fromStorage = String(
+      localStorage.getItem("posechrono-sync-webrtc-url") || "",
+    ).trim();
+    if (fromStorage) return fromStorage;
+  } catch (_) {}
+
+  try {
+    const fromDesktop = String(
+      window?.poseChronoDesktop?.sync?.webrtcSignalingUrl || "",
+    ).trim();
+    if (fromDesktop) return fromDesktop;
+  } catch (_) {}
+
+  try {
+    const fromConfig = String(CONFIG?.SYNC?.webrtcSignalingUrl || "").trim();
+    if (fromConfig) return fromConfig;
+  } catch (_) {}
+
+  return "";
+}
+
+function resolveSyncMediaTransferEnabled() {
+  const parseBooleanLike = (value, fallback = true) => {
+    const normalized = String(value || "")
+      .trim()
+      .toLowerCase();
+    if (!normalized) return !!fallback;
+    if (["1", "true", "yes", "on"].includes(normalized)) return true;
+    if (["0", "false", "no", "off"].includes(normalized)) return false;
+    return !!fallback;
+  };
+
+  const queryValue =
+    resolveSyncQueryParam("syncMediaTransfer") ||
+    resolveSyncQueryParam("sync_media_transfer");
+  if (queryValue) return parseBooleanLike(queryValue, true);
+
+  try {
+    const fromStorage = String(
+      localStorage.getItem("posechrono-sync-media-transfer-enabled") || "",
+    ).trim();
+    if (fromStorage) return parseBooleanLike(fromStorage, true);
+  } catch (_) {}
+
+  try {
+    const fromDesktop = window?.poseChronoDesktop?.sync?.allowMediaTransfer;
+    if (fromDesktop !== undefined) return !!fromDesktop;
+  } catch (_) {}
+
+  try {
+    if (
+      CONFIG?.SYNC &&
+      Object.prototype.hasOwnProperty.call(CONFIG.SYNC, "allowMediaTransfer")
+    ) {
+      return CONFIG.SYNC.allowMediaTransfer !== false;
+    }
+  } catch (_) {}
+
+  return true;
+}
+
+function createSyncSessionTransport() {
+  const preferredMode = resolveSyncTransportMode();
+  const wsUrl = resolveSyncWebSocketUrl();
+  const webrtcSignalingUrl = resolveSyncWebRtcSignalingUrl() || wsUrl;
+  const allowMediaTransfer = resolveSyncMediaTransferEnabled();
+  const syncConfig =
+    CONFIG?.SYNC && typeof CONFIG.SYNC === "object" ? CONFIG.SYNC : {};
+  const requireTls = syncConfig.requireTls === true;
+  const maxReconnectAttempts = Math.max(
+    0,
+    Number(syncConfig.maxReconnectAttempts ?? 10) || 0,
+  );
+  const reconnectBaseDelayMs = Math.max(
+    500,
+    Number(syncConfig.reconnectBaseDelayMs || 1000) || 1000,
+  );
+  const reconnectMaxDelayMs = Math.max(
+    reconnectBaseDelayMs,
+    Number(syncConfig.reconnectMaxDelayMs || 30000) || 30000,
+  );
+  const webrtcIceServers = Array.isArray(syncConfig.webrtcIceServers)
+    ? syncConfig.webrtcIceServers
+        .map((entry) =>
+          entry && typeof entry === "object" ? { ...entry } : null,
+        )
+        .filter((entry) => !!entry)
+    : null;
+  const maxMeshPeers = Math.max(1, Number(syncConfig.maxMeshPeers || 4) || 4);
+  const p2pRequestTimeoutMs = Math.max(
+    1000,
+    Number(syncConfig.p2pRequestTimeoutMs || 12000) || 12000,
+  );
+  const mediaChunkBase64Size = Math.max(
+    2048,
+    Number(syncConfig.mediaChunkBase64Size || 12000) || 12000,
+  );
+  const maxBufferedAmountBeforeYield = Math.max(
+    mediaChunkBase64Size * 2,
+    Number(syncConfig.maxBufferedAmountBeforeYield || 512 * 1024) || 512 * 1024,
+  );
+  const sendYieldDelayMs = Math.max(
+    1,
+    Number(syncConfig.sendYieldDelayMs || 12) || 12,
+  );
+  const latencyLogEvery = Math.max(
+    5,
+    Number(syncConfig.latencyLogEvery || 20) || 20,
+  );
+  const latencyWindowSize = Math.max(
+    10,
+    Number(syncConfig.latencyWindowSize || 120) || 120,
+  );
+  const mirrorMediaToRelay = syncConfig.mirrorMediaToRelay !== false;
+  const enableLatencyLogs = syncConfig.enableLatencyLogs === true;
+
+  if (preferredMode === "webrtc" && webrtcSignalingUrl) {
+    if (typeof SHARED_SYNC_TRANSPORT_WEBRTC_FACTORY === "function") {
+      try {
+        const transport = SHARED_SYNC_TRANSPORT_WEBRTC_FACTORY({
+          signalingUrl: webrtcSignalingUrl,
+          rtcConfiguration:
+            webrtcIceServers && webrtcIceServers.length
+              ? { iceServers: webrtcIceServers }
+              : undefined,
+          requireTls,
+          maxReconnectAttempts,
+          reconnectBaseDelayMs,
+          reconnectMaxDelayMs,
+          allowMediaTransfer,
+          maxMeshPeers,
+          p2pRequestTimeoutMs,
+          mediaChunkBase64Size,
+          maxBufferedAmountBeforeYield,
+          sendYieldDelayMs,
+          enableLatencyLogs,
+          latencyLogEvery,
+          latencyWindowSize,
+          mirrorMediaToRelay,
+          logger: (...args) => console.warn(...args),
+        });
+        return {
+          transport,
+          mode: "webrtc",
+          wsUrl: webrtcSignalingUrl,
+          mediaTransferEnabled: allowMediaTransfer,
+        };
+      } catch (error) {
+        console.warn(
+          "[Sync] WebRTC transport init failed, fallback to ws/mock:",
+          error,
+        );
+      }
+    } else {
+      logMissingShared("createSyncTransportWebRTC");
+    }
+  }
+
+  if (preferredMode !== "mock" && wsUrl) {
+    if (typeof SHARED_SYNC_TRANSPORT_WEBSOCKET_FACTORY === "function") {
+      try {
+        const transport = SHARED_SYNC_TRANSPORT_WEBSOCKET_FACTORY({
+          url: wsUrl,
+          requireTls,
+          maxReconnectAttempts,
+          reconnectBaseDelayMs,
+          reconnectMaxDelayMs,
+          allowMediaTransfer,
+          logger: (...args) => {
+            const msg = String(args[0] || "");
+            if (msg.includes("unencrypted ws://") && wsUrl && (wsUrl.includes("127.0.0.1") || wsUrl.includes("localhost") || wsUrl.includes("192.168.") || wsUrl.includes("10."))) return;
+            console.warn(...args);
+          },
+        });
+        return {
+          transport,
+          mode: "ws",
+          wsUrl,
+          mediaTransferEnabled: allowMediaTransfer,
+        };
+      } catch (error) {
+        console.warn(
+          "[Sync] WebSocket transport init failed, fallback to mock:",
+          error,
+        );
+      }
+    } else {
+      logMissingShared("createSyncTransportWebSocket");
+    }
+  }
+
+  if (typeof SHARED_SYNC_TRANSPORT_MOCK_FACTORY === "function") {
+    return {
+      transport: SHARED_SYNC_TRANSPORT_MOCK_FACTORY({
+        busKey: "__POSECHRONO_SYNC_MOCK_TRANSPORT_BUS__",
+      }),
+      mode: "mock",
+      wsUrl: "",
+      mediaTransferEnabled: allowMediaTransfer,
+    };
+  }
+
+  return {
+    transport: null,
+    mode: "none",
+    wsUrl: "",
+    mediaTransferEnabled: allowMediaTransfer,
+  };
+}
+
+function getSyncSessionStatusElement(modal) {
+  if (
+    SYNC_SESSION_STATUS_UI &&
+    typeof SYNC_SESSION_STATUS_UI.getStatusElement === "function"
+  ) {
+    return SYNC_SESSION_STATUS_UI.getStatusElement(modal);
+  }
+  if (!modal) return null;
+  return modal.querySelector("#sync-session-status");
+}
+
+function getSyncSessionNetworkStatusElement(modal) {
+  if (
+    SYNC_SESSION_STATUS_UI &&
+    typeof SYNC_SESSION_STATUS_UI.getNetworkStatusElement === "function"
+  ) {
+    return SYNC_SESSION_STATUS_UI.getNetworkStatusElement(modal);
+  }
+  if (!modal) return null;
+  return modal.querySelector("#sync-session-network-status");
+}
+
+function setSyncSessionNetworkStatus(
+  modal,
+  message = "",
+  tone = "",
+  tooltip = "",
+) {
+  if (
+    SYNC_SESSION_STATUS_UI &&
+    typeof SYNC_SESSION_STATUS_UI.setNetworkStatus === "function"
+  ) {
+    SYNC_SESSION_STATUS_UI.setNetworkStatus(modal, message, tone, tooltip);
+    return;
+  }
+  const networkEl = getSyncSessionNetworkStatusElement(modal);
+  if (!networkEl) return;
+  networkEl.classList.remove("is-success", "is-warning", "is-error");
+  if (tone === "success") networkEl.classList.add("is-success");
+  if (tone === "warning") networkEl.classList.add("is-warning");
+  if (tone === "error") networkEl.classList.add("is-error");
+  networkEl.textContent = String(message || "");
+  const tooltipText = String(tooltip || "").trim();
+  if (tooltipText) {
+    networkEl.setAttribute("data-tooltip", tooltipText);
+  } else {
+    networkEl.removeAttribute("data-tooltip");
+  }
+  networkEl.removeAttribute("title");
+}
+
+function isLoopbackSyncEndpoint(endpointUrl) {
+  try {
+    const parsed = new URL(String(endpointUrl || "").trim());
+    const host = String(parsed.hostname || "").trim().toLowerCase();
+    return host === "localhost" || host === "127.0.0.1" || host === "::1";
+  } catch (_) {
+    return false;
+  }
+}
+
+function stripEndpointSuffixFromStatus(message) {
+  const text = String(message || "").trim();
+  if (!text) return "";
+  return text
+    .replace(/\s*\([^)]*\)\s*$/, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+function updateSyncSessionNetworkStatus(modal, snapshot = null) {
+  // Fallback: if transportUrl was not set, resolve it now
+  const effectiveTransportUrl =
+    syncSessionTransportUrl || resolveSyncWebSocketUrl() || "";
+  const isLocalConnectionMode =
+    UIPreferences.get("syncConnectionType", "local") === "local";
+  const localServerBtn = modal
+    ? modal.querySelector("#sync-session-start-local-server-btn")
+    : null;
+  const isLocalServerReady =
+    !!localServerBtn && localServerBtn.classList.contains("is-ready");
+  if (
+    SYNC_SESSION_STATUS_UI &&
+    typeof SYNC_SESSION_STATUS_UI.updateNetworkStatus === "function"
+  ) {
+    const handled = SYNC_SESSION_STATUS_UI.updateNetworkStatus({
+      modal,
+      transportMode: syncSessionTransportMode,
+      transportUrl: effectiveTransportUrl,
+      preferredEndpoint: syncSessionSuggestedLocalRelayUrl || "",
+      isLocalConnectionMode,
+      isLocalServerReady,
+      state: snapshot || syncSessionServiceState,
+      getText: (key, fallback, vars = undefined) =>
+        getI18nText(key, fallback, vars),
+      setNetworkStatus: (message, tone, tooltip = "") =>
+        setSyncSessionNetworkStatus(modal, message, tone, tooltip),
+    });
+    if (handled) return;
+  }
+  if (!modal) return;
+  if (syncSessionTransportMode === "none") {
+    setSyncSessionNetworkStatus(modal, getI18nText("sync.networkUnavailable", "Network: unavailable."), "error");
+    return;
+  }
+
+  if (syncSessionTransportMode === "mock") {
+    setSyncSessionNetworkStatus(modal, getI18nText("sync.networkLocalMock", "Network: local mode (mock)."), "warning");
+    return;
+  }
+
+  if (syncSessionTransportMode === "webrtc") {
+    const state = snapshot || syncSessionServiceState;
+    const endpoint = String(syncSessionTransportUrl || "").trim();
+    const endpointLabel = endpoint || "WebRTC signaling";
+    const fallbackActive = !!state?.p2pFallbackActive;
+    const fallbackCount = Math.max(
+      0,
+      Number(state?.p2pRelayParticipantsCount || 0) || 0,
+    );
+    const meshLimit = Math.max(0, Number(state?.p2pMeshLimit || 0) || 0);
+    const errorCode = String(state?.lastError || "").toLowerCase();
+    const hasNetworkError =
+      errorCode.includes("websocket") ||
+      errorCode.includes("webrtc") ||
+      errorCode.includes("transport-unavailable") ||
+      errorCode.includes("connect-failed") ||
+      errorCode.includes("disconnected") ||
+      errorCode.includes("timeout");
+
+    if ((state && state.status === "connecting") || hasNetworkError) {
+      setSyncSessionNetworkStatus(
+        modal,
+        getI18nText("sync.networkP2PConnecting", "Network: P2P connecting ({{endpoint}})", { endpoint: endpointLabel }),
+        "warning",
+      );
+      return;
+    }
+
+    if (state && (state.status === "hosting" || state.status === "joined")) {
+      if (fallbackActive) {
+        setSyncSessionNetworkStatus(
+          modal,
+          getI18nText("sync.networkP2PFallback", "Network: P2P partial ({{endpoint}}) - relay fallback for {{count}} participant(s), mesh limit {{limit}}.", { endpoint: endpointLabel, count: fallbackCount, limit: meshLimit || 0 }),
+          "warning",
+        );
+        return;
+      }
+      setSyncSessionNetworkStatus(
+        modal,
+        getI18nText("sync.networkP2PConnected", "Network: P2P connected ({{endpoint}})", { endpoint: endpointLabel }),
+        "success",
+      );
+      return;
+    }
+
+    setSyncSessionNetworkStatus(
+      modal,
+      getI18nText("sync.networkP2PReady", "Network: P2P ready ({{endpoint}})", { endpoint: endpointLabel }),
+      "warning",
+    );
+    return;
+  }
+
+  const state = snapshot || syncSessionServiceState;
+  const endpoint = String(effectiveTransportUrl || "").trim();
+  let endpointLabel = endpoint || "";
+  if (endpointLabel && isLoopbackSyncEndpoint(endpointLabel)) {
+    const suggested = String(syncSessionSuggestedLocalRelayUrl || "").trim();
+    endpointLabel =
+      suggested && !isLoopbackSyncEndpoint(suggested) ? suggested : "";
+  }
+  const getWsStatusText = (key, fallback) => {
+    const text = getI18nText(key, fallback, { endpoint: "" });
+    const stripped = stripEndpointSuffixFromStatus(text);
+    if (stripped) return stripped;
+    return stripEndpointSuffixFromStatus(String(fallback || ""));
+  };
+  const networkTooltip = endpointLabel || "";
+  const errorCode = String(state?.lastError || "").toLowerCase();
+  const hasNetworkError =
+    errorCode.includes("websocket") ||
+    errorCode.includes("transport-unavailable") ||
+    errorCode.includes("connect-failed") ||
+    errorCode.includes("disconnected") ||
+    errorCode.includes("timeout");
+  const hasActiveSession =
+    state && (state.status === "hosting" || state.status === "joined");
+
+  if (isLocalConnectionMode && !isLocalServerReady && !hasActiveSession) {
+    setSyncSessionNetworkStatus(
+      modal,
+      getWsStatusText(
+        "sync.networkWaitingLocalServer",
+        "Network: waiting for local server startup.",
+      ),
+      "warning",
+      networkTooltip,
+    );
+    return;
+  }
+
+  if ((state && state.status === "connecting") || hasNetworkError) {
+    setSyncSessionNetworkStatus(
+      modal,
+      getWsStatusText(
+        "sync.networkReconnecting",
+        "Network: reconnecting",
+      ),
+      "warning",
+      networkTooltip,
+    );
+    return;
+  }
+
+  if (hasActiveSession) {
+    setSyncSessionNetworkStatus(
+      modal,
+      getWsStatusText(
+        "sync.networkConnected",
+        "Network: connected",
+      ),
+      "success",
+      networkTooltip,
+    );
+    return;
+  }
+
+  setSyncSessionNetworkStatus(
+    modal,
+    getWsStatusText("sync.networkReady", "Network: ready"),
+    "warning",
+    networkTooltip,
+  );
+}
+
+function updateSyncSessionCodeUi(modal, sessionCode = "") {
+  if (
+    SYNC_SESSION_STATUS_UI &&
+    typeof SYNC_SESSION_STATUS_UI.updateCodeUi === "function"
+  ) {
+    const handled = SYNC_SESSION_STATUS_UI.updateCodeUi({
+      modal,
+      sessionCode,
+      normalizeCode: (value) => normalizeSyncSessionCode(value),
+    });
+    if (handled) {
+      updateSyncSessionInvitePanelVisibility(modal);
+      return;
+    }
+  }
+  if (!modal) return;
+  const rowEl = modal.querySelector("#sync-session-code-row");
+  const valueEl = modal.querySelector("#sync-session-code-value");
+  const copyBtn =
+    modal.querySelector("#sync-session-code-row") ||
+    modal.querySelector("#sync-session-copy-code-btn");
+  if (!rowEl || !valueEl) return;
+
+  const normalizedCode = normalizeSyncSessionCode(sessionCode);
+  if (!normalizedCode) {
+    rowEl.classList.add("hidden");
+    valueEl.textContent = "";
+    if (copyBtn && "disabled" in copyBtn) copyBtn.disabled = true;
+    if (copyBtn) copyBtn.classList.add("is-disabled");
+    updateSyncSessionInvitePanelVisibility(modal);
+    return;
+  }
+
+  valueEl.textContent = normalizedCode;
+  rowEl.classList.remove("hidden");
+  if (copyBtn && "disabled" in copyBtn) copyBtn.disabled = false;
+  if (copyBtn) copyBtn.classList.remove("is-disabled");
+  updateSyncSessionInvitePanelVisibility(modal);
+}
+
+function updateSyncSessionInvitePanelVisibility(modal, snapshot = null) {
+  if (!modal) return;
+  const invitePanel = modal.querySelector("#sync-session-invite-panel");
+  if (!invitePanel) return;
+  const state = snapshot || syncSessionServiceState;
+  const hasSessionCode = !!normalizeSyncSessionCode(state?.sessionCode || "");
+  const shouldShow = isSyncSessionActive(state) && hasSessionCode;
+  const isLocalConnectionType =
+    UIPreferences.get("syncConnectionType", "local") === "local";
+  invitePanel.classList.toggle("hidden", !shouldShow);
+  invitePanel.classList.toggle(
+    "sync-session-invite-panel--plain",
+    !isLocalConnectionType,
+  );
+}
+
+function setSyncSessionStatus(modal, message = "", tone = "", options = {}) {
+  const withLoadingDots = !!options?.loadingDots;
+  if (
+    SYNC_SESSION_STATUS_UI &&
+    typeof SYNC_SESSION_STATUS_UI.setStatus === "function"
+  ) {
+    SYNC_SESSION_STATUS_UI.setStatus(modal, message, tone, {
+      loadingDots: withLoadingDots,
+    });
+    return;
+  }
+  const statusEl = getSyncSessionStatusElement(modal);
+  if (!statusEl) return;
+  statusEl.classList.remove(
+    "is-success",
+    "is-warning",
+    "is-error",
+    "is-loading-dots",
+  );
+  if (tone === "success") statusEl.classList.add("is-success");
+  if (tone === "warning") statusEl.classList.add("is-warning");
+  if (tone === "error") statusEl.classList.add("is-error");
+  if (withLoadingDots) statusEl.classList.add("is-loading-dots");
+  const normalizedMessage = withLoadingDots
+    ? String(message || "").replace(/\s*(?:\.\.\.|…)\s*$/, "")
+    : String(message || "");
+  const dotEl = statusEl.querySelector(".sync-session-status-dot");
+  if (dotEl) {
+    // Preserve the dot span, set text after it
+    while (dotEl.nextSibling) dotEl.nextSibling.remove();
+    const messageNode = document.createTextNode(normalizedMessage);
+    dotEl.after(messageNode);
+    if (withLoadingDots) {
+      const loadingDotsEl = document.createElement("span");
+      loadingDotsEl.className = "sync-session-status-loading-dots";
+      loadingDotsEl.setAttribute("aria-hidden", "true");
+      for (let i = 0; i < 3; i += 1) {
+        const dotElNode = document.createElement("span");
+        dotElNode.className = "sync-session-status-loading-dot";
+        dotElNode.textContent = ".";
+        loadingDotsEl.appendChild(dotElNode);
+      }
+      messageNode.after(loadingDotsEl);
+    }
+  } else {
+    statusEl.textContent = normalizedMessage;
+    if (withLoadingDots) {
+      const loadingDotsEl = document.createElement("span");
+      loadingDotsEl.className = "sync-session-status-loading-dots";
+      loadingDotsEl.setAttribute("aria-hidden", "true");
+      for (let i = 0; i < 3; i += 1) {
+        const dotElNode = document.createElement("span");
+        dotElNode.className = "sync-session-status-loading-dot";
+        dotElNode.textContent = ".";
+        loadingDotsEl.appendChild(dotElNode);
+      }
+      statusEl.appendChild(loadingDotsEl);
+    }
+  }
+}
+
+function getSyncSessionGuestParticipants(snapshot = null) {
+  const state = snapshot || syncSessionServiceState;
+  if (!state || typeof state !== "object") return [];
+  const hostClientId = String(state.hostClientId || "").trim();
+  const participantIds = getSyncParticipantIds(state);
+  const profiles = getSyncParticipantProfiles(state);
+  const participantSyncStates = getSyncParticipantSyncStates(state);
+  return participantIds
+    .filter((id) => !!id && id !== hostClientId)
+    .map((id) => ({
+      id,
+      name: getSyncParticipantDisplayName(id, profiles),
+      syncState: getSyncParticipantSyncState(id, participantSyncStates),
+    }));
+}
+
+function getSyncSessionJoinedRemoteParticipants(snapshot = null) {
+  const state = snapshot || syncSessionServiceState;
+  if (!state || typeof state !== "object") return [];
+  const selfClientId = String(state.clientId || "").trim();
+  const hostClientId = String(state.hostClientId || "").trim();
+  const participantIds = getSyncParticipantIds(state);
+  const profiles = getSyncParticipantProfiles(state);
+  const participantSyncStates = getSyncParticipantSyncStates(state);
+
+  return participantIds
+    .filter((id) => !!id && id !== selfClientId)
+    .map((id) => {
+      const displayName = getSyncParticipantDisplayName(id, profiles);
+      return {
+        id,
+        name: id === hostClientId ? `Hôte: ${displayName}` : displayName,
+        syncState: getSyncParticipantSyncState(id, participantSyncStates),
+      };
+    });
+}
+
+function ensureSyncSessionParticipantsTooltip() {
+  if (
+    SYNC_SESSION_STATUS_UI &&
+    typeof SYNC_SESSION_STATUS_UI.ensureParticipantsTooltip === "function"
+  ) {
+    syncSessionParticipantsTooltipEl =
+      SYNC_SESSION_STATUS_UI.ensureParticipantsTooltip({
+        existingTooltipEl: syncSessionParticipantsTooltipEl,
+        documentRef: typeof document !== "undefined" ? document : null,
+      }) || null;
+    return syncSessionParticipantsTooltipEl;
+  }
+  if (
+    syncSessionParticipantsTooltipEl &&
+    document.body &&
+    document.body.contains(syncSessionParticipantsTooltipEl)
+  ) {
+    return syncSessionParticipantsTooltipEl;
+  }
+  if (!document || !document.body) return null;
+  const tooltip = document.createElement("div");
+  tooltip.id = "sync-session-participants-tooltip";
+  tooltip.className =
+    "timeline-custom-tooltip sync-session-participants-tooltip";
+  document.body.appendChild(tooltip);
+  syncSessionParticipantsTooltipEl = tooltip;
+  return tooltip;
+}
+
+function hideSyncSessionParticipantsTooltip() {
+  if (
+    SYNC_SESSION_STATUS_UI &&
+    typeof SYNC_SESSION_STATUS_UI.hideParticipantsTooltip === "function"
+  ) {
+    SYNC_SESSION_STATUS_UI.hideParticipantsTooltip(
+      syncSessionParticipantsTooltipEl,
+    );
+    return;
+  }
+  if (!syncSessionParticipantsTooltipEl) return;
+  syncSessionParticipantsTooltipEl.classList.remove("visible");
+}
+
+function readSyncGuestsFromStatusTrigger(triggerEl) {
+  if (
+    SYNC_SESSION_STATUS_UI &&
+    typeof SYNC_SESSION_STATUS_UI.readGuestsFromStatusTrigger === "function"
+  ) {
+    return SYNC_SESSION_STATUS_UI.readGuestsFromStatusTrigger(triggerEl);
+  }
+  if (!triggerEl) return [];
+  const raw = String(triggerEl.dataset.syncGuests || "[]");
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((value) => {
+        if (value && typeof value === "object") {
+          const name = String(value.name || "").trim();
+          if (!name) return null;
+          return {
+            id: String(value.id || "").trim(),
+            name,
+            syncState: normalizeSyncParticipantSyncState(value.syncState),
+          };
+        }
+        const name = String(value || "").trim();
+        if (!name) return null;
+        return {
+          id: "",
+          name,
+          syncState: "missing",
+        };
+      })
+      .filter((value) => !!value);
+  } catch (_) {
+    return [];
+  }
+}
+
+function renderSyncSessionParticipantsTooltip(tooltipEl, guests = []) {
+  if (
+    SYNC_SESSION_STATUS_UI &&
+    typeof SYNC_SESSION_STATUS_UI.renderParticipantsTooltip === "function"
+  ) {
+    const handled = SYNC_SESSION_STATUS_UI.renderParticipantsTooltip({
+      tooltipEl,
+      guests,
+      title: getI18nText("sync.guestsConnectedTitle", "Connected guests"),
+      emptyLabel: getI18nText("sync.noGuestsConnected", "No guests connected"),
+      documentRef: typeof document !== "undefined" ? document : null,
+    });
+    if (handled) return;
+  }
+  if (!tooltipEl) return;
+  tooltipEl.innerHTML = "";
+
+  const titleEl = document.createElement("div");
+  titleEl.className = "custom-structure-title";
+  titleEl.textContent = getI18nText("sync.guestsConnectedTitle", "Connected guests");
+  tooltipEl.appendChild(titleEl);
+
+  if (!Array.isArray(guests) || guests.length <= 0) {
+    const emptyEl = document.createElement("div");
+    emptyEl.className = "custom-step pause";
+    emptyEl.textContent = getI18nText("sync.noGuestsConnected", "No guests connected");
+    tooltipEl.appendChild(emptyEl);
+    return;
+  }
+
+  guests.forEach((guest) => {
+    const guestName =
+      guest && typeof guest === "object"
+        ? String(guest.name || "").trim()
+        : String(guest || "").trim();
+    if (!guestName) return;
+    const itemEl = document.createElement("div");
+    itemEl.className = "custom-step pose";
+    itemEl.textContent = `• ${guestName}`;
+    tooltipEl.appendChild(itemEl);
+  });
+}
+
+function updateSyncSessionParticipantsTooltipPosition(triggerEl, tooltipEl) {
+  if (
+    SYNC_SESSION_STATUS_UI &&
+    typeof SYNC_SESSION_STATUS_UI.updateParticipantsTooltipPosition ===
+      "function"
+  ) {
+    const handled = SYNC_SESSION_STATUS_UI.updateParticipantsTooltipPosition(
+      triggerEl,
+      tooltipEl,
+    );
+    if (handled) return;
+  }
+  if (!triggerEl || !tooltipEl) return;
+  const rect = triggerEl.getBoundingClientRect();
+  tooltipEl.style.left = rect.left + rect.width / 2 + "px";
+  tooltipEl.style.top = rect.bottom + 8 + "px";
+}
+
+function showSyncSessionParticipantsTooltip(triggerEl) {
+  if (
+    SYNC_SESSION_STATUS_UI &&
+    typeof SYNC_SESSION_STATUS_UI.showParticipantsTooltip === "function"
+  ) {
+    syncSessionParticipantsTooltipEl =
+      SYNC_SESSION_STATUS_UI.showParticipantsTooltip({
+        triggerEl,
+        existingTooltipEl: syncSessionParticipantsTooltipEl,
+        documentRef: typeof document !== "undefined" ? document : null,
+        title: getI18nText("sync.guestsConnectedTitle", "Connected guests"),
+        emptyLabel: getI18nText("sync.noGuestsConnected", "No guests connected"),
+      }) || syncSessionParticipantsTooltipEl;
+    return;
+  }
+  if (!triggerEl) return;
+  const tooltipEl = ensureSyncSessionParticipantsTooltip();
+  if (!tooltipEl) return;
+  const guests = readSyncGuestsFromStatusTrigger(triggerEl);
+  renderSyncSessionParticipantsTooltip(tooltipEl, guests);
+  updateSyncSessionParticipantsTooltipPosition(triggerEl, tooltipEl);
+  tooltipEl.classList.add("visible");
+}
+
+function setSyncSessionHostingStatus(modal, state) {
+  if (
+    SYNC_SESSION_STATUS_UI &&
+    typeof SYNC_SESSION_STATUS_UI.setHostingStatus === "function"
+  ) {
+    const handled = SYNC_SESSION_STATUS_UI.setHostingStatus({
+      modal,
+      state,
+      guests: getSyncSessionGuestParticipants(state),
+      getText: (key, fallback, vars = undefined) =>
+        getI18nText(key, fallback, vars),
+    });
+    if (handled) return;
+  }
+  const statusEl = getSyncSessionStatusElement(modal);
+  if (!statusEl) return;
+  statusEl.classList.remove(
+    "is-success",
+    "is-warning",
+    "is-error",
+    "is-loading-dots",
+  );
+  statusEl.classList.add("is-success");
+  const dotElH = statusEl.querySelector(".sync-session-status-dot");
+  if (dotElH) {
+    while (dotElH.nextSibling) dotElH.nextSibling.remove();
+  } else {
+    statusEl.textContent = "";
+  }
+
+  const guests = getSyncSessionGuestParticipants(state);
+  const participants = Math.max(0, guests.length);
+  const sessionCode = String(state?.sessionCode || "").trim();
+  const participantsLabel = `(${participants} participant${participants === 1 ? "" : "s"})`;
+
+  const prefixText = `Hosting ${sessionCode} `;
+  statusEl.appendChild(document.createTextNode(prefixText));
+
+  const triggerEl = document.createElement("span");
+  triggerEl.className = "sync-session-participants-trigger";
+  triggerEl.setAttribute("role", "button");
+  triggerEl.setAttribute("tabindex", "0");
+  triggerEl.textContent = participantsLabel;
+  triggerEl.dataset.syncGuests = JSON.stringify(
+    guests.map((guest) => ({
+      id: String(guest?.id || "").trim(),
+      name: String(guest?.name || "").trim(),
+      syncState: normalizeSyncParticipantSyncState(guest?.syncState),
+    })),
+  );
+  statusEl.appendChild(triggerEl);
+}
+
+function setSyncSessionJoinedStatus(modal, state) {
+  if (
+    SYNC_SESSION_STATUS_UI &&
+    typeof SYNC_SESSION_STATUS_UI.setJoinedStatus === "function"
+  ) {
+    const handled = SYNC_SESSION_STATUS_UI.setJoinedStatus({
+      modal,
+      state,
+      others: getSyncSessionJoinedRemoteParticipants(state),
+      getText: (key, fallback, vars = undefined) =>
+        getI18nText(key, fallback, vars),
+    });
+    if (handled) return;
+  }
+  const statusEl = getSyncSessionStatusElement(modal);
+  if (!statusEl) return;
+  statusEl.classList.remove(
+    "is-success",
+    "is-warning",
+    "is-error",
+    "is-loading-dots",
+  );
+  statusEl.classList.add("is-success");
+  const dotElJ = statusEl.querySelector(".sync-session-status-dot");
+  if (dotElJ) {
+    while (dotElJ.nextSibling) dotElJ.nextSibling.remove();
+  } else {
+    statusEl.textContent = "";
+  }
+
+  const others = getSyncSessionJoinedRemoteParticipants(state);
+  const participants = Math.max(0, others.length);
+  const sessionCode = String(state?.sessionCode || "").trim();
+  const participantsLabel = `(${participants} participant${participants === 1 ? "" : "s"})`;
+
+  const prefixText = `Connected to ${sessionCode} `;
+  statusEl.appendChild(document.createTextNode(prefixText));
+
+  const triggerEl = document.createElement("span");
+  triggerEl.className = "sync-session-participants-trigger";
+  triggerEl.setAttribute("role", "button");
+  triggerEl.setAttribute("tabindex", "0");
+  triggerEl.textContent = participantsLabel;
+  triggerEl.dataset.syncGuests = JSON.stringify(
+    others.map((guest) => {
+      if (guest && typeof guest === "object") {
+        return {
+          id: String(guest.id || "").trim(),
+          name: String(guest.name || "").trim(),
+          syncState: normalizeSyncParticipantSyncState(guest.syncState),
+        };
+      }
+      return {
+        id: "",
+        name: String(guest || "").trim(),
+        syncState: "missing",
+      };
+    }),
+  );
+  statusEl.appendChild(triggerEl);
+}
+
+function flashSyncSessionInputError(inputEl) {
+  if (
+    SYNC_SESSION_MODAL_HELPERS &&
+    typeof SYNC_SESSION_MODAL_HELPERS.flashInputError === "function"
+  ) {
+    SYNC_SESSION_MODAL_HELPERS.flashInputError(inputEl);
+    return;
+  }
+  if (!inputEl) return;
+  inputEl.classList.remove("shake", "input-border-error");
+  if (typeof inputEl.focus === "function") {
+    inputEl.focus();
+  }
+  void inputEl.offsetWidth;
+  inputEl.classList.add("shake", "input-border-error");
+  setTimeout(() => {
+    inputEl.classList.remove("shake", "input-border-error");
+  }, 420);
+}
+
+function flashSyncSessionCodeInputError(inputEl) {
+  flashSyncSessionInputError(inputEl);
+}
+
+function isSyncGuestPseudoCharAllowed(char) {
+  if (
+    SYNC_RUNTIME_HELPERS &&
+    typeof SYNC_RUNTIME_HELPERS.isGuestPseudoCharAllowed === "function"
+  ) {
+    return SYNC_RUNTIME_HELPERS.isGuestPseudoCharAllowed(char);
+  }
+  const symbol = String(char || "");
+  if (!symbol) return false;
+  if (symbol === " ") return true;
+  const lower = symbol.toLocaleLowerCase();
+  const upper = symbol.toLocaleUpperCase();
+  return lower !== upper;
+}
+
+function sanitizeSyncGuestPseudoInputValue(input) {
+  if (
+    SYNC_RUNTIME_HELPERS &&
+    typeof SYNC_RUNTIME_HELPERS.sanitizeGuestPseudoInputValue === "function"
+  ) {
+    return SYNC_RUNTIME_HELPERS.sanitizeGuestPseudoInputValue(input);
+  }
+  const raw = String(input || "").normalize("NFC");
+  return Array.from(raw)
+    .filter((char) => isSyncGuestPseudoCharAllowed(char))
+    .join("")
+    .slice(0, 32);
+}
+
+function normalizeSyncGuestPseudoValue(input) {
+  if (
+    SYNC_RUNTIME_HELPERS &&
+    typeof SYNC_RUNTIME_HELPERS.normalizeGuestPseudoValue === "function"
+  ) {
+    return SYNC_RUNTIME_HELPERS.normalizeGuestPseudoValue(input);
+  }
+  return sanitizeSyncGuestPseudoInputValue(input).replace(/\s+/g, " ").trim();
+}
+
+function notifySyncGuestPseudoValidationError(inputEl = null) {
+  if (inputEl) {
+    flashSyncSessionInputError(inputEl);
+  }
+  const nowMs = Date.now();
+  if (nowMs - syncSessionLastPseudoValidationToastAt < 1200) {
+    return;
+  }
+  syncSessionLastPseudoValidationToastAt = nowMs;
+  showSyncSessionToast({
+    type: "error",
+    message: getI18nText("sync.errorPseudoInvalid", "Nickname: letters and spaces only."),
+    duration: 2000,
+  });
+}
+
+function getSyncSessionErrorMessage(error) {
+  let helperMessage = "";
+  if (
+    SYNC_SESSION_MODAL_HELPERS &&
+    typeof SYNC_SESSION_MODAL_HELPERS.getErrorMessage === "function"
+  ) {
+    helperMessage = String(
+      SYNC_SESSION_MODAL_HELPERS.getErrorMessage(error) || "",
+    ).trim();
+    if (helperMessage && helperMessage !== "Sync action failed.") {
+      return helperMessage;
+    }
+  }
+  const code =
+    error && typeof error === "object" && typeof error.message === "string"
+      ? error.message
+      : "";
+  if (code === "unknown-action") {
+    return getI18nText("sync.errorProtocolMismatch", "Sync protocol mismatch. Restart relay and update both apps.");
+  }
+  if (code.startsWith("unknown-action:")) {
+    const actionName = String(
+      code.slice("unknown-action:".length) || "",
+    ).trim();
+    const base = getI18nText("sync.errorProtocolMismatch", "Sync protocol mismatch. Restart relay and update both apps.");
+    return actionName ? `${base} (${actionName})` : base;
+  }
+
+  if (code === "missing-session-code") return getI18nText("sync.errorMissingSessionCode", "Please enter a session code first.");
+  if (code === "invalid-session-code") return getI18nText("sync.errorInvalidSessionCode", "Invalid session code format.");
+  if (code === "session-not-found") return getI18nText("sync.errorSessionNotFound", "Session not found.");
+  if (code === "invalid-password") return getI18nText("sync.errorInvalidPassword", "Invalid password.");
+  if (code === "invalid-client-id") return getI18nText("sync.errorForbiddenIdentity", "Invalid participant identity.");
+  if (code === "invalid-host-client-id") return getI18nText("sync.errorInvalidHostIdentity", "Invalid host identity.");
+  if (code === "invalid-session-state") return getI18nText("sync.errorInvalidSyncPayload", "Invalid sync payload.");
+  if (code === "session-state-too-large") return getI18nText("sync.errorSyncPayloadTooLarge", "Sync payload too large.");
+  if (code === "invalid-request") return getI18nText("sync.errorInvalidRequest", "Invalid sync request.");
+  if (code === "invalid-session-pack") return getI18nText("sync.errorInvalidSessionPack", "Invalid session pack.");
+  if (code === "session-pack-too-large") return getI18nText("sync.errorSessionPackTooLarge", "Session pack is too large.");
+  if (code === "session-pack-not-found") return getI18nText("sync.errorSessionPackNotFound", "No online session pack available yet.");
+  if (code === "invalid-session-media") return getI18nText("sync.errorInvalidSessionMedia", "Invalid session media payload.");
+  if (code === "session-media-too-large") return getI18nText("sync.errorSessionMediaTooLarge", "Session media payload is too large.");
+  if (code === "session-media-not-found") return getI18nText("sync.errorSessionMediaNotFound", "No online session media available yet.");
+  if (code === "session-media-incomplete") return getI18nText("sync.errorSessionMediaIncomplete", "Online media download incomplete. Please retry download.");
+  if (code.startsWith("session-media-incomplete:")) {
+    const details = code.slice("session-media-incomplete:".length).trim();
+    const base = getI18nText("sync.errorSessionMediaIncomplete", "Online media download incomplete. Please retry download.");
+    return details ? `${base} (${details})` : base;
+  }
+  if (code === "session-media-file-not-found") return getI18nText("sync.errorSessionMediaFileNotFound", "Online session media file not found.");
+  if (code === "session-media-unsupported-type") return getI18nText("sync.errorSessionMediaUnsupportedType", "Unsupported media format for online sync.");
+  if (code === "forbidden-host-impersonation") return getI18nText("sync.errorForbiddenIdentity", "Invalid participant identity.");
+  if (code === "duplicate-client-id") return getI18nText("sync.errorDuplicateClient", "A participant with the same identity is already connected.");
+  if (code === "room-full") return getI18nText("sync.errorRoomFull", "Session is full.");
+  if (code === "already-joined") return getI18nText("sync.errorAlreadyJoined", "Already connected to this session.");
+  if (code === "not-joined") return getI18nText("sync.errorNotJoined", "You are not connected to this session.");
+  if (code === "rate-limited") return getI18nText("sync.errorRateLimited", "Too many requests. Please wait a moment.");
+  if (code === "state-rate-limited") return getI18nText("sync.errorStateRateLimited", "Sync updates are too frequent. Please slow down.");
+  if (code === "rtc-rate-limited") return getI18nText("sync.errorRtcRateLimited", "Real-time signaling is too frequent. Please slow down.");
+  if (code === "media-transfer-disabled") return getI18nText("sync.errorMediaTransferDisabled", "Online media transfer is disabled on this relay.");
+  if (code === "session-already-exists") return getI18nText("sync.errorSessionAlreadyExists", "This session code already exists.");
+  if (code === "transport-unavailable") return getI18nText("sync.errorTransportUnavailable", "Sync transport unavailable.");
+  if (code === "websocket-unavailable") return getI18nText("sync.errorWsUnavailable", "WebSocket unavailable in this runtime.");
+  if (code === "websocket-url-missing") return getI18nText("sync.errorWsUrlMissing", "WebSocket URL is missing.");
+  if (code === "websocket-not-open") return getI18nText("sync.errorWsNotConnected", "WebSocket is not connected.");
+  if (code === "websocket-connect-failed") return getI18nText("sync.errorWsConnectFailed", "WebSocket connection failed.");
+  if (code === "websocket-connect-closed") return getI18nText("sync.errorWsConnectClosed", "WebSocket closed during connection.");
+  if (code === "websocket-disconnected") return getI18nText("sync.errorWsDisconnected", "WebSocket disconnected.");
+  if (code === "websocket-request-timeout") return getI18nText("sync.errorWsRequestTimeout", "WebSocket request timeout.");
+  if (code === "webrtc-unavailable") return getI18nText("sync.errorWebrtcUnavailable", "WebRTC unavailable in this runtime.");
+  if (code === "webrtc-signaling-unavailable") return getI18nText("sync.errorWebrtcSignalingUnavailable", "WebRTC signaling transport unavailable.");
+  if (code === "webrtc-signaling-url-missing") return getI18nText("sync.errorWebrtcSignalingUrlMissing", "WebRTC signaling URL is missing.");
+  if (code === "webrtc-peer-failed") return getI18nText("sync.errorWebrtcPeerFailed", "WebRTC peer connection failed.");
+  if (code === "webrtc-not-ready") return getI18nText("sync.errorWebrtcNotReady", "WebRTC peer channel is not ready.");
+  if (code === "webrtc-media-unavailable") return getI18nText("sync.errorWebrtcMediaUnavailable", "Host media is not available on P2P yet.");
+  if (code === "webrtc-file-transfer-failed") return getI18nText("sync.errorWebrtcTransferFailed", "P2P media transfer failed. Falling back to relay.");
+  if (code === "webrtc-file-transfer-incomplete") return getI18nText("sync.errorWebrtcTransferIncomplete", "P2P media transfer incomplete. Falling back to relay.");
+  if (code === "webrtc-request-timeout") return getI18nText("sync.errorWebrtcRequestTimeout", "P2P request timeout. Falling back to relay.");
+  if (code === "invalid-rtc-signal") return getI18nText("sync.errorInvalidRtcSignal", "Invalid real-time signaling payload.");
+  if (code === "request-failed") return getI18nText("sync.errorRequestFailed", "Sync request failed.");
+  if (code === "session-pack-integrity-failed") return getI18nText("sync.onlinePackIntegrityFailed", "Online config pack integrity check failed.");
+  if (code === "session-closed") return getI18nText("sync.errorSessionClosed", "The host closed this session.");
+  if (code) return `${getI18nText("sync.errorDefault", "Sync action failed.")} (${code}).`;
+  return helperMessage || getI18nText("sync.errorDefault", "Sync action failed.");
+}
+
+function renderSyncSessionStatus(modal, snapshot = null) {
+  if (!modal) return;
+  const state = snapshot || syncSessionServiceState;
+  hideSyncSessionParticipantsTooltip();
+  updateSyncSessionVisualIndicators(state);
+  updateSyncSessionModalPanelsVisibility(modal, state);
+  updateSyncSessionCodeUi(modal, state?.sessionCode);
+  updateSyncSessionNetworkStatus(modal, state);
+  updateSyncSessionGuestActionNotificationsUi(modal);
+  if (!state || typeof state !== "object") {
+    const label =
+      syncSessionTransportMode === "webrtc"
+        ? getI18nText("sync.statusSyncReadyWebrtc", "WebRTC sync ready.")
+        : syncSessionTransportMode === "ws"
+          ? getI18nText("sync.statusSyncReadyWs", "WebSocket sync ready.")
+          : getI18nText("sync.statusSyncReadyMock", "Local sync mock ready.");
+    setSyncSessionStatus(modal, label, "");
+    return;
+  }
+
+  if (state.status === "connecting") {
+    if (!syncConnectingStartedAt) syncConnectingStartedAt = Date.now();
+    const elapsedMs = Date.now() - syncConnectingStartedAt;
+    if (elapsedMs > 45000) {
+      setSyncSessionStatus(
+        modal,
+        getI18nText("sync.errorConnectTimeout", "Unable to reach the server. Check the relay URL."),
+        "error",
+      );
+    } else if (elapsedMs > 5000) {
+      setSyncSessionStatus(
+        modal,
+        getI18nText("sync.statusServerWaking", "The server is waking up, please wait up to 30 seconds..."),
+        "warning",
+        { loadingDots: true },
+      );
+    } else {
+      setSyncSessionStatus(
+        modal,
+        getI18nText("sync.statusConnecting", "Connecting..."),
+        "warning",
+        { loadingDots: true },
+      );
+    }
+    return;
+  }
+  syncConnectingStartedAt = 0;
+
+  if (state.status === "hosting") {
+    setSyncSessionHostingStatus(modal, state);
+    return;
+  }
+
+  if (state.status === "joined") {
+    setSyncSessionJoinedStatus(modal, state);
+    return;
+  }
+
+  if (state.status === "idle") {
+    setSyncSessionStatus(
+      modal,
+      getI18nText("sync.toastNoActiveSession", "No active sync session."),
+      "",
+    );
+    return;
+  }
+
+  if (state.lastError) {
+    setSyncSessionStatus(
+      modal,
+      getSyncSessionErrorMessage({ message: state.lastError }),
+      "error",
+    );
+    return;
+  }
+
+  setSyncSessionStatus(
+    modal,
+    getI18nText("sync.toastNoActiveSession", "No active sync session."),
+    "",
+  );
+}
+
+function isSyncSessionConnectedAsParticipant(snapshot = null) {
+  const state = snapshot || syncSessionServiceState;
+  return !!(
+    state &&
+    state.role === "participant" &&
+    state.status === "joined" &&
+    state.sessionCode
+  );
+}
+
+function isSyncSessionConnectedAsHost(snapshot = null) {
+  const state = snapshot || syncSessionServiceState;
+  return !!(
+    state &&
+    state.role === "host" &&
+    state.status === "hosting" &&
+    state.sessionCode
+  );
+}
+
+function isSyncSessionActive(snapshot = null) {
+  return (
+    isSyncSessionConnectedAsParticipant(snapshot) ||
+    isSyncSessionConnectedAsHost(snapshot)
+  );
+}
+
+function isSyncSessionOnlineForHistory(snapshot = null) {
+  const state = snapshot || syncSessionServiceState;
+  if (!state || typeof state !== "object") return false;
+  const role = String(state.role || "").trim();
+  const status = String(state.status || "").trim();
+  const hasSessionCode = !!String(state.sessionCode || "").trim();
+  if (!hasSessionCode) return false;
+  if (role === "host" || role === "participant") return true;
+  return status === "hosting" || status === "joined" || status === "connecting";
+}
+
+function updateSyncSessionModalPanelsVisibility(modal, snapshot = null) {
+  if (!modal) return;
+  const state = snapshot || syncSessionServiceState;
+  const roleToggle = modal.querySelector(".sync-session-role-toggle");
+  const noteEl = modal.querySelector(".sync-session-note");
+  const hostPanel = modal.querySelector("#sync-session-host-panel");
+  const joinPanel = modal.querySelector("#sync-session-join-panel");
+  const connectedPanel = modal.querySelector("#sync-session-connected-panel");
+  const packPanel = modal.querySelector("#sync-session-pack-panel");
+  const exportPackBtn = modal.querySelector("#sync-session-export-pack-btn");
+  const importPackBtn = modal.querySelector("#sync-session-import-pack-btn");
+  const publishOnlinePackBtn = modal.querySelector(
+    "#sync-session-publish-online-pack-btn",
+  );
+  const downloadOnlinePackBtn = modal.querySelector(
+    "#sync-session-download-online-pack-btn",
+  );
+  const connectedAsParticipant = isSyncSessionConnectedAsParticipant(state);
+  const connectedAsHost = isSyncSessionConnectedAsHost(state);
+  const isActive = connectedAsParticipant || connectedAsHost;
+  const hostRoleSelected = syncSessionModalRole === "host";
+  const showHostSettingsPanel =
+    connectedAsHost || (!isActive && hostRoleSelected);
+  const showParticipantOnlineDownload = connectedAsParticipant;
+  const leaveBtn = modal.querySelector("#sync-session-leave-btn");
+  const leaveBtnLabel = leaveBtn?.querySelector(".sync-session-leave-label");
+  const copyServerAddressHostBtn = modal.querySelector(
+    "#sync-session-copy-server-address-host-btn",
+  );
+  const copyServerAddressConnectedBtn = modal.querySelector(
+    "#sync-session-copy-server-address-connected-btn",
+  );
+  const isLocalConnectionType =
+    UIPreferences.get("syncConnectionType", "local") === "local";
+  const hasActiveSessionCode = !!String(state?.sessionCode || "").trim();
+  const shouldShowCopyServerAddressButton =
+    isActive && connectedAsHost && hasActiveSessionCode && isLocalConnectionType;
+
+  // Connection type section toggle
+  const connTypeRow = modal.querySelector(".sync-session-connection-type-row");
+
+  if (roleToggle) roleToggle.classList.toggle("hidden", isActive);
+  if (noteEl) noteEl.classList.toggle("hidden", isActive);
+  if (connTypeRow) connTypeRow.classList.toggle("hidden", isActive);
+  if (connectedPanel) connectedPanel.classList.toggle("hidden", !isActive);
+  if (copyServerAddressHostBtn) {
+    copyServerAddressHostBtn.classList.toggle(
+      "hidden",
+      !shouldShowCopyServerAddressButton,
+    );
+  }
+  if (copyServerAddressConnectedBtn) {
+    copyServerAddressConnectedBtn.classList.toggle(
+      "hidden",
+      !shouldShowCopyServerAddressButton,
+    );
+  }
+
+  if (isActive) {
+    if (hostPanel) hostPanel.classList.add("hidden");
+    if (joinPanel) joinPanel.classList.add("hidden");
+    if (leaveBtn) {
+      if (connectedAsHost) {
+        const closeLabel = getI18nText(
+          "sync.closeOnlineSessionLabel",
+          "Close online session",
+        );
+        if (leaveBtnLabel) {
+          leaveBtnLabel.textContent = closeLabel;
+        } else {
+          leaveBtn.textContent = closeLabel;
+        }
+        leaveBtn.setAttribute(
+          "data-i18n-tooltip",
+          "sync.closeOnlineSessionTooltip",
+        );
+        leaveBtn.setAttribute(
+          "data-tooltip",
+          getI18nText(
+            "sync.closeOnlineSessionTooltip",
+            "Close online session for all participants",
+          ),
+        );
+      } else {
+        const leaveLabel = getI18nText(
+          "sync.leaveOnlineSessionLabel",
+          "Leave current session",
+        );
+        if (leaveBtnLabel) {
+          leaveBtnLabel.textContent = leaveLabel;
+        } else {
+          leaveBtn.textContent = leaveLabel;
+        }
+        leaveBtn.setAttribute(
+          "data-i18n-tooltip",
+          "sync.leaveOnlineSessionTooltip",
+        );
+        leaveBtn.setAttribute(
+          "data-tooltip",
+          getI18nText(
+            "sync.leaveOnlineSessionTooltip",
+            "Leave current online session",
+          ),
+        );
+      }
+    }
+    const notifyToggle = connectedPanel?.querySelector(
+      ".sync-session-inline-toggle",
+    );
+    if (notifyToggle) {
+      notifyToggle.classList.toggle("hidden", !connectedAsParticipant);
+    }
+
+    // --- Live control mode: move selector into connected panel when hosting ---
+    if (connectedAsHost && connectedPanel && hostPanel) {
+      const controlModeLabel = modal.querySelector(
+        'label[for="sync-session-control-mode-trigger"]',
+      );
+      const controlModeSelect = modal.querySelector(
+        "#sync-session-control-mode-select",
+      );
+      const leaveBtn2 = connectedPanel.querySelector("#sync-session-leave-btn");
+      if (controlModeLabel && controlModeSelect) {
+        if (leaveBtn2) {
+          connectedPanel.insertBefore(controlModeLabel, leaveBtn2);
+          connectedPanel.insertBefore(controlModeSelect, leaveBtn2);
+        } else {
+          connectedPanel.appendChild(controlModeLabel);
+          connectedPanel.appendChild(controlModeSelect);
+        }
+        const controlModeTrigger = controlModeSelect.querySelector(
+          "#sync-session-control-mode-trigger",
+        );
+        if (controlModeTrigger) {
+          controlModeTrigger.disabled = false;
+          controlModeTrigger.removeAttribute("aria-disabled");
+        }
+        // Sync the select value with the current server-side state
+        const serverControlMode = String(state.controlMode || "host-only").trim();
+        updateSyncSessionControlModeSelect(modal, serverControlMode);
+      }
+    }
+  } else {
+    // --- Move control mode selector back to host panel when disconnected ---
+    if (hostPanel && connectedPanel) {
+      const controlModeLabel = connectedPanel.querySelector(
+        'label[for="sync-session-control-mode-trigger"]',
+      );
+      const controlModeSelect = connectedPanel.querySelector(
+        "#sync-session-control-mode-select",
+      );
+      if (controlModeLabel && controlModeSelect) {
+        // Insert before the password label (first label after local section)
+        const passwordLabel = hostPanel.querySelector(
+          'label[for="sync-session-host-password"]',
+        );
+        if (passwordLabel) {
+          hostPanel.insertBefore(controlModeLabel, passwordLabel);
+          hostPanel.insertBefore(controlModeSelect, passwordLabel);
+        } else {
+          hostPanel.appendChild(controlModeLabel);
+          hostPanel.appendChild(controlModeSelect);
+        }
+      }
+    }
+    const wantHost = syncSessionModalRole === "host";
+    const outgoing = wantHost ? joinPanel : hostPanel;
+    const incoming = wantHost ? hostPanel : joinPanel;
+    const slideDirection = wantHost ? "reverse" : "forward";
+
+    // If outgoing is already hidden, just show incoming directly
+    if (!outgoing || outgoing.classList.contains("hidden")) {
+      if (incoming) {
+        incoming.classList.remove("hidden", "panel-slide-out-left", "panel-slide-out-right", "panel-slide-in", "panel-slide-in-reverse");
+      }
+      if (outgoing) outgoing.classList.add("hidden");
+    } else if (incoming && outgoing) {
+      // 1. Lock the modal body height to its current value
+      const modalBody = modal.querySelector(".sync-session-modal-body");
+      const lockedHeight = modalBody ? modalBody.offsetHeight : 0;
+      if (modalBody) {
+        modalBody.style.transition = "none";
+        modalBody.style.height = lockedHeight + "px";
+        modalBody.style.overflow = "hidden";
+      }
+
+      const exitClass = slideDirection === "forward" ? "panel-slide-out-left" : "panel-slide-out-right";
+      const enterClass = slideDirection === "forward" ? "panel-slide-in" : "panel-slide-in-reverse";
+
+      // 2. Slide out old panel
+      outgoing.classList.add(exitClass);
+
+      setTimeout(() => {
+        // 3. Swap panels (still height-locked, no jump)
+        outgoing.classList.add("hidden");
+        outgoing.classList.remove(exitClass);
+        incoming.classList.remove("hidden");
+        incoming.classList.add(enterClass);
+
+        // 4. Slide in new panel
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            incoming.classList.remove(enterClass);
+          });
+        });
+
+        // 5. After slide-in completes, THEN smoothly resize height
+        setTimeout(() => {
+          if (modalBody) {
+            const targetHeight = modalBody.scrollHeight;
+            modalBody.style.transition = "height 0.25s ease";
+            modalBody.style.height = targetHeight + "px";
+
+            setTimeout(() => {
+              modalBody.style.height = "";
+              modalBody.style.overflow = "";
+              modalBody.style.transition = "";
+            }, 280);
+          }
+        }, 220);
+      }, 200);
+    }
+  }
+
+  if (packPanel) {
+    const showPackPanel =
+      showHostSettingsPanel || showParticipantOnlineDownload;
+    packPanel.classList.toggle("hidden", !showPackPanel);
+  }
+
+  if (exportPackBtn) {
+    exportPackBtn.classList.toggle("hidden", !showHostSettingsPanel);
+  }
+  if (importPackBtn) {
+    importPackBtn.classList.toggle("hidden", !showHostSettingsPanel);
+  }
+  if (publishOnlinePackBtn) {
+    publishOnlinePackBtn.classList.toggle(
+      "hidden",
+      !connectedAsHost || !syncSessionMediaTransferEnabled,
+    );
+  }
+  if (downloadOnlinePackBtn) {
+    downloadOnlinePackBtn.classList.toggle(
+      "hidden",
+      !showParticipantOnlineDownload || !syncSessionMediaTransferEnabled,
+    );
+  }
+
+  updateSyncSessionInvitePanelVisibility(modal, state);
+}
+
+function ensureSyncRuntimeStatusBadge() {
+  if (
+    syncRuntimeStatusBadgeEl &&
+    document.body &&
+    document.body.contains(syncRuntimeStatusBadgeEl)
+  ) {
+    return syncRuntimeStatusBadgeEl;
+  }
+
+  if (!document || !document.body) return null;
+  const badgeEl = document.createElement("div");
+  badgeEl.id = "sync-runtime-status-badge";
+  badgeEl.className = "sync-runtime-status-badge";
+  badgeEl.setAttribute("role", "status");
+  badgeEl.setAttribute("aria-live", "polite");
+  document.body.appendChild(badgeEl);
+  syncRuntimeStatusBadgeEl = badgeEl;
+  return badgeEl;
+}
+
+function getSyncControlModeLabel(controlMode) {
+  const config = getSyncSessionControlModeConfig(controlMode);
+  return getI18nText(config.key, config.fallback);
+}
+
+function getSyncParticipantIds(snapshot = null) {
+  const data = snapshot || syncSessionServiceState;
+  if (!data || !Array.isArray(data.participantIds)) return [];
+  return data.participantIds
+    .map((id) => String(id || "").trim())
+    .filter((id) => !!id);
+}
+
+function getSyncParticipantProfiles(snapshot = null) {
+  const data = snapshot || syncSessionServiceState;
+  if (!data || typeof data !== "object" || !data.participantProfiles) return {};
+  const out = {};
+  Object.keys(data.participantProfiles).forEach((id) => {
+    const normalizedId = String(id || "").trim();
+    if (!normalizedId) return;
+    out[normalizedId] = String(data.participantProfiles[id] || "")
+      .replace(/[\u0000-\u001f\u007f]/g, "")
+      .trim()
+      .slice(0, 32);
+  });
+  return out;
+}
+
+function normalizeSyncParticipantSyncState(input) {
+  const value = String(input || "")
+    .trim()
+    .toLowerCase();
+  if (value === "ready") return "ready";
+  if (value === "connecting" || value === "downloading") {
+    return value;
+  }
+  return "missing";
+}
+
+function getSyncParticipantSyncStates(snapshot = null) {
+  const data = snapshot || syncSessionServiceState;
+  if (!data || typeof data !== "object" || !data.participantSyncStates)
+    return {};
+  const out = {};
+  Object.keys(data.participantSyncStates).forEach((id) => {
+    const normalizedId = String(id || "").trim();
+    if (!normalizedId) return;
+    out[normalizedId] = normalizeSyncParticipantSyncState(
+      data.participantSyncStates[id],
+    );
+  });
+  return out;
+}
+
+function getSyncParticipantSyncState(clientId, states = null) {
+  const normalizedId = String(clientId || "").trim();
+  if (!normalizedId) return "missing";
+  const source =
+    states && typeof states === "object"
+      ? states
+      : getSyncParticipantSyncStates();
+  return normalizeSyncParticipantSyncState(source?.[normalizedId]);
+}
+
+function getSyncParticipantDisplayName(clientId, profiles = {}) {
+  const normalizedId = String(clientId || "").trim();
+  if (!normalizedId) return "";
+  const name = String(profiles?.[normalizedId] || "").trim();
+  if (name) return name;
+  return "Un participant";
+}
+
+function getSyncParticipantSelfSyncState(snapshot = null) {
+  const stateSnapshot = snapshot || syncSessionServiceState;
+  if (!stateSnapshot || typeof stateSnapshot !== "object") return "";
+  const selfClientId = String(stateSnapshot.clientId || "").trim();
+  if (!selfClientId) return "";
+  return getSyncParticipantSyncState(
+    selfClientId,
+    getSyncParticipantSyncStates(stateSnapshot),
+  );
+}
+
+function getDesiredSyncParticipantState(snapshot = null) {
+  const stateSnapshot = snapshot || syncSessionServiceState;
+  if (
+    !stateSnapshot ||
+    stateSnapshot.role !== "participant" ||
+    stateSnapshot.status !== "joined"
+  ) {
+    return "";
+  }
+  if (syncParticipantTransferInProgress) {
+    return "downloading";
+  }
+  const requiresValidation =
+    shouldRequireSyncParticipantPackValidation(stateSnapshot) &&
+    !isSyncParticipantPackValidationCurrent(stateSnapshot);
+  return requiresValidation ? "missing" : "ready";
+}
+
+function refreshSyncParticipantPublishedState(snapshot = null) {
+  const stateSnapshot = snapshot || syncSessionServiceState;
+  if (
+    !stateSnapshot ||
+    stateSnapshot.role !== "participant" ||
+    stateSnapshot.status !== "joined"
+  ) {
+    syncParticipantLastPublishedSyncState = "";
+    syncParticipantLastPublishedSessionCode = "";
+    syncParticipantTransferInProgress = false;
+    return;
+  }
+  syncParticipantLastPublishedSessionCode = String(
+    stateSnapshot.sessionCode || "",
+  ).trim();
+  syncParticipantLastPublishedSyncState =
+    getSyncParticipantSelfSyncState(stateSnapshot);
+}
+
+async function publishSyncParticipantState(syncState, options = {}) {
+  const normalizedState = normalizeSyncParticipantSyncState(syncState);
+  const stateSnapshot = syncSessionServiceState;
+  if (
+    !stateSnapshot ||
+    stateSnapshot.role !== "participant" ||
+    stateSnapshot.status !== "joined"
+  ) {
+    return false;
+  }
+  const sessionCode = String(stateSnapshot.sessionCode || "").trim();
+  if (!sessionCode) return false;
+  const force = options?.force === true;
+  if (
+    !force &&
+    syncParticipantLastPublishedSessionCode === sessionCode &&
+    syncParticipantLastPublishedSyncState === normalizedState
+  ) {
+    return false;
+  }
+  if (
+    !syncSessionService ||
+    typeof syncSessionService.updateParticipantState !== "function"
+  ) {
+    return false;
+  }
+  try {
+    await syncSessionService.updateParticipantState({
+      syncState: normalizedState,
+    });
+    syncParticipantLastPublishedSessionCode = sessionCode;
+    syncParticipantLastPublishedSyncState = normalizedState;
+    return true;
+  } catch (error) {
+    console.warn("[Sync] Failed to publish participant state:", error);
+    return false;
+  }
+}
+
+function updateSyncSessionVisualIndicators(snapshot = null) {
+  const state = snapshot || syncSessionServiceState;
+  const syncEnabled = isSyncFeatureEnabled();
+  const syncBtn = document.getElementById("titlebar-sync-btn");
+  const modalTitleIconEl = document.getElementById(
+    "sync-session-modal-title-icon",
+  );
+  const badgeEl = syncEnabled
+    ? ensureSyncRuntimeStatusBadge()
+    : document.getElementById("sync-runtime-status-badge");
+  const settingsScreenEl = document.getElementById("settings-screen");
+  const settingsReadonlyBadgeEl = document.getElementById(
+    "sync-settings-readonly-badge",
+  );
+  const syncTitle = getI18nText("sync.title", "Online sync");
+  const hostOnlyLabel = getI18nText(
+    "sync.badgeHostControlsOnly",
+    "Host controls only",
+  );
+  const sharedPauseLabel = getI18nText(
+    "sync.badgeSharedControls",
+    "Shared controls",
+  );
+
+  if (syncBtn) {
+    syncBtn.classList.remove(
+      "is-idle",
+      "is-connecting",
+      "is-hosting",
+      "is-joined",
+    );
+  }
+  if (modalTitleIconEl) {
+    modalTitleIconEl.classList.remove(
+      "is-idle",
+      "is-connecting",
+      "is-hosting",
+      "is-joined",
+    );
+  }
+  if (badgeEl) {
+    badgeEl.classList.remove("is-hosting", "is-joined", "is-visible");
+    badgeEl.textContent = "";
+  }
+  if (settingsScreenEl) {
+    settingsScreenEl.classList.remove("sync-participant-readonly");
+  }
+  if (settingsReadonlyBadgeEl) {
+    settingsReadonlyBadgeEl.classList.add("hidden");
+    settingsReadonlyBadgeEl.textContent = getI18nText(
+      "sync.readonlyBadge",
+      "Lecture seule: contrôlée par l'hôte",
+    );
+  }
+
+  if (!syncEnabled) {
+    const modal = document.getElementById("sync-session-modal");
+    if (syncBtn) {
+      syncBtn.classList.add("hidden");
+      syncBtn.setAttribute("aria-hidden", "true");
+      syncBtn.setAttribute("tabindex", "-1");
+      syncBtn.setAttribute("data-tooltip", syncTitle);
+    }
+    if (modalTitleIconEl) {
+      modalTitleIconEl.classList.add("is-idle");
+    }
+    if (badgeEl) {
+      badgeEl.classList.add("hidden");
+      badgeEl.classList.remove("is-hosting", "is-joined", "is-visible");
+      badgeEl.textContent = "";
+    }
+    if (modal && !modal.classList.contains("hidden")) {
+      modal.classList.add("hidden");
+    }
+    return;
+  }
+
+  if (syncBtn) {
+    syncBtn.classList.remove("hidden");
+    syncBtn.removeAttribute("aria-hidden");
+    syncBtn.removeAttribute("tabindex");
+  }
+  if (badgeEl) {
+    badgeEl.classList.remove("hidden");
+  }
+
+  if (!state || typeof state !== "object") {
+    if (syncBtn) {
+      syncBtn.classList.add("is-idle");
+      syncBtn.setAttribute("data-tooltip", syncTitle);
+    }
+    if (modalTitleIconEl) {
+      modalTitleIconEl.classList.add("is-idle");
+    }
+    return;
+  }
+
+  if (state.status === "connecting") {
+    if (syncBtn) {
+      syncBtn.classList.add("is-connecting");
+      syncBtn.setAttribute("data-tooltip", `${syncTitle} - Connecting...`);
+    }
+    if (modalTitleIconEl) {
+      modalTitleIconEl.classList.add("is-connecting");
+    }
+    return;
+  }
+
+  if (state.status === "hosting" && state.sessionCode) {
+    const modeLabel =
+      String(state.controlMode || "").trim() === "shared-pause"
+        ? sharedPauseLabel
+        : hostOnlyLabel;
+    const participants = Math.max(0, Number(state.participantsCount || 0) || 0);
+    const tooltip = `${getI18nText(
+      "sync.hostBadgePrefix",
+      "Hosting online session",
+    )} (${String(modeLabel || hostOnlyLabel)})`;
+    if (syncBtn) {
+      syncBtn.classList.add("is-hosting");
+      syncBtn.setAttribute("data-tooltip", tooltip);
+    }
+    if (modalTitleIconEl) {
+      modalTitleIconEl.classList.add("is-hosting");
+    }
+    if (badgeEl) {
+      const badgeText =
+        participants > 1
+          ? `${tooltip} — ${participants} participants`
+          : tooltip;
+      badgeEl.textContent = badgeText;
+      badgeEl.classList.add("is-hosting", "is-visible");
+    }
+    return;
+  }
+
+  if (state.status === "joined" && state.sessionCode) {
+    const modeLabel =
+      String(state.controlMode || "").trim() === "shared-pause"
+        ? sharedPauseLabel
+        : hostOnlyLabel;
+    const tooltip = `${getI18nText(
+      "sync.guestBadgePrefix",
+      "Connected to online session",
+    )} (${String(modeLabel || hostOnlyLabel)})`;
+    if (syncBtn) {
+      syncBtn.classList.add("is-joined");
+      syncBtn.setAttribute("data-tooltip", tooltip);
+    }
+    if (modalTitleIconEl) {
+      modalTitleIconEl.classList.add("is-joined");
+    }
+    if (settingsScreenEl) {
+      settingsScreenEl.classList.add("sync-participant-readonly");
+    }
+    if (settingsReadonlyBadgeEl) {
+      settingsReadonlyBadgeEl.classList.remove("hidden");
+    }
+    if (badgeEl) {
+      badgeEl.textContent = tooltip;
+      badgeEl.classList.add("is-joined", "is-visible");
+    }
+    return;
+  }
+
+  if (syncBtn) {
+    syncBtn.classList.add("is-idle");
+    syncBtn.setAttribute("data-tooltip", syncTitle);
+  }
+  if (modalTitleIconEl) {
+    modalTitleIconEl.classList.add("is-idle");
+  }
+}
+
+function ensureSyncSessionService(modal) {
+  if (!isSyncFeatureEnabled()) {
+    if (modal) {
+      setSyncSessionStatus(
+        modal,
+        getI18nText("sync.errorSyncDisabled", "Online sync is disabled in configuration."),
+        "warning",
+      );
+      setSyncSessionNetworkStatus(modal, getI18nText("sync.networkUnavailable", "Network: unavailable."), "error");
+    }
+    return null;
+  }
+
+  if (syncSessionService) {
+    renderSyncSessionStatus(modal);
+    return syncSessionService;
+  }
+
+  if (typeof SHARED_SYNC_SESSION_SERVICE_FACTORY !== "function") {
+    logMissingShared("createSyncSessionService");
+    setSyncSessionStatus(
+      modal,
+      getI18nText("sync.errorServiceUnavailable", "Sync service unavailable in this build."),
+      "error",
+    );
+    setSyncSessionNetworkStatus(modal, getI18nText("sync.networkUnavailable", "Network: unavailable."), "error");
+    return null;
+  }
+
+  try {
+    const transportEntry = createSyncSessionTransport();
+    const transport = transportEntry.transport;
+    syncSessionTransportMode = transportEntry.mode || "mock";
+    syncSessionTransportUrl = transportEntry.wsUrl || "";
+    syncSessionMediaTransferEnabled =
+      transportEntry.mediaTransferEnabled !== false;
+
+    syncSessionService = SHARED_SYNC_SESSION_SERVICE_FACTORY({
+      transport,
+      logger: (...args) => console.warn(...args),
+    });
+  } catch (error) {
+    console.warn("[Sync] Service init failed:", error);
+    syncSessionService = null;
+  }
+
+  if (
+    syncSessionService &&
+    typeof syncSessionService.subscribe === "function"
+  ) {
+    if (typeof syncSessionServiceUnsubscribe === "function") {
+      try {
+        syncSessionServiceUnsubscribe();
+      } catch (_) {}
+    }
+    syncSessionServiceUnsubscribe = syncSessionService.subscribe(
+      (nextState) => {
+        const previousStateSnapshot = syncSessionServiceState;
+        const previousSessionCode = String(
+          previousStateSnapshot?.sessionCode || "",
+        ).trim();
+        const nextSessionCode = String(nextState?.sessionCode || "").trim();
+        const previousP2pFallbackActive =
+          !!previousStateSnapshot?.p2pFallbackActive;
+        const nextP2pFallbackActive = !!nextState?.p2pFallbackActive;
+        const previousParticipantsCount = syncSessionLastParticipantsCount;
+        const nextParticipantsCount = Math.max(
+          0,
+          Number(nextState?.participantsCount || 0) || 0,
+        );
+        const previousParticipantIds = getSyncParticipantIds(
+          previousStateSnapshot,
+        );
+        const nextParticipantIds = getSyncParticipantIds(nextState);
+        const previousProfiles = getSyncParticipantProfiles(
+          previousStateSnapshot,
+        );
+        const nextProfiles = getSyncParticipantProfiles(nextState);
+        syncSessionServiceState = nextState;
+        if (isSyncSessionOnlineForHistory(nextState)) {
+          state.sessionWasOnline = true;
+        }
+        refreshSyncParticipantPublishedState(nextState);
+        if (
+          !nextState ||
+          nextState.role !== "participant" ||
+          nextState.status !== "joined" ||
+          !nextSessionCode ||
+          (previousSessionCode && previousSessionCode !== nextSessionCode)
+        ) {
+          clearSyncParticipantPackValidation();
+        }
+        updateSyncSessionVisualIndicators(nextState);
+        syncSessionLastParticipantsCount = nextParticipantsCount;
+        const activeModal = document.getElementById("sync-session-modal");
+        if (activeModal) {
+          renderSyncSessionStatus(activeModal, nextState);
+        }
+
+        if (
+          syncSessionTransportMode === "webrtc" &&
+          nextState &&
+          nextState.role === "host" &&
+          nextState.status === "hosting" &&
+          typeof window.showPoseChronoToast === "function" &&
+          previousP2pFallbackActive !== nextP2pFallbackActive
+        ) {
+          if (nextP2pFallbackActive) {
+            const relayCount = Math.max(
+              0,
+              Number(nextState?.p2pRelayParticipantsCount || 0) || 0,
+            );
+            const meshLimit = Math.max(
+              0,
+              Number(nextState?.p2pMeshLimit || 0) || 0,
+            );
+            const fallbackReason = String(
+              nextState?.p2pFallbackReason || "",
+            ).trim();
+            const fallbackMessage =
+              fallbackReason === "peer-failed"
+                ? getI18nText(
+                    "sync.p2pPeerFallbackToast",
+                    "P2P link degraded. Relay fallback is active for stability.",
+                  )
+                : getI18nText(
+                    "sync.p2pMeshLimitToast",
+                    "P2P mesh limit reached: {{count}} participant(s) now use relay fallback (limit {{limit}}).",
+                    { count: relayCount, limit: meshLimit || 0 },
+                  )
+                    .replace("{{count}}", String(relayCount))
+                    .replace("{{limit}}", String(meshLimit || 0));
+            showSyncSessionToast({
+              type: "warning",
+              message: fallbackMessage,
+              duration: 3200,
+            });
+          } else {
+            showSyncSessionToast({
+              type: "success",
+              message: getI18nText(
+                "sync.p2pFallbackClearedToast",
+                "P2P full-mesh restored. Relay fallback is no longer needed.",
+              ),
+              duration: 2200,
+            });
+          }
+        }
+
+        if (
+          nextState &&
+          nextState.role === "participant" &&
+          nextState.status === "joined"
+        ) {
+          const desiredParticipantState =
+            getDesiredSyncParticipantState(nextState);
+          const currentParticipantState =
+            getSyncParticipantSelfSyncState(nextState);
+          if (
+            desiredParticipantState &&
+            desiredParticipantState !== currentParticipantState
+          ) {
+            void publishSyncParticipantState(desiredParticipantState);
+          }
+        }
+
+        if (
+          nextState &&
+          nextState.role === "host" &&
+          nextState.status === "hosting" &&
+          previousParticipantsCount !== null &&
+          previousParticipantsCount >= 0 &&
+          typeof window.showPoseChronoToast === "function"
+        ) {
+          const delta = nextParticipantsCount - previousParticipantsCount;
+          if (delta > 0) {
+            const hostClientId = String(nextState.hostClientId || "").trim();
+            const joinedIds = nextParticipantIds.filter(
+              (clientId) => !previousParticipantIds.includes(clientId),
+            );
+            const joinedNonHostIds = joinedIds.filter(
+              (clientId) => clientId !== hostClientId,
+            );
+            const joinedParticipants = joinedIds
+              .filter((clientId) => clientId !== hostClientId)
+              .map((clientId) =>
+                getSyncParticipantDisplayName(clientId, nextProfiles),
+              )
+              .filter((name) => !!name);
+            const joinedNonHostCount = joinedNonHostIds.length;
+            if (joinedNonHostCount > 0) {
+              const message =
+                joinedParticipants.length === 1
+                  ? `${joinedParticipants[0]} a rejoint la session.`
+                  : joinedParticipants.length > 1
+                    ? `${joinedParticipants.join(", ")} ont rejoint la session.`
+                    : joinedNonHostCount > 1
+                      ? `${joinedNonHostCount} participants ont rejoint la session en ligne.`
+                      : "Un participant a rejoint la session en ligne.";
+              window.showPoseChronoToast({
+                type: "success",
+                message,
+                duration: 2200,
+              });
+            }
+          } else if (delta < 0) {
+            const hostClientId = String(
+              previousStateSnapshot?.hostClientId || "",
+            ).trim();
+            const leftIds = previousParticipantIds.filter(
+              (clientId) => !nextParticipantIds.includes(clientId),
+            );
+            const leftNonHostIds = leftIds.filter(
+              (clientId) => clientId !== hostClientId,
+            );
+            const leftParticipants = leftIds
+              .filter((clientId) => clientId !== hostClientId)
+              .map((clientId) =>
+                getSyncParticipantDisplayName(clientId, previousProfiles),
+              )
+              .filter((name) => !!name);
+            const leftCount = leftNonHostIds.length;
+            if (leftCount > 0) {
+              const message =
+                leftParticipants.length === 1
+                  ? `${leftParticipants[0]} a quitté la session.`
+                  : leftParticipants.length > 1
+                    ? `${leftParticipants.join(", ")} ont quitté la session.`
+                    : leftCount > 1
+                      ? `${leftCount} participants ont quitté la session en ligne.`
+                      : "Un participant a quitté la session en ligne.";
+              window.showPoseChronoToast({
+                type: "warning",
+                message,
+                duration: 2200,
+              });
+            }
+          }
+        }
+
+        if (
+          nextState &&
+          nextState.role === "participant" &&
+          nextState.status === "joined" &&
+          nextState.sharedSessionState &&
+          typeof nextState.sharedSessionState === "object"
+        ) {
+          applyRemoteSyncRuntimeState(nextState.sharedSessionState);
+        } else if (
+          nextState &&
+          nextState.role === "host" &&
+          nextState.status === "hosting" &&
+          nextState.controlMode === "shared-pause" &&
+          nextState.sharedSessionState &&
+          typeof nextState.sharedSessionState === "object"
+        ) {
+          applyRemoteSharedPlaybackForHost(nextState.sharedSessionState);
+        } else if (!nextState || nextState.role !== "participant") {
+          syncRuntimeLastAppliedRevision = 0;
+          syncRuntimeLastAppliedCustomQueueFingerprint = "";
+        }
+        if (
+          (!nextState ||
+            !nextState.sessionCode ||
+            nextState.status === "idle") &&
+          syncOnlineMediaCacheByIdentity instanceof Map &&
+          syncOnlineMediaCacheByIdentity.size > 0
+        ) {
+          clearSyncOnlineMediaCache();
+        }
+      },
+    );
+  }
+
+  renderSyncSessionStatus(modal);
+  updateSyncSessionVisualIndicators(syncSessionServiceState);
+  return syncSessionService;
+}
+
+function isSyncSessionHostActive() {
+  const state = syncSessionServiceState;
+  return !!(
+    state &&
+    state.role === "host" &&
+    state.status === "hosting" &&
+    state.sessionCode
+  );
+}
+
+function isSyncSessionParticipantActive() {
+  const state = syncSessionServiceState;
+  return !!(
+    state &&
+    state.role === "participant" &&
+    state.status === "joined" &&
+    state.sessionCode
+  );
+}
+
+function isSyncControlModeSharedPause() {
+  return (
+    isSyncSessionParticipantActive() &&
+    String(syncSessionServiceState?.controlMode || "").trim() === "shared-pause"
+  );
+}
+
+async function requestSyncSharedPlayback(
+  requestType = "pause",
+  reason = "participant-shared-pause",
+) {
+  if (!isSyncControlModeSharedPause()) return false;
+  const service = syncSessionService;
+  if (!service) return false;
+  const normalizedRequestType =
+    String(requestType || "").trim() === "play" ? "play" : "pause";
+  try {
+    let ok = false;
+    if (typeof service.requestSharedPlayback === "function") {
+      ok = await service.requestSharedPlayback({
+        requestType: normalizedRequestType,
+        reason: String(
+          reason ||
+            (normalizedRequestType === "play"
+              ? "participant-shared-play"
+              : "participant-shared-pause"),
+        ),
+      });
+    } else if (
+      normalizedRequestType === "pause" &&
+      typeof service.requestSharedPause === "function"
+    ) {
+      ok = await service.requestSharedPause({
+        reason: String(reason || "participant-shared-pause"),
+      });
+    }
+    return !!ok;
+  } catch (error) {
+    console.warn(
+      `[Sync] Shared ${normalizedRequestType} request failed:`,
+      error,
+    );
+    return false;
+  }
+}
+
+function maybeShowSharedPlaybackFeedback(sourceClientId, requestType) {
+  if (typeof window.showPoseChronoToast !== "function") return;
+  const actorId = String(sourceClientId || "").trim();
+  if (!actorId) return;
+  const action = String(requestType || "").trim();
+  if (action !== "pause" && action !== "play") return;
+
+  const nowMs = Date.now();
+  if (nowMs - syncSharedPlaybackFeedbackToastAt < 400) {
+    return;
+  }
+  syncSharedPlaybackFeedbackToastAt = nowMs;
+
+  const profiles = getSyncParticipantProfiles(syncSessionServiceState);
+  const actorName = getSyncParticipantDisplayName(actorId, profiles);
+  const message =
+    action === "pause"
+      ? `${actorName} a mis la session en pause.`
+      : `${actorName} a relancé la session.`;
+
+  window.showPoseChronoToast({
+    type: "info",
+    message,
+    duration: 1800,
+  });
+}
+
+function maybeShowParticipantHostActionFeedback(remoteState) {
+  if (!isSyncSessionParticipantActive()) return;
+  if (!remoteState || typeof remoteState !== "object") return;
+  if (typeof window.showPoseChronoToast !== "function") return;
+  if (!isSyncGuestActionNotificationsEnabled()) return;
+
+  const reason = String(remoteState.reason || "").trim();
+  let message = "";
+
+  if (reason === "timer-reset") {
+    message = getI18nText("sync.toastTimerReset", "The host reset the timer.");
+  } else if (reason === "timer-paused") {
+    message = getI18nText(
+      "sync.toastTimerPaused",
+      "The host paused the timer.",
+    );
+  } else if (reason === "timer-resumed") {
+    message = getI18nText(
+      "sync.toastTimerResumed",
+      "The host resumed the timer.",
+    );
+  } else if (reason === "image-next-manual") {
+    message = getI18nText(
+      "sync.toastImageNext",
+      "The host moved to the next image.",
+    );
+  } else if (reason === "image-next-auto") {
+    message = getI18nText(
+      "sync.toastImageNextAuto",
+      "Next image (auto-advance).",
+    );
+  } else if (reason === "image-prev-manual") {
+    message = getI18nText(
+      "sync.toastImagePrev",
+      "The host went back to the previous image.",
+    );
+  } else if (reason === "custom-step-next") {
+    message = getI18nText(
+      "sync.toastCustomStepNext",
+      "The host moved to the next step.",
+    );
+  } else if (reason === "custom-group-next") {
+    message = getI18nText(
+      "sync.toastPoseGroupNext",
+      "The host moved to the next pose group.",
+    );
+  } else if (reason === "custom-group-prev") {
+    message = getI18nText(
+      "sync.toastPoseGroupPrev",
+      "The host went back to the previous pose group.",
+    );
+  }
+
+  if (!message) return;
+
+  const nowMs = Date.now();
+  if (nowMs - syncHostActionFeedbackToastAt < 350) return;
+  syncHostActionFeedbackToastAt = nowMs;
+
+  window.showPoseChronoToast({
+    type: "info",
+    message,
+    duration: 1700,
+  });
+}
+
+function applyRemoteSharedPlaybackForHost(remoteState) {
+  if (!remoteState || typeof remoteState !== "object") return false;
+  if (!isSyncSessionHostActive()) return false;
+  if (
+    String(syncSessionServiceState?.controlMode || "").trim() !== "shared-pause"
+  ) {
+    return false;
+  }
+  const sourceClientId = String(remoteState.sourceClientId || "").trim();
+  if (!sourceClientId) return false;
+  if (
+    sourceClientId === String(syncSessionServiceState?.clientId || "").trim()
+  ) {
+    return false;
+  }
+  const requestType = String(remoteState.requestType || "").trim();
+  if (requestType !== "pause" && requestType !== "play") {
+    return false;
+  }
+  const expectedIsPlaying = requestType === "play";
+  if (remoteState.isPlaying !== expectedIsPlaying) {
+    return false;
+  }
+
+  if (requestType === "pause") {
+    if (state.isPlaying) {
+      stopTimer();
+    } else {
+      state.isPlaying = false;
+      updatePlayPauseIcon();
+    }
+    if (timerDisplay) timerDisplay.classList.add("timer-paused");
+    if (pauseBadge) pauseBadge.classList.remove("hidden");
+  } else {
+    const drawingVisible =
+      !!drawingScreen && !drawingScreen.classList.contains("hidden");
+    if (!state.isPlaying && drawingVisible) {
+      startTimer();
+    } else {
+      state.isPlaying = true;
+      updatePlayPauseIcon();
+    }
+    if (timerDisplay) timerDisplay.classList.remove("timer-paused");
+    if (pauseBadge) pauseBadge.classList.add("hidden");
+  }
+
+  maybeShowSharedPlaybackFeedback(sourceClientId, requestType);
+  scheduleSyncRuntimeState("shared-playback-applied", { force: true });
+  return true;
+}
+
+function hashSyncIdentity(input) {
+  const value = String(input || "");
+  let h1 = 2166136261;
+  let h2 = 5381;
+  for (let i = 0; i < value.length; i += 1) {
+    const code = value.charCodeAt(i);
+    h1 ^= code;
+    h1 = Math.imul(h1, 16777619);
+    h2 = ((h2 << 5) + h2 + code) >>> 0;
+  }
+  const a = (h1 >>> 0).toString(36);
+  const b = (h2 >>> 0).toString(36);
+  return `${a}${b}`;
+}
+
+function getSyncMediaIdentity(item) {
+  if (!item || typeof item !== "object") return "";
+  const explicitIdentity = String(
+    item.syncIdentity || item.identity || "",
+  ).trim();
+  if (explicitIdentity) return explicitIdentity;
+  const filePath = String(item.filePath || item.path || item.file || "").trim();
+  const fileNameFromPath = filePath ? filePath.split(/[\\/]/).pop() : "";
+  const fallbackName = String(
+    item.name || item.filename || item.fileName || fileNameFromPath || "",
+  )
+    .trim()
+    .toLowerCase();
+  const ext = String(item.ext || "")
+    .trim()
+    .toLowerCase();
+  if (!fallbackName && !ext) {
+    if (item.id !== undefined && item.id !== null) {
+      return `id:${String(item.id)}`;
+    }
+    return "";
+  }
+
+  // Use filename only (not full path) so identity matches across machines
+  // when sharing the same folder of images via network share or copy
+  const rawIdentity = `${fallbackName}|${ext}`;
+  return `k:${hashSyncIdentity(rawIdentity)}`;
+}
+
+function normalizeRuntimeMediaPath(rawPath) {
+  const value = String(rawPath || "").trim();
+  if (!value) return "";
+  const lower = value.toLowerCase();
+  if (
+    lower.startsWith("blob:") ||
+    lower.startsWith("data:") ||
+    lower.startsWith("http://") ||
+    lower.startsWith("https://")
+  ) {
+    return value;
+  }
+  const normalizeAndEncode = (input) => {
+    const normalized = String(input || "").replace(/\\/g, "/");
+    try {
+      return encodeURI(decodeURI(normalized));
+    } catch (_) {
+      return encodeURI(normalized);
+    }
+  };
+
+  if (lower.startsWith("file://")) {
+    return normalizeAndEncode(value);
+  }
+
+  const normalizedValue = String(value).replace(/\\/g, "/");
+  if (/^[a-zA-Z]:\//.test(normalizedValue)) {
+    return normalizeAndEncode(`file:///${normalizedValue}`);
+  }
+  if (normalizedValue.startsWith("/")) {
+    return normalizeAndEncode(`file://${normalizedValue}`);
+  }
+  return normalizeAndEncode(`file:///${normalizedValue.replace(/^\/+/, "")}`);
+}
+
+function getRuntimeMediaSourceFromItem(item) {
+  if (!item || typeof item !== "object") return "";
+  const rawPath = String(item.filePath || item.path || item.file || "").trim();
+  return normalizeRuntimeMediaPath(rawPath);
+}
+
+function normalizeSyncSessionMediaExt(extValue) {
+  const ext = String(extValue || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "")
+    .slice(0, 12);
+  if (!SYNC_SESSION_MEDIA_ALLOWED_EXTENSIONS.has(ext)) return "";
+  return ext;
+}
+
+function normalizeSyncSessionMediaMime(ext, mimeValue) {
+  const expected = SYNC_SESSION_MEDIA_MIME_BY_EXT[ext] || "";
+  const mime = String(mimeValue || "")
+    .trim()
+    .toLowerCase();
+  if (!mime) return expected;
+  if (
+    mime === expected ||
+    ((ext === "jpg" || ext === "jpeg") &&
+      (mime === "image/jpg" || mime === "image/jpeg"))
+  ) {
+    return expected || mime;
+  }
+  return "";
+}
+
+function toBase64FromBytes(bytes) {
+  if (!(bytes instanceof Uint8Array)) return "";
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode.apply(null, chunk);
+  }
+  return btoa(binary);
+}
+
+function fromBase64ToBytes(value) {
+  const base64 = String(value || "")
+    .replace(/\s+/g, "")
+    .trim();
+  if (!base64) return null;
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+async function computeSyncSha256HexFromBytes(bytes) {
+  if (!(bytes instanceof Uint8Array) || bytes.length <= 0) return "";
+  try {
+    if (
+      typeof window !== "undefined" &&
+      window.crypto &&
+      window.crypto.subtle
+    ) {
+      const digest = await window.crypto.subtle.digest("SHA-256", bytes);
+      const view = new Uint8Array(digest);
+      let output = "";
+      for (let i = 0; i < view.length; i += 1) {
+        output += view[i].toString(16).padStart(2, "0");
+      }
+      return output;
+    }
+  } catch (_) {}
+  return "";
+}
+
+function sleepSyncTransfer(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, Math.max(0, Number(ms || 0) || 0));
+  });
+}
+
+function getSyncErrorCode(error) {
+  return String(error?.message || "").trim();
+}
+
+function isRetryableSyncTransferError(error) {
+  const code = getSyncErrorCode(error);
+  return (
+    code === "rate-limited" ||
+    code === "state-rate-limited" ||
+    code === "request-failed" ||
+    code === "websocket-request-timeout" ||
+    code === "websocket-disconnected" ||
+    code === "websocket-not-open" ||
+    code === "websocket-connect-failed" ||
+    code === "websocket-connect-closed"
+  );
+}
+
+function getSyncTransferRetryDelay(attemptIndex) {
+  const baseDelay = Math.max(
+    1,
+    Number(SYNC_SESSION_MEDIA_TRANSFER_BASE_DELAY_MS || 0) || 1,
+  );
+  const maxDelay = Math.max(
+    baseDelay,
+    Number(SYNC_SESSION_MEDIA_TRANSFER_MAX_DELAY_MS || 0) || baseDelay,
+  );
+  const exponential = Math.min(
+    maxDelay,
+    baseDelay * Math.pow(2, Math.max(0, Number(attemptIndex || 0) || 0)),
+  );
+  const jitter = Math.floor(
+    Math.random() * Math.min(120, Math.floor(exponential * 0.25)),
+  );
+  return Math.min(maxDelay, exponential + jitter);
+}
+
+async function runSyncTransferRequestWithRetry(requestFn, options = {}) {
+  if (typeof requestFn !== "function") {
+    throw new Error("invalid-transfer-request");
+  }
+  const abortSignal = options.abortSignal || null;
+  const maxRetries = Math.max(
+    0,
+    Number(options.maxRetries ?? SYNC_SESSION_MEDIA_TRANSFER_MAX_RETRIES) || 0,
+  );
+  let attempt = 0;
+  while (true) {
+    if (abortSignal && abortSignal.aborted) {
+      throw new Error("transfer-cancelled");
+    }
+    try {
+      return await requestFn();
+    } catch (error) {
+      const retryable = isRetryableSyncTransferError(error);
+      if (!retryable || attempt >= maxRetries) {
+        throw error;
+      }
+      const delayMs = getSyncTransferRetryDelay(attempt);
+      attempt += 1;
+      if (typeof options.onRetry === "function") {
+        try {
+          options.onRetry({
+            attempt,
+            delayMs,
+            errorCode: getSyncErrorCode(error),
+          });
+        } catch (_) {}
+      }
+      if (delayMs > 0) {
+        await sleepSyncTransfer(delayMs);
+      }
+    }
+  }
+}
+
+function clearSyncOnlineMediaCache() {
+  if (!(syncOnlineMediaCacheByIdentity instanceof Map)) {
+    syncOnlineMediaCacheByIdentity = new Map();
+    return;
+  }
+  syncOnlineMediaCacheByIdentity.forEach((entry) => {
+    const source = String(entry?.source || "").trim();
+    if (source.startsWith("blob:")) {
+      try {
+        URL.revokeObjectURL(source);
+      } catch (_) {}
+    }
+  });
+  syncOnlineMediaCacheByIdentity.clear();
+}
+
+function clearSyncParticipantPackValidation() {
+  syncParticipantPackValidationState = {
+    sessionCode: "",
+    packHash: "",
+    packUpdatedAt: 0,
+    mediaUpdatedAt: 0,
+    validatedAt: 0,
+  };
+  syncParticipantPackValidationWarningAt = 0;
+}
+
+function getSyncSessionCurrentPackFingerprint(snapshot = null) {
+  const stateSnapshot = snapshot || syncSessionServiceState;
+  if (!stateSnapshot || typeof stateSnapshot !== "object") return null;
+  const sessionCode = String(stateSnapshot.sessionCode || "").trim();
+  const packHash = String(stateSnapshot.sessionPackMeta?.hash || "")
+    .trim()
+    .toLowerCase();
+  const packUpdatedAt = Math.max(
+    0,
+    Number(stateSnapshot.sessionPackMeta?.updatedAt || 0) || 0,
+  );
+  const mediaUpdatedAt = Math.max(
+    0,
+    Number(stateSnapshot.sessionMediaMeta?.updatedAt || 0) || 0,
+  );
+  if (!sessionCode || !packHash) return null;
+  return {
+    sessionCode,
+    packHash,
+    packUpdatedAt,
+    mediaUpdatedAt,
+  };
+}
+
+function markSyncParticipantPackValidated(snapshot = null, overrides = null) {
+  const current = getSyncSessionCurrentPackFingerprint(snapshot);
+  if (!current) {
+    clearSyncParticipantPackValidation();
+    return false;
+  }
+  syncParticipantPackValidationState = {
+    sessionCode: String(
+      overrides?.sessionCode || current.sessionCode || "",
+    ).trim(),
+    packHash: String(overrides?.packHash || current.packHash || "")
+      .trim()
+      .toLowerCase(),
+    packUpdatedAt: Math.max(
+      0,
+      Number(overrides?.packUpdatedAt || current.packUpdatedAt || 0) || 0,
+    ),
+    mediaUpdatedAt: Math.max(
+      0,
+      Number(overrides?.mediaUpdatedAt || current.mediaUpdatedAt || 0) || 0,
+    ),
+    validatedAt: Date.now(),
+  };
+  syncParticipantPackValidationWarningAt = 0;
+  return true;
+}
+
+function isSyncParticipantPackValidationCurrent(snapshot = null) {
+  const current = getSyncSessionCurrentPackFingerprint(snapshot);
+  if (!current) return true;
+  const validated = syncParticipantPackValidationState || {};
+  return (
+    String(validated.sessionCode || "").trim() === current.sessionCode &&
+    String(validated.packHash || "")
+      .trim()
+      .toLowerCase() === current.packHash &&
+    Math.max(0, Number(validated.packUpdatedAt || 0) || 0) ===
+      current.packUpdatedAt &&
+    Math.max(0, Number(validated.mediaUpdatedAt || 0) || 0) ===
+      current.mediaUpdatedAt
+  );
+}
+
+function shouldRequireSyncParticipantPackValidation(snapshot = null) {
+  const stateSnapshot = snapshot || syncSessionServiceState;
+  if (
+    !stateSnapshot ||
+    stateSnapshot.role !== "participant" ||
+    stateSnapshot.status !== "joined"
+  ) {
+    return false;
+  }
+  return !!getSyncSessionCurrentPackFingerprint(stateSnapshot);
+}
+
+function notifySyncParticipantPackValidationRequired() {
+  const nowMs = Date.now();
+  if (nowMs - syncParticipantPackValidationWarningAt < 2200) return;
+  syncParticipantPackValidationWarningAt = nowMs;
+  const message = getI18nText(
+    "sync.onlinePackValidationRequiredBeforeStart",
+    "Download and apply the online session pack before joining this session start.",
+  );
+  const activeModal = document.getElementById("sync-session-modal");
+  if (activeModal && !activeModal.classList.contains("hidden")) {
+    setSyncSessionStatus(activeModal, message, "warning");
+  }
+  showSyncSessionToast({
+    type: "warning",
+    message,
+    duration: 2800,
+  });
+}
+
+function parseSyncUnknownActionName(error) {
+  const code = String(error?.message || "").trim();
+  if (code === "unknown-action") return "unknown";
+  if (!code.startsWith("unknown-action:")) return "";
+  return String(code.slice("unknown-action:".length) || "").trim();
+}
+
+function isSyncRelayMediaActionUnsupported(error) {
+  const action = parseSyncUnknownActionName(error);
+  if (!action) return false;
+  return (
+    action === "resetSessionMediaPack" ||
+    action === "uploadSessionMediaFile" ||
+    action === "getSessionMediaManifest" ||
+    action === "getSessionMediaFile"
+  );
+}
+
+function buildSyncMediaOrderKeys() {
+  if (!Array.isArray(state.images) || state.images.length <= 0) return [];
+  return state.images.map((item) => getSyncMediaIdentity(item)).filter(Boolean);
+}
+
+function buildSyncSessionPackMediaRefs() {
+  if (!Array.isArray(state.images) || state.images.length <= 0) return [];
+  const refs = [];
+  for (
+    let i = 0;
+    i < state.images.length && refs.length < SYNC_SESSION_PACK_MAX_MEDIA_REFS;
+    i += 1
+  ) {
+    const item = state.images[i];
+    if (!item || typeof item !== "object") continue;
+    const identity = getSyncMediaIdentity(item);
+    if (!identity) continue;
+    const rawPath = String(
+      item.filePath || item.path || item.file || "",
+    ).trim();
+    const fileNameFromPath = rawPath ? rawPath.split(/[\\/]/).pop() : "";
+    const name = String(
+      item.name || item.filename || item.fileName || fileNameFromPath || "",
+    ).trim();
+    const ext = String(item.ext || "")
+      .trim()
+      .toLowerCase();
+    refs.push({
+      identity,
+      index: i,
+      name: name || "unknown",
+      ext,
+    });
+  }
+  return refs;
+}
+
+function createSyncSessionPackFilename() {
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, "0");
+  const dd = String(now.getDate()).padStart(2, "0");
+  const hh = String(now.getHours()).padStart(2, "0");
+  const min = String(now.getMinutes()).padStart(2, "0");
+  const ss = String(now.getSeconds()).padStart(2, "0");
+  return `posechrono-session-pack-${yyyy}${mm}${dd}-${hh}${min}${ss}.json`;
+}
+
+function buildSyncSessionPackManifest() {
+  const mode = normalizeSessionModeValue(
+    state.sessionMode || CONFIG.defaultSessionMode || "classique",
+    "classique",
+  );
+  const selectedDuration = Math.max(
+    1,
+    Number(state.selectedDuration || 0) || 60,
+  );
+  const timeRemaining = Math.max(
+    0,
+    Number(state.timeRemaining || 0) || selectedDuration,
+  );
+  const customQueue = mode === "custom" ? buildSyncCustomQueuePayload() : [];
+  const mediaOrderKeys = buildSyncMediaOrderKeys();
+
+  return {
+    schema: SYNC_SESSION_PACK_SCHEMA,
+    version: SYNC_SESSION_PACK_VERSION,
+    createdAt: new Date().toISOString(),
+    source: {
+      runtime: isDesktopStandaloneRuntime() ? "desktop" : "eagle",
+      language: getCurrentI18nLanguage(),
+    },
+    session: {
+      mode,
+      selectedDuration,
+      timeRemaining,
+      memoryType: String(state.memoryType || "flash"),
+      memoryDuration: Math.max(0, Number(state.memoryDuration || 0) || 0),
+      memoryPosesCount: Math.max(1, Number(state.memoryPosesCount || 1) || 1),
+      memoryDrawingTime: Math.max(0, Number(state.memoryDrawingTime || 0) || 0),
+      memoryNoPressure: !!state.memoryNoPressure,
+      customQueue,
+      mediaOrderKeys,
+      imagesCount: Array.isArray(state.images) ? state.images.length : 0,
+    },
+    mediaRefs: buildSyncSessionPackMediaRefs(),
+  };
+}
+
+function buildSyncSessionPackFromUploadedMedia(pack, uploadedIdentities = []) {
+  if (!pack || !pack.session || typeof pack.session !== "object") return null;
+  const allowed = new Set(
+    (Array.isArray(uploadedIdentities) ? uploadedIdentities : [])
+      .map((id) => String(id || "").trim())
+      .filter((id) => !!id),
+  );
+
+  const baseRefs = normalizeSyncSessionPackMediaRefs(pack.mediaRefs);
+  const filteredRefs = allowed.size
+    ? baseRefs.filter((ref) => allowed.has(String(ref.identity || "").trim()))
+    : [];
+
+  let mediaOrderKeys = normalizeSyncSessionPackMediaOrderKeys(
+    pack.session.mediaOrderKeys,
+  );
+  if (allowed.size) {
+    mediaOrderKeys = mediaOrderKeys.filter((id) =>
+      allowed.has(String(id || "").trim()),
+    );
+  } else {
+    mediaOrderKeys = [];
+  }
+  if (mediaOrderKeys.length <= 0 && filteredRefs.length > 0) {
+    mediaOrderKeys = filteredRefs
+      .slice()
+      .sort((a, b) => Number(a?.index || 0) - Number(b?.index || 0))
+      .map((ref) => String(ref.identity || "").trim())
+      .filter((id) => !!id);
+  }
+
+  const normalizedRefs = filteredRefs
+    .slice()
+    .sort((a, b) => Number(a?.index || 0) - Number(b?.index || 0))
+    .map((ref, index) => ({
+      identity: String(ref.identity || "").trim(),
+      index,
+      name: String(ref.name || "").trim() || "unknown",
+      ext: normalizeSyncSessionMediaExt(ref.ext || ""),
+    }));
+
+  return {
+    ...pack,
+    session: {
+      ...pack.session,
+      mediaOrderKeys,
+      imagesCount: mediaOrderKeys.length,
+    },
+    mediaRefs: normalizedRefs,
+  };
+}
+
+function applySyncHostOnlinePackMediaSelection(pack) {
+  if (!isSyncSessionHostActive()) return false;
+  if (!pack || !pack.session || typeof pack.session !== "object") return false;
+  if (!Array.isArray(state.images) || state.images.length <= 0) return false;
+
+  let desiredKeys = normalizeSyncSessionPackMediaOrderKeys(
+    pack.session.mediaOrderKeys,
+  );
+  if (desiredKeys.length <= 0) {
+    desiredKeys = normalizeSyncSessionPackMediaRefs(pack.mediaRefs)
+      .slice()
+      .sort((a, b) => Number(a?.index || 0) - Number(b?.index || 0))
+      .map((ref) => String(ref.identity || "").trim())
+      .filter((id) => !!id);
+  }
+  if (desiredKeys.length <= 0) return false;
+
+  const buckets = new Map();
+  state.images.forEach((item) => {
+    const id = getSyncMediaIdentity(item);
+    if (!id) return;
+    if (!buckets.has(id)) buckets.set(id, []);
+    buckets.get(id).push(item);
+  });
+
+  const nextImages = [];
+  desiredKeys.forEach((key) => {
+    const normalizedKey = String(key || "").trim();
+    if (!normalizedKey) return;
+    const bucket = buckets.get(normalizedKey);
+    if (!bucket || bucket.length <= 0) return;
+    const entry = bucket.shift();
+    if (entry) nextImages.push(entry);
+  });
+
+  if (nextImages.length <= 0) return false;
+
+  state.images = nextImages;
+  state.originalImages = nextImages.slice();
+  state.currentIndex = Math.max(
+    0,
+    Math.min(state.currentIndex, state.images.length - 1),
+  );
+  state.memoryPosesCount = clampMemorySessionPosesCount(
+    state.memoryPosesCount,
+    state.images.length,
+    1,
+  );
+  updateStartButtonState();
+  updateTimerDisplay();
+  return true;
+}
+
+function normalizeSyncSessionPackMediaOrderKeys(input) {
+  if (!Array.isArray(input)) return [];
+  const out = [];
+  for (
+    let i = 0;
+    i < input.length && out.length < SYNC_SESSION_PACK_MAX_MEDIA_REFS;
+    i += 1
+  ) {
+    const value = String(input[i] || "").trim();
+    if (!value || value.length > 128) continue;
+    if (!/^[A-Za-z0-9:_-]+$/.test(value)) continue;
+    out.push(value);
+  }
+  return out;
+}
+
+function normalizeSyncSessionPackMediaRefs(input) {
+  if (!Array.isArray(input)) return [];
+  const out = [];
+  for (
+    let i = 0;
+    i < input.length && out.length < SYNC_SESSION_PACK_MAX_MEDIA_REFS;
+    i += 1
+  ) {
+    const raw = input[i];
+    if (!raw || typeof raw !== "object") continue;
+
+    const identity = String(raw.identity || "").trim();
+    if (!identity || identity.length > 128) continue;
+    if (!/^[A-Za-z0-9:_-]+$/.test(identity)) continue;
+
+    const indexRaw = Number(raw.index);
+    const index = Number.isFinite(indexRaw)
+      ? Math.max(0, Math.floor(indexRaw))
+      : out.length;
+
+    const name = String(raw.name || "")
+      .replace(/[\u0000-\u001f\u007f]/g, "")
+      .trim()
+      .slice(0, 160);
+
+    const ext = normalizeSyncSessionMediaExt(raw.ext || "");
+    out.push({
+      identity,
+      index,
+      name: name || "unknown",
+      ext,
+    });
+  }
+  return out;
+}
+
+function parseSyncSessionPackText(rawText) {
+  if (typeof rawText !== "string" || !rawText.trim()) {
+    throw new Error("sync-pack-empty");
+  }
+  if (rawText.length > SYNC_SESSION_PACK_MAX_TEXT_LENGTH) {
+    throw new Error("sync-pack-too-large");
+  }
+
+  let parsed = null;
+  try {
+    parsed = JSON.parse(rawText);
+  } catch (_) {
+    throw new Error("sync-pack-invalid-json");
+  }
+
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error("sync-pack-invalid");
+  }
+  if (String(parsed.schema || "").trim() !== SYNC_SESSION_PACK_SCHEMA) {
+    throw new Error("sync-pack-invalid-schema");
+  }
+
+  const rawSession =
+    parsed.session && typeof parsed.session === "object"
+      ? parsed.session
+      : null;
+  if (!rawSession) {
+    throw new Error("sync-pack-missing-session");
+  }
+
+  const mode = normalizeSessionModeValue(
+    rawSession.mode || "classique",
+    "classique",
+  );
+  const selectedDuration = Math.max(
+    1,
+    Math.min(
+      24 * 3600,
+      Math.floor(Number(rawSession.selectedDuration || 0) || 60),
+    ),
+  );
+  const timeRemaining = Math.max(
+    0,
+    Math.min(
+      24 * 3600,
+      Math.floor(
+        Number(rawSession.timeRemaining || selectedDuration) ||
+          selectedDuration,
+      ),
+    ),
+  );
+  const memoryType =
+    String(rawSession.memoryType || "").trim() === "progressive"
+      ? "progressive"
+      : "flash";
+  const memoryDuration = Math.max(
+    0,
+    Math.min(
+      24 * 3600,
+      Math.floor(Number(rawSession.memoryDuration || 0) || 0),
+    ),
+  );
+  const memoryPosesCount = Math.max(
+    1,
+    Math.min(9999, Math.floor(Number(rawSession.memoryPosesCount || 1) || 1)),
+  );
+  const memoryDrawingTime = Math.max(
+    0,
+    Math.min(
+      24 * 3600,
+      Math.floor(Number(rawSession.memoryDrawingTime || 0) || 0),
+    ),
+  );
+  const memoryNoPressure = !!rawSession.memoryNoPressure;
+  const mediaOrderKeys = normalizeSyncSessionPackMediaOrderKeys(
+    rawSession.mediaOrderKeys,
+  );
+  const mediaRefs = normalizeSyncSessionPackMediaRefs(parsed.mediaRefs);
+  const customQueue =
+    mode === "custom" && Array.isArray(rawSession.customQueue)
+      ? rawSession.customQueue
+          .map((step) => normalizeCustomStep(step))
+          .filter((step) => !!step && typeof step === "object")
+          .slice(0, 600)
+      : [];
+
+  return {
+    schema: SYNC_SESSION_PACK_SCHEMA,
+    version: SYNC_SESSION_PACK_VERSION,
+    createdAt: String(parsed.createdAt || "").trim(),
+    session: {
+      mode,
+      selectedDuration,
+      timeRemaining,
+      memoryType,
+      memoryDuration,
+      memoryPosesCount,
+      memoryDrawingTime,
+      memoryNoPressure,
+      mediaOrderKeys,
+      customQueue,
+    },
+    mediaRefs,
+  };
+}
+
+async function computeSyncSessionPackSha256Hex(rawText) {
+  const normalized = String(rawText || "");
+  if (!normalized) return "";
+  try {
+    if (
+      typeof window !== "undefined" &&
+      window.crypto &&
+      window.crypto.subtle &&
+      typeof TextEncoder !== "undefined"
+    ) {
+      const bytes = new TextEncoder().encode(normalized);
+      const digest = await window.crypto.subtle.digest("SHA-256", bytes);
+      const view = new Uint8Array(digest);
+      let output = "";
+      for (let i = 0; i < view.length; i += 1) {
+        output += view[i].toString(16).padStart(2, "0");
+      }
+      return output;
+    }
+  } catch (_) {}
+  return "";
+}
+
+async function collectSyncSessionMediaUploadEntries(pack) {
+  const refs = Array.isArray(pack?.mediaRefs) ? pack.mediaRefs : [];
+  if (
+    !Array.isArray(state.images) ||
+    state.images.length <= 0 ||
+    refs.length <= 0
+  ) {
+    return {
+      entries: [],
+      selectedCount: 0,
+      skippedMissing: 0,
+      skippedUnsupported: 0,
+      skippedTooLarge: 0,
+      skippedFileTooLarge: 0,
+      skippedTotalBudget: 0,
+      skippedFetch: 0,
+      skippedCountLimit: 0,
+    };
+  }
+
+  const entries = [];
+  let totalBytes = 0;
+  let skippedMissing = 0;
+  let skippedUnsupported = 0;
+  let skippedTooLarge = 0;
+  let skippedFileTooLarge = 0;
+  let skippedTotalBudget = 0;
+  let skippedFetch = 0;
+  let skippedCountLimit = 0;
+
+  const imageByIdentity = new Map();
+  state.images.forEach((item) => {
+    const identity = getSyncMediaIdentity(item);
+    if (!identity || imageByIdentity.has(identity)) return;
+    imageByIdentity.set(identity, item);
+  });
+
+  for (let i = 0; i < refs.length; i += 1) {
+    if (entries.length >= SYNC_SESSION_MEDIA_MAX_FILES) {
+      skippedCountLimit += 1;
+      continue;
+    }
+    const ref = refs[i];
+    const identity = String(ref?.identity || "").trim();
+    if (!identity) continue;
+    const item = imageByIdentity.get(identity);
+    if (!item) {
+      skippedMissing += 1;
+      continue;
+    }
+
+    const ext = normalizeSyncSessionMediaExt(ref?.ext || item.ext || "");
+    if (!ext) {
+      skippedUnsupported += 1;
+      continue;
+    }
+
+    const sourceUrl = getRuntimeMediaSourceFromItem(item);
+    if (!sourceUrl) {
+      skippedMissing += 1;
+      continue;
+    }
+
+    let response = null;
+    try {
+      response = await fetch(sourceUrl);
+    } catch (_) {
+      skippedFetch += 1;
+      continue;
+    }
+    if (!response || !response.ok) {
+      skippedFetch += 1;
+      continue;
+    }
+
+    let arrayBuffer = null;
+    try {
+      arrayBuffer = await response.arrayBuffer();
+    } catch (_) {
+      skippedFetch += 1;
+      continue;
+    }
+    const bytes = new Uint8Array(arrayBuffer || 0);
+    if (!bytes.length) {
+      skippedFetch += 1;
+      continue;
+    }
+
+    if (bytes.length > SYNC_SESSION_MEDIA_MAX_FILE_BYTES) {
+      skippedTooLarge += 1;
+      skippedFileTooLarge += 1;
+      continue;
+    }
+    if (totalBytes + bytes.length > SYNC_SESSION_MEDIA_MAX_TOTAL_BYTES) {
+      skippedTooLarge += 1;
+      skippedTotalBudget += 1;
+      continue;
+    }
+
+    const mimeFromResponse = response.headers
+      ? response.headers.get("content-type")
+      : "";
+    const mime = normalizeSyncSessionMediaMime(
+      ext,
+      mimeFromResponse || item.mime || item.type || "",
+    );
+    if (!mime) {
+      skippedUnsupported += 1;
+      continue;
+    }
+
+    const sha256 = await computeSyncSha256HexFromBytes(bytes);
+    const dataBase64 = toBase64FromBytes(bytes);
+    if (!dataBase64) {
+      skippedFetch += 1;
+      continue;
+    }
+
+    const name = String(
+      ref?.name ||
+        item.name ||
+        item.filename ||
+        item.fileName ||
+        `${identity}.${ext}`,
+    ).trim();
+    entries.push({
+      identity,
+      name: name || `${identity}.${ext}`,
+      ext,
+      mime,
+      size: bytes.length,
+      sha256,
+      dataBase64,
+    });
+    totalBytes += bytes.length;
+  }
+
+  return {
+    entries,
+    selectedCount: Math.min(refs.length, SYNC_SESSION_MEDIA_MAX_FILES),
+    skippedMissing,
+    skippedUnsupported,
+    skippedTooLarge,
+    skippedFileTooLarge,
+    skippedTotalBudget,
+    skippedFetch,
+    skippedCountLimit,
+  };
+}
+
+async function publishSyncSessionMediaPack(service, pack, options = {}) {
+  const onProgress =
+    options && typeof options.onProgress === "function"
+      ? options.onProgress
+      : null;
+  if (
+    !service ||
+    typeof service.resetSessionMediaPack !== "function" ||
+    typeof service.publishSessionMediaFile !== "function"
+  ) {
+    return {
+      supported: false,
+      selectedCount: 0,
+      uploadedCount: 0,
+      uploadedIdentities: [],
+      failedCount: 0,
+      failedRateLimited: 0,
+      failedTimeout: 0,
+      failedDisconnected: 0,
+      failedOther: 0,
+      skippedMissing: 0,
+      skippedUnsupported: 0,
+      skippedTooLarge: 0,
+      skippedFileTooLarge: 0,
+      skippedTotalBudget: 0,
+      skippedFetch: 0,
+      skippedCountLimit: 0,
+      relayUnsupported: false,
+    };
+  }
+
+  if (onProgress) {
+    onProgress({
+      stage: "prepare",
+      done: 0,
+      total: 0,
+      uploaded: 0,
+      failed: 0,
+      skipped: 0,
+      selected: 0,
+    });
+  }
+  const prepared = await collectSyncSessionMediaUploadEntries(pack);
+  const initialSkipped =
+    Math.max(0, Number(prepared.skippedMissing || 0) || 0) +
+    Math.max(0, Number(prepared.skippedUnsupported || 0) || 0) +
+    Math.max(0, Number(prepared.skippedTooLarge || 0) || 0) +
+    Math.max(0, Number(prepared.skippedFetch || 0) || 0) +
+    Math.max(0, Number(prepared.skippedCountLimit || 0) || 0);
+
+  if (onProgress) {
+    onProgress({
+      stage: "prepare",
+      done: 0,
+      total: prepared.entries.length,
+      uploaded: 0,
+      failed: 0,
+      skipped: initialSkipped,
+      selected: Math.max(0, Number(prepared.selectedCount || 0) || 0),
+    });
+  }
+
+  try {
+    await service.resetSessionMediaPack();
+  } catch (error) {
+    if (isSyncRelayMediaActionUnsupported(error)) {
+      return {
+        supported: false,
+        selectedCount: prepared.selectedCount,
+        uploadedCount: 0,
+        uploadedIdentities: [],
+        failedCount: 0,
+        failedRateLimited: 0,
+        failedTimeout: 0,
+        failedDisconnected: 0,
+        failedOther: 0,
+        skippedMissing: prepared.skippedMissing,
+        skippedUnsupported: prepared.skippedUnsupported,
+        skippedTooLarge: prepared.skippedTooLarge,
+        skippedFileTooLarge: prepared.skippedFileTooLarge,
+        skippedTotalBudget: prepared.skippedTotalBudget,
+        skippedFetch: prepared.skippedFetch,
+        skippedCountLimit: prepared.skippedCountLimit,
+        relayUnsupported: true,
+      };
+    }
+    throw error;
+  }
+
+  let uploadedCount = 0;
+  const uploadedIdentities = [];
+  let failedCount = 0;
+  let failedRateLimited = 0;
+  let failedTimeout = 0;
+  let failedDisconnected = 0;
+  let failedOther = 0;
+  if (onProgress) {
+    onProgress({
+      stage: "upload",
+      done: 0,
+      total: prepared.entries.length,
+      uploaded: uploadedCount,
+      failed: failedCount,
+      skipped: initialSkipped,
+      selected: Math.max(0, Number(prepared.selectedCount || 0) || 0),
+    });
+  }
+  const abortSignal = options.abortSignal || getSyncTransferAbortSignal();
+  let lastRequestSentAt = 0;
+  for (let i = 0; i < prepared.entries.length; i += 1) {
+    if (abortSignal && abortSignal.aborted) {
+      throw new Error("transfer-cancelled");
+    }
+    const entry = prepared.entries[i];
+    const sinceLast = Date.now() - lastRequestSentAt;
+    if (sinceLast < SYNC_SESSION_MEDIA_TRANSFER_REQUEST_INTERVAL_MS) {
+      await sleepSyncTransfer(
+        SYNC_SESSION_MEDIA_TRANSFER_REQUEST_INTERVAL_MS - sinceLast,
+      );
+    }
+    try {
+      lastRequestSentAt = Date.now();
+      await runSyncTransferRequestWithRetry(
+        () =>
+          service.publishSessionMediaFile({
+            file: entry,
+          }),
+        {
+          abortSignal,
+        },
+      );
+      uploadedCount += 1;
+      uploadedIdentities.push(String(entry?.identity || "").trim());
+    } catch (error) {
+      if (isSyncRelayMediaActionUnsupported(error)) {
+        return {
+          supported: false,
+          selectedCount: prepared.selectedCount,
+          uploadedCount,
+          uploadedIdentities,
+          failedCount,
+          failedRateLimited,
+          failedTimeout,
+          failedDisconnected,
+          failedOther,
+          skippedMissing: prepared.skippedMissing,
+          skippedUnsupported: prepared.skippedUnsupported,
+          skippedTooLarge: prepared.skippedTooLarge,
+          skippedFileTooLarge: prepared.skippedFileTooLarge,
+          skippedTotalBudget: prepared.skippedTotalBudget,
+          skippedFetch: prepared.skippedFetch,
+          skippedCountLimit: prepared.skippedCountLimit,
+          relayUnsupported: true,
+        };
+      }
+      const errorCode = getSyncErrorCode(error);
+      if (errorCode === "rate-limited" || errorCode === "state-rate-limited") {
+        failedRateLimited += 1;
+      } else if (errorCode === "websocket-request-timeout") {
+        failedTimeout += 1;
+      } else if (
+        errorCode === "websocket-disconnected" ||
+        errorCode === "websocket-not-open" ||
+        errorCode === "websocket-connect-failed" ||
+        errorCode === "websocket-connect-closed"
+      ) {
+        failedDisconnected += 1;
+      } else {
+        failedOther += 1;
+      }
+      failedCount += 1;
+    }
+    if (onProgress) {
+      onProgress({
+        stage: "upload",
+        done: i + 1,
+        total: prepared.entries.length,
+        uploaded: uploadedCount,
+        failed: failedCount,
+        skipped: initialSkipped,
+        selected: Math.max(0, Number(prepared.selectedCount || 0) || 0),
+      });
+    }
+  }
+
+  return {
+    supported: true,
+    selectedCount: prepared.selectedCount,
+    uploadedCount,
+    uploadedIdentities,
+    failedCount,
+    failedRateLimited,
+    failedTimeout,
+    failedDisconnected,
+    failedOther,
+    skippedMissing: prepared.skippedMissing,
+    skippedUnsupported: prepared.skippedUnsupported,
+    skippedTooLarge: prepared.skippedTooLarge,
+    skippedFileTooLarge: prepared.skippedFileTooLarge,
+    skippedTotalBudget: prepared.skippedTotalBudget,
+    skippedFetch: prepared.skippedFetch,
+    skippedCountLimit: prepared.skippedCountLimit,
+    relayUnsupported: false,
+  };
+}
+
+async function downloadSyncSessionMediaPack(service, options = {}) {
+  const onProgress =
+    options && typeof options.onProgress === "function"
+      ? options.onProgress
+      : null;
+  if (
+    !service ||
+    typeof service.fetchSessionMediaManifest !== "function" ||
+    typeof service.fetchSessionMediaFile !== "function"
+  ) {
+    return {
+      supported: false,
+      downloadedCount: 0,
+      filesCount: 0,
+      skippedCount: 0,
+      skippedRateLimited: 0,
+      skippedTimeout: 0,
+      skippedDisconnected: 0,
+      skippedOther: 0,
+      mediaUpdatedAt: 0,
+      entries: [],
+      relayUnsupported: false,
+    };
+  }
+
+  let manifest = null;
+  try {
+    manifest = await service.fetchSessionMediaManifest();
+  } catch (error) {
+    const code = String(error?.message || "").trim();
+    if (code === "session-media-not-found") {
+      manifest = {
+        files: [],
+        filesCount: 0,
+        totalBytes: 0,
+        updatedAt: 0,
+      };
+    } else if (isSyncRelayMediaActionUnsupported(error)) {
+      return {
+        supported: false,
+        downloadedCount: 0,
+        filesCount: 0,
+        skippedCount: 0,
+        skippedRateLimited: 0,
+        skippedTimeout: 0,
+        skippedDisconnected: 0,
+        skippedOther: 0,
+        mediaUpdatedAt: 0,
+        entries: [],
+        relayUnsupported: true,
+      };
+    } else {
+      throw error;
+    }
+  }
+  const files = Array.isArray(manifest?.files) ? manifest.files : [];
+  if (onProgress) {
+    onProgress({
+      stage: "manifest",
+      done: 0,
+      total: files.length,
+      skipped: 0,
+    });
+  }
+  if (files.length <= 0) {
+    return {
+      supported: true,
+      downloadedCount: 0,
+      filesCount: 0,
+      skippedCount: 0,
+      skippedRateLimited: 0,
+      skippedTimeout: 0,
+      skippedDisconnected: 0,
+      skippedOther: 0,
+      mediaUpdatedAt: Math.max(0, Number(manifest?.updatedAt || 0) || 0),
+      entries: [],
+      relayUnsupported: false,
+    };
+  }
+
+  clearSyncOnlineMediaCache();
+  const entries = [];
+  let totalBytes = 0;
+  let skippedCount = 0;
+  let skippedRateLimited = 0;
+  let skippedTimeout = 0;
+  let skippedDisconnected = 0;
+  let skippedOther = 0;
+
+  const dlAbortSignal = options.abortSignal || getSyncTransferAbortSignal();
+  let lastRequestSentAt = 0;
+  for (
+    let i = 0;
+    i < files.length && entries.length < SYNC_SESSION_MEDIA_MAX_FILES;
+    i += 1
+  ) {
+    if (dlAbortSignal && dlAbortSignal.aborted) {
+      throw new Error("transfer-cancelled");
+    }
+    const fileMeta = files[i];
+    const identity = String(fileMeta?.identity || "").trim();
+    if (!identity) {
+      skippedCount += 1;
+      if (onProgress) {
+        onProgress({
+          stage: "file",
+          done: i + 1,
+          total: files.length,
+          skipped: skippedCount,
+        });
+      }
+      continue;
+    }
+    let payload = null;
+    try {
+      const sinceLast = Date.now() - lastRequestSentAt;
+      if (sinceLast < SYNC_SESSION_MEDIA_TRANSFER_REQUEST_INTERVAL_MS) {
+        await sleepSyncTransfer(
+          SYNC_SESSION_MEDIA_TRANSFER_REQUEST_INTERVAL_MS - sinceLast,
+        );
+      }
+      lastRequestSentAt = Date.now();
+      payload = await runSyncTransferRequestWithRetry(
+        () => service.fetchSessionMediaFile({ identity }),
+        { abortSignal: dlAbortSignal },
+      );
+    } catch (error) {
+      const errorCode = getSyncErrorCode(error);
+      if (errorCode === "rate-limited" || errorCode === "state-rate-limited") {
+        skippedRateLimited += 1;
+      } else if (errorCode === "websocket-request-timeout") {
+        skippedTimeout += 1;
+      } else if (
+        errorCode === "websocket-disconnected" ||
+        errorCode === "websocket-not-open" ||
+        errorCode === "websocket-connect-failed" ||
+        errorCode === "websocket-connect-closed"
+      ) {
+        skippedDisconnected += 1;
+      } else {
+        skippedOther += 1;
+      }
+      skippedCount += 1;
+      if (onProgress) {
+        onProgress({
+          stage: "file",
+          done: i + 1,
+          total: files.length,
+          skipped: skippedCount,
+        });
+      }
+      continue;
+    }
+    const remoteFile = payload?.file;
+    if (!remoteFile || typeof remoteFile !== "object") {
+      skippedCount += 1;
+      if (onProgress) {
+        onProgress({
+          stage: "file",
+          done: i + 1,
+          total: files.length,
+          skipped: skippedCount,
+        });
+      }
+      continue;
+    }
+
+    const ext = normalizeSyncSessionMediaExt(
+      remoteFile.ext || fileMeta.ext || "",
+    );
+    if (!ext) {
+      skippedCount += 1;
+      if (onProgress) {
+        onProgress({
+          stage: "file",
+          done: i + 1,
+          total: files.length,
+          skipped: skippedCount,
+        });
+      }
+      continue;
+    }
+    const mime = normalizeSyncSessionMediaMime(
+      ext,
+      remoteFile.mime || fileMeta.mime || "",
+    );
+    if (!mime) {
+      skippedCount += 1;
+      if (onProgress) {
+        onProgress({
+          stage: "file",
+          done: i + 1,
+          total: files.length,
+          skipped: skippedCount,
+        });
+      }
+      continue;
+    }
+
+    const bytes = fromBase64ToBytes(remoteFile.dataBase64);
+    const expectedSize = Math.max(
+      0,
+      Number(remoteFile.size || fileMeta.size || 0) || 0,
+    );
+    if (
+      !(bytes instanceof Uint8Array) ||
+      !bytes.length ||
+      bytes.length !== expectedSize
+    ) {
+      skippedCount += 1;
+      if (onProgress) {
+        onProgress({
+          stage: "file",
+          done: i + 1,
+          total: files.length,
+          skipped: skippedCount,
+        });
+      }
+      continue;
+    }
+
+    if (
+      bytes.length > SYNC_SESSION_MEDIA_MAX_FILE_BYTES ||
+      totalBytes + bytes.length > SYNC_SESSION_MEDIA_MAX_TOTAL_BYTES
+    ) {
+      skippedCount += 1;
+      if (onProgress) {
+        onProgress({
+          stage: "file",
+          done: i + 1,
+          total: files.length,
+          skipped: skippedCount,
+        });
+      }
+      continue;
+    }
+
+    const remoteSha = String(remoteFile.sha256 || fileMeta.sha256 || "")
+      .trim()
+      .toLowerCase();
+    if (/^[a-f0-9]{64}$/.test(remoteSha)) {
+      const localSha = await computeSyncSha256HexFromBytes(bytes);
+      if (!localSha || localSha !== remoteSha) {
+        skippedCount += 1;
+        if (onProgress) {
+          onProgress({
+            stage: "file",
+            done: i + 1,
+            total: files.length,
+            skipped: skippedCount,
+          });
+        }
+        continue;
+      }
+    }
+
+    const blob = new Blob([bytes], { type: mime });
+    const source = URL.createObjectURL(blob);
+    const entry = {
+      identity,
+      name:
+        String(remoteFile.name || fileMeta.name || "unknown").trim() ||
+        "unknown",
+      ext,
+      mime,
+      size: bytes.length,
+      sha256: remoteSha,
+      source,
+    };
+    syncOnlineMediaCacheByIdentity.set(identity, entry);
+    entries.push(entry);
+    totalBytes += bytes.length;
+    if (onProgress) {
+      onProgress({
+        stage: "file",
+        done: i + 1,
+        total: files.length,
+        skipped: skippedCount,
+      });
+    }
+  }
+
+  return {
+    supported: true,
+    downloadedCount: entries.length,
+    filesCount: files.length,
+    skippedCount,
+    skippedRateLimited,
+    skippedTimeout,
+    skippedDisconnected,
+    skippedOther,
+    mediaUpdatedAt: Math.max(0, Number(manifest?.updatedAt || 0) || 0),
+    entries,
+    relayUnsupported: false,
+  };
+}
+
+function applySyncDownloadedMediaPackToState(pack, downloadResult) {
+  if (!pack || !pack.session || !Array.isArray(downloadResult?.entries)) {
+    return false;
+  }
+  const refs = Array.isArray(pack.mediaRefs) ? pack.mediaRefs.slice() : [];
+
+  const byIdentity = new Map();
+  downloadResult.entries.forEach((entry) => {
+    const identity = String(entry?.identity || "").trim();
+    if (!identity || byIdentity.has(identity)) return;
+    byIdentity.set(identity, entry);
+  });
+  if (byIdentity.size <= 0) return false;
+
+  const orderedEntries = [];
+  if (refs.length > 0) {
+    refs.sort((a, b) => Number(a?.index || 0) - Number(b?.index || 0));
+    const used = new Set();
+    refs.forEach((ref) => {
+      const identity = String(ref?.identity || "").trim();
+      if (!identity || used.has(identity)) return;
+      const found = byIdentity.get(identity);
+      if (!found) return;
+      orderedEntries.push(found);
+      used.add(identity);
+    });
+    byIdentity.forEach((entry, identity) => {
+      if (used.has(identity)) return;
+      orderedEntries.push(entry);
+    });
+  } else {
+    downloadResult.entries.forEach((entry) => {
+      const identity = String(entry?.identity || "").trim();
+      if (!identity) return;
+      const found = byIdentity.get(identity);
+      if (!found) return;
+      orderedEntries.push(found);
+    });
+  }
+
+  if (orderedEntries.length <= 0) return false;
+  state.images = orderedEntries.map((entry, index) => ({
+    id: `sync-media-${entry.identity}-${index}`,
+    filePath: entry.source,
+    path: entry.source,
+    file: entry.source,
+    url: entry.source,
+    thumbnailURL: entry.source,
+    thumbnail: entry.source,
+    name: entry.name,
+    ext: entry.ext,
+    mime: entry.mime,
+    isSyncRemoteMedia: true,
+    syncIdentity: entry.identity,
+  }));
+  state.originalImages = state.images.slice();
+  state.currentIndex = 0;
+  state.memoryPosesCount = clampMemorySessionPosesCount(
+    state.memoryPosesCount,
+    state.images.length,
+    1,
+  );
+
+  const folderInfoEl = folderInfo || document.getElementById("folder-info");
+  const startBtnEl = startBtn || document.getElementById("start-btn");
+  if (folderInfoEl) {
+    const mediaCounts = countSessionMediaTypes(state.images);
+    const countMessage = formatSessionMediaCountLabel({
+      imageCount: mediaCounts.imageCount,
+      videoCount: mediaCounts.videoCount,
+    });
+    folderInfoEl.innerHTML = `
+      <div style="display: flex; align-items: baseline; justify-content: left; gap: 8px;">
+        <span class="source-message-text">${getI18nText("sync.onlineMediaSourceLabel", "Online media")}</span>
+        <span class="image-count-text">${countMessage}</span>
+      </div>
+    `;
+  }
+  if (startBtnEl) {
+    startBtnEl.disabled = state.images.length <= 0;
+  }
+  updateStartButtonState();
+  updateTimerDisplay();
+  return true;
+}
+
+function setClassicDurationInputsFromSeconds(totalSeconds) {
+  const safe = Math.max(0, Math.floor(Number(totalSeconds || 0) || 0));
+  if (hoursInput) {
+    hoursInput.value = Math.floor(safe / 3600);
+  }
+  if (minutesInput) {
+    minutesInput.value = Math.floor((safe % 3600) / 60);
+  }
+  if (secondsInput) {
+    secondsInput.value = safe % 60;
+  }
+}
+
+function setMinutesSecondsInputs(minutesInputEl, secondsInputEl, totalSeconds) {
+  const safe = Math.max(0, Math.floor(Number(totalSeconds || 0) || 0));
+  if (minutesInputEl) {
+    minutesInputEl.value = Math.floor(safe / 60);
+  }
+  if (secondsInputEl) {
+    secondsInputEl.value = safe % 60;
+  }
+}
+
+function applyPendingSyncSessionPackMediaOrder() {
+  if (!Array.isArray(state.images) || state.images.length <= 0) {
+    return false;
+  }
+
+  const runtimeKeys = syncPendingRuntimeMediaOrderKeys;
+  if (Array.isArray(runtimeKeys) && runtimeKeys.length > 0) {
+    const reordered = reorderSessionImagesByRemoteOrder(runtimeKeys);
+    if (reordered) {
+      syncPendingRuntimeMediaOrderKeys = null;
+      syncPendingSessionPackMediaOrderKeys = null;
+      return true;
+    }
+  }
+
+  if (
+    !Array.isArray(syncPendingSessionPackMediaOrderKeys) ||
+    syncPendingSessionPackMediaOrderKeys.length <= 0
+  ) {
+    return false;
+  }
+  const reordered = reorderSessionImagesByRemoteOrder(
+    syncPendingSessionPackMediaOrderKeys,
+  );
+  if (reordered) {
+    syncPendingSessionPackMediaOrderKeys = null;
+  }
+  return reordered;
+}
+
+function applySyncSessionPackManifest(pack) {
+  if (!pack || !pack.session || typeof pack.session !== "object") {
+    return { reorderedMedia: false, pendingMedia: false };
+  }
+
+  const session = pack.session;
+  const mode = normalizeSessionModeValue(
+    session.mode || "classique",
+    "classique",
+  );
+  switchMode(mode);
+
+  state.selectedDuration = Math.max(
+    1,
+    Math.floor(
+      Number(session.selectedDuration || state.selectedDuration || 60),
+    ),
+  );
+  state.timeRemaining = Math.max(
+    0,
+    Math.floor(Number(session.timeRemaining || state.selectedDuration)),
+  );
+  setClassicDurationInputsFromSeconds(state.selectedDuration);
+  toggleDurationButtonsForValue(durationBtns, state.selectedDuration);
+
+  state.memoryType =
+    session.memoryType === "progressive" ? "progressive" : "flash";
+  state.memoryDuration = Math.max(
+    0,
+    Math.floor(Number(session.memoryDuration || state.memoryDuration || 0)),
+  );
+  state.memoryPosesCount = Math.max(
+    1,
+    Math.floor(Number(session.memoryPosesCount || state.memoryPosesCount || 1)),
+  );
+  state.memoryDrawingTime = Math.max(
+    0,
+    Math.floor(
+      Number(session.memoryDrawingTime || state.memoryDrawingTime || 0),
+    ),
+  );
+  state.memoryNoPressure = !!session.memoryNoPressure;
+  syncMemoryDurationButtons();
+  setMinutesSecondsInputs(
+    document.getElementById("memory-flash-minutes"),
+    document.getElementById("memory-flash-seconds"),
+    state.memoryDuration,
+  );
+  setMinutesSecondsInputs(
+    document.getElementById("memory-progressive-minutes"),
+    document.getElementById("memory-progressive-seconds"),
+    state.memoryDuration,
+  );
+  setMinutesSecondsInputs(
+    document.getElementById("memory-drawing-minutes"),
+    document.getElementById("memory-drawing-seconds"),
+    state.memoryDrawingTime,
+  );
+
+  if (mode === "custom") {
+    state.customQueue = Array.isArray(session.customQueue)
+      ? session.customQueue
+      : [];
+    state.currentStepIndex = 0;
+    state.currentPoseInStep = 1;
+    renderCustomQueue();
+  }
+
+  updateStartButtonState();
+  updateTimerDisplay();
+
+  const mediaOrderKeys = Array.isArray(session.mediaOrderKeys)
+    ? session.mediaOrderKeys
+    : [];
+  if (mediaOrderKeys.length <= 0) {
+    syncPendingSessionPackMediaOrderKeys = null;
+    return { reorderedMedia: false, pendingMedia: false };
+  }
+
+  if (!Array.isArray(state.images) || state.images.length <= 0) {
+    syncPendingSessionPackMediaOrderKeys = [...mediaOrderKeys];
+    return { reorderedMedia: false, pendingMedia: true };
+  }
+
+  const reorderedMedia = reorderSessionImagesByRemoteOrder(mediaOrderKeys);
+  if (!reorderedMedia) {
+    syncPendingSessionPackMediaOrderKeys = [...mediaOrderKeys];
+    return { reorderedMedia: false, pendingMedia: true };
+  }
+  syncPendingSessionPackMediaOrderKeys = null;
+  return { reorderedMedia: true, pendingMedia: false };
+}
+
+function buildSyncCustomQueuePayload() {
+  if (!Array.isArray(state.customQueue) || state.customQueue.length <= 0)
+    return [];
+  const maxSteps = 600;
+  const normalized = state.customQueue
+    .map((step) => normalizeCustomStep(step))
+    .filter((step) => !!step && typeof step === "object");
+  if (normalized.length <= maxSteps) return normalized;
+  return normalized.slice(0, maxSteps);
+}
+
+function getSyncCustomQueueFingerprint(queue) {
+  if (!Array.isArray(queue) || queue.length <= 0) return "[]";
+  try {
+    return JSON.stringify(queue);
+  } catch (_) {
+    return "[]";
+  }
+}
+
+function reorderSessionImagesByRemoteOrder(remoteOrderKeys) {
+  if (!Array.isArray(remoteOrderKeys) || remoteOrderKeys.length <= 0)
+    return false;
+  if (!Array.isArray(state.images) || state.images.length <= 0) return false;
+
+  const remaining = new Map();
+  state.images.forEach((item) => {
+    const key = getSyncMediaIdentity(item);
+    if (!key) return;
+    if (!remaining.has(key)) {
+      remaining.set(key, []);
+    }
+    remaining.get(key).push(item);
+  });
+
+  const nextImages = [];
+  remoteOrderKeys.forEach((key) => {
+    const normalizedKey = String(key || "").trim();
+    if (!normalizedKey) return;
+    const bucket = remaining.get(normalizedKey);
+    if (!bucket || bucket.length <= 0) return;
+    const item = bucket.shift();
+    if (item) nextImages.push(item);
+  });
+
+  state.images.forEach((item) => {
+    if (nextImages.includes(item)) return;
+    nextImages.push(item);
+  });
+
+  if (nextImages.length !== state.images.length) return false;
+  state.images = nextImages;
+  return true;
+}
+
+function buildSyncRuntimePayload(reason, options = {}) {
+  const includeMediaOrder = !!options.includeMediaOrder;
+  const drawingVisible =
+    !!drawingScreen && !drawingScreen.classList.contains("hidden");
+  const reviewVisible =
+    !!reviewScreen && !reviewScreen.classList.contains("hidden");
+
+  const payload = {
+    reason: String(reason || "runtime-update"),
+    ts: Date.now(),
+    mode: String(state.sessionMode || ""),
+    sessionActive: drawingVisible && !reviewVisible,
+    reviewActive: reviewVisible,
+    isPlaying: !!state.isPlaying,
+    selectedDuration: Math.max(0, Number(state.selectedDuration || 0) || 0),
+    timeRemaining: Math.max(0, Number(state.timeRemaining || 0) || 0),
+    currentIndex: Math.max(0, Number(state.currentIndex || 0) || 0),
+    currentStepIndex: Math.max(0, Number(state.currentStepIndex || 0) || 0),
+    currentPoseInStep: Math.max(1, Number(state.currentPoseInStep || 1) || 1),
+    memoryType: String(state.memoryType || "flash"),
+    memoryDuration: Math.max(0, Number(state.memoryDuration || 0) || 0),
+    memoryPosesCount: Math.max(1, Number(state.memoryPosesCount || 1) || 1),
+    memoryDrawingTime: Math.max(0, Number(state.memoryDrawingTime || 0) || 0),
+    memoryNoPressure: !!state.memoryNoPressure,
+    memoryHidden: !!state.memoryHidden,
+    totalSessionTime: Math.max(0, Number(state.totalSessionTime || 0) || 0),
+    imagesCount: Array.isArray(state.images) ? state.images.length : 0,
+  };
+
+  if (String(payload.mode || "").trim() === "custom") {
+    const customQueue = buildSyncCustomQueuePayload();
+    payload.customQueue = customQueue;
+    payload.customQueueLength = customQueue.length;
+  }
+
+  if (includeMediaOrder) {
+    payload.mediaOrderKeys = buildSyncMediaOrderKeys();
+  }
+
+  return payload;
+}
+
+async function emitSyncRuntimeState(reason, options = {}) {
+  if (syncRuntimeApplyInProgress) return false;
+  if (!isSyncSessionHostActive()) return false;
+
+  const service = syncSessionService;
+  if (!service || typeof service.publishSessionState !== "function")
+    return false;
+
+  const payload = buildSyncRuntimePayload(reason, options);
+  if (
+    Array.isArray(payload.mediaOrderKeys) &&
+    payload.mediaOrderKeys.length > 0
+  ) {
+    const maxOrderEntries = 12000;
+    if (payload.mediaOrderKeys.length > maxOrderEntries) {
+      payload.mediaOrderCount = payload.mediaOrderKeys.length;
+      payload.mediaOrderKeys = payload.mediaOrderKeys.slice(0, maxOrderEntries);
+      payload.mediaOrderTruncated = true;
+    }
+
+    const maxSerializedSize = 900000;
+    const roughSize = JSON.stringify(payload).length;
+    if (roughSize > maxSerializedSize) {
+      const originalCount =
+        payload.mediaOrderCount || payload.mediaOrderKeys.length;
+      delete payload.mediaOrderKeys;
+      payload.mediaOrderCount = originalCount;
+      payload.mediaOrderSkipped = true;
+    }
+  }
+
+  const fingerprintPayload = { ...payload };
+  delete fingerprintPayload.reason;
+  delete fingerprintPayload.ts;
+  const fingerprint = JSON.stringify(fingerprintPayload);
+  const nowMs = Date.now();
+  const force = !!options.force;
+
+  if (
+    !force &&
+    fingerprint === syncRuntimeLastSentFingerprint &&
+    nowMs - syncRuntimeLastSentAt < 1200
+  ) {
+    return false;
+  }
+
+  syncRuntimeLastSentFingerprint = fingerprint;
+  syncRuntimeLastSentAt = nowMs;
+  try {
+    await service.publishSessionState(payload);
+    return true;
+  } catch (error) {
+    console.warn("[Sync] Failed to publish runtime state:", error);
+    return false;
+  }
+}
+
+function scheduleSyncRuntimeState(reason, options = {}) {
+  if (!isSyncSessionHostActive()) return;
+  syncRuntimePendingReason = String(
+    reason || syncRuntimePendingReason || "runtime-update",
+  );
+  syncRuntimePendingOptions = {
+    includeMediaOrder:
+      !!syncRuntimePendingOptions.includeMediaOrder ||
+      !!options.includeMediaOrder,
+    force: !!syncRuntimePendingOptions.force || !!options.force,
+  };
+
+  if (syncRuntimePublishScheduled) return;
+  syncRuntimePublishScheduled = true;
+  queueMicrotask(() => {
+    syncRuntimePublishScheduled = false;
+    const pendingReason = syncRuntimePendingReason || "runtime-update";
+    const pendingOptions = { ...syncRuntimePendingOptions };
+    syncRuntimePendingReason = "";
+    syncRuntimePendingOptions = {
+      includeMediaOrder: false,
+      force: false,
+    };
+    void emitSyncRuntimeState(pendingReason, pendingOptions);
+  });
+}
+
+function maybeScheduleSyncRuntimeHeartbeat() {
+  if (!isSyncSessionHostActive()) return;
+  const nowMs = Date.now();
+  if (nowMs - syncRuntimeLastHeartbeatAt < 3000) return;
+  syncRuntimeLastHeartbeatAt = nowMs;
+  scheduleSyncRuntimeState("timer-heartbeat");
+}
+
+function applyRemoteSyncRuntimeState(remoteState) {
+  if (!remoteState || typeof remoteState !== "object") return;
+  if (!isSyncSessionParticipantActive()) return;
+
+  const revision = Math.max(0, Number(remoteState.revision || 0) || 0);
+  if (revision > 0 && revision <= syncRuntimeLastAppliedRevision) {
+    return;
+  }
+
+  maybeShowParticipantHostActionFeedback(remoteState);
+  syncRuntimeApplyInProgress = true;
+  try {
+    if (revision > 0) {
+      syncRuntimeLastAppliedRevision = revision;
+    }
+
+    const nextMode = String(remoteState.mode || "").trim();
+    if (nextMode && nextMode !== state.sessionMode) {
+      switchMode(nextMode);
+    }
+
+    if (
+      Array.isArray(remoteState.mediaOrderKeys) &&
+      remoteState.mediaOrderKeys.length > 0
+    ) {
+      const reordered = reorderSessionImagesByRemoteOrder(
+        remoteState.mediaOrderKeys,
+      );
+      if (!reordered) {
+        syncPendingRuntimeMediaOrderKeys = [...remoteState.mediaOrderKeys];
+      } else {
+        syncPendingRuntimeMediaOrderKeys = null;
+      }
+    }
+
+    if (Array.isArray(remoteState.customQueue)) {
+      const normalizedQueue = remoteState.customQueue
+        .map((step) => normalizeCustomStep(step))
+        .filter((step) => !!step && typeof step === "object");
+      const queueFingerprint = getSyncCustomQueueFingerprint(normalizedQueue);
+      if (queueFingerprint !== syncRuntimeLastAppliedCustomQueueFingerprint) {
+        state.customQueue = normalizedQueue;
+        syncRuntimeLastAppliedCustomQueueFingerprint = queueFingerprint;
+        if (
+          typeof renderCustomQueue === "function" &&
+          settingsScreen &&
+          !settingsScreen.classList.contains("hidden") &&
+          String(state.sessionMode || "").trim() === "custom"
+        ) {
+          renderCustomQueue();
+        }
+      }
+    }
+
+    const selectedDuration = Number(remoteState.selectedDuration);
+    if (Number.isFinite(selectedDuration) && selectedDuration > 0) {
+      state.selectedDuration = Math.max(1, Math.floor(selectedDuration));
+    }
+
+    const timeRemaining = Number(remoteState.timeRemaining);
+    if (Number.isFinite(timeRemaining) && timeRemaining >= 0) {
+      state.timeRemaining = Math.max(0, Math.floor(timeRemaining));
+    }
+
+    const currentStepIndex = Number(remoteState.currentStepIndex);
+    if (Number.isFinite(currentStepIndex) && currentStepIndex >= 0) {
+      state.currentStepIndex = Math.floor(currentStepIndex);
+    }
+
+    const currentPoseInStep = Number(remoteState.currentPoseInStep);
+    if (Number.isFinite(currentPoseInStep) && currentPoseInStep >= 1) {
+      state.currentPoseInStep = Math.floor(currentPoseInStep);
+    }
+
+    const memoryType = String(remoteState.memoryType || "").trim();
+    if (memoryType === "flash" || memoryType === "progressive") {
+      state.memoryType = memoryType;
+    }
+    const memoryDuration = Number(remoteState.memoryDuration);
+    if (Number.isFinite(memoryDuration) && memoryDuration >= 0) {
+      state.memoryDuration = Math.max(0, Math.floor(memoryDuration));
+    }
+    const memoryPosesCount = Number(remoteState.memoryPosesCount);
+    if (Number.isFinite(memoryPosesCount) && memoryPosesCount >= 1) {
+      state.memoryPosesCount = clampMemorySessionPosesCount(
+        Math.floor(memoryPosesCount),
+        Array.isArray(state.images) ? state.images.length : 0,
+        1,
+      );
+    }
+    const memoryDrawingTime = Number(remoteState.memoryDrawingTime);
+    if (Number.isFinite(memoryDrawingTime) && memoryDrawingTime >= 0) {
+      state.memoryDrawingTime = Math.max(0, Math.floor(memoryDrawingTime));
+    }
+    if (typeof remoteState.memoryNoPressure === "boolean") {
+      state.memoryNoPressure = remoteState.memoryNoPressure;
+    }
+    if (typeof remoteState.memoryHidden === "boolean") {
+      state.memoryHidden = remoteState.memoryHidden;
+    }
+
+    const remoteSessionActive =
+      typeof remoteState.sessionActive === "boolean"
+        ? remoteState.sessionActive
+        : null;
+    const remoteReviewActive =
+      typeof remoteState.reviewActive === "boolean"
+        ? remoteState.reviewActive
+        : null;
+    const requiresPackValidationForStart =
+      remoteSessionActive === true &&
+      shouldRequireSyncParticipantPackValidation(syncSessionServiceState) &&
+      !isSyncParticipantPackValidationCurrent(syncSessionServiceState);
+
+    if (requiresPackValidationForStart) {
+      notifySyncParticipantPackValidationRequired();
+    }
+
+    if (remoteSessionActive === true && !requiresPackValidationForStart) {
+      const activeSyncModal = document.getElementById("sync-session-modal");
+      if (activeSyncModal && !activeSyncModal.classList.contains("hidden")) {
+        closeSyncSessionModal({ restoreFocus: false });
+      }
+    }
+
+    if (remoteSessionActive === true && requiresPackValidationForStart) {
+      if (drawingScreen && !drawingScreen.classList.contains("hidden")) {
+        stopTimer();
+        drawingScreen.classList.add("hidden");
+        if (reviewScreen) reviewScreen.classList.add("hidden");
+        document.body.classList.remove("review-active");
+        if (settingsScreen) settingsScreen.classList.remove("hidden");
+      }
+    } else if (
+      remoteSessionActive === true &&
+      state.images.length > 0 &&
+      ((settingsScreen && !settingsScreen.classList.contains("hidden")) ||
+        (reviewScreen && !reviewScreen.classList.contains("hidden")))
+    ) {
+      const previousShuffle = state.randomShuffle;
+      state.randomShuffle = false;
+      try {
+        startSession();
+      } finally {
+        state.randomShuffle = previousShuffle;
+      }
+
+      const isMemoryMode =
+        String(nextMode || state.sessionMode || "").trim() === "memory";
+      if (
+        isMemoryMode &&
+        drawingScreen &&
+        drawingScreen.classList.contains("hidden") &&
+        state.images.length > 0
+      ) {
+        console.warn(
+          "[Sync] Participant memory start fallback triggered (drawing screen stayed hidden).",
+        );
+        if (settingsScreen) settingsScreen.classList.add("hidden");
+        if (reviewScreen) reviewScreen.classList.add("hidden");
+        document.body.classList.remove("review-active");
+        drawingScreen.classList.remove("hidden");
+      }
+    } else if (
+      remoteReviewActive === true &&
+      reviewScreen &&
+      reviewScreen.classList.contains("hidden")
+    ) {
+      showReview();
+    } else if (
+      remoteSessionActive === false &&
+      remoteReviewActive !== true &&
+      drawingScreen &&
+      !drawingScreen.classList.contains("hidden")
+    ) {
+      stopTimer();
+      drawingScreen.classList.add("hidden");
+      if (reviewScreen) reviewScreen.classList.add("hidden");
+      document.body.classList.remove("review-active");
+      if (settingsScreen) settingsScreen.classList.remove("hidden");
+    }
+
+    const currentIndex = Number(remoteState.currentIndex);
+    if (
+      Number.isFinite(currentIndex) &&
+      currentIndex >= 0 &&
+      Array.isArray(state.images) &&
+      state.images.length > 0
+    ) {
+      const clampedIndex = Math.max(
+        0,
+        Math.min(Math.floor(currentIndex), state.images.length - 1),
+      );
+      state.currentIndex = clampedIndex;
+    }
+
+    if (
+      drawingScreen &&
+      !drawingScreen.classList.contains("hidden") &&
+      Array.isArray(state.images) &&
+      state.images.length > 0
+    ) {
+      updateDisplay(false);
+    } else {
+      updateTimerDisplay();
+    }
+
+    const remoteIsPlaying =
+      typeof remoteState.isPlaying === "boolean" ? remoteState.isPlaying : null;
+    if (remoteIsPlaying === true) {
+      if (
+        !state.isPlaying &&
+        drawingScreen &&
+        !drawingScreen.classList.contains("hidden")
+      ) {
+        startTimer();
+      } else {
+        state.isPlaying = true;
+        updatePlayPauseIcon();
+      }
+      if (timerDisplay) timerDisplay.classList.remove("timer-paused");
+      if (pauseBadge) pauseBadge.classList.add("hidden");
+    } else if (remoteIsPlaying === false) {
+      if (state.isPlaying) {
+        stopTimer();
+      } else {
+        state.isPlaying = false;
+        updatePlayPauseIcon();
+      }
+      if (timerDisplay) timerDisplay.classList.add("timer-paused");
+      if (pauseBadge) pauseBadge.classList.remove("hidden");
+    }
+  } catch (error) {
+    console.warn("[Sync] Failed to apply remote runtime state:", error);
+  } finally {
+    syncRuntimeApplyInProgress = false;
+  }
+}
+
+function closeSyncSessionControlModeMenu(modal) {
+  if (
+    SYNC_SESSION_MODAL_HELPERS &&
+    typeof SYNC_SESSION_MODAL_HELPERS.closeControlModeMenu === "function"
+  ) {
+    SYNC_SESSION_MODAL_HELPERS.closeControlModeMenu(modal);
+    return;
+  }
+  if (!modal) return;
+  const selectRoot = modal.querySelector("#sync-session-control-mode-select");
+  const trigger = modal.querySelector("#sync-session-control-mode-trigger");
+  const menu = modal.querySelector("#sync-session-control-mode-menu");
+
+  if (selectRoot) {
+    selectRoot.classList.remove("is-open");
+  }
+  if (menu) {
+    menu.hidden = true;
+  }
+  if (trigger) {
+    trigger.setAttribute("aria-expanded", "false");
+  }
+}
+
+function updateSyncSessionControlModeSelect(modal, nextControlMode = null) {
+  if (
+    SYNC_SESSION_MODAL_HELPERS &&
+    typeof SYNC_SESSION_MODAL_HELPERS.updateControlModeSelect === "function"
+  ) {
+    return SYNC_SESSION_MODAL_HELPERS.updateControlModeSelect(
+      modal,
+      nextControlMode,
+      {
+        options: SYNC_SESSION_CONTROL_MODE_OPTIONS,
+        getText: (key, fallback) => getI18nText(key, fallback),
+      },
+    );
+  }
+  if (!modal) return SYNC_SESSION_CONTROL_MODE_OPTIONS[0].value;
+  const selectRoot = modal.querySelector("#sync-session-control-mode-select");
+  if (!selectRoot) return SYNC_SESSION_CONTROL_MODE_OPTIONS[0].value;
+
+  const currentValue = nextControlMode || selectRoot.dataset.value;
+  const activeConfig = getSyncSessionControlModeConfig(currentValue);
+  selectRoot.dataset.value = activeConfig.value;
+
+  const valueEl = selectRoot.querySelector(".sync-session-control-mode-value");
+  if (valueEl) {
+    valueEl.setAttribute("data-i18n", activeConfig.key);
+    valueEl.textContent = getI18nText(activeConfig.key, activeConfig.fallback);
+  }
+
+  selectRoot
+    .querySelectorAll(
+      ".sync-session-control-mode-option[data-sync-control-mode]",
+    )
+    .forEach((optionEl) => {
+      const isSelected =
+        optionEl.dataset.syncControlMode === activeConfig.value;
+      optionEl.classList.toggle("active", isSelected);
+      optionEl.setAttribute("aria-selected", isSelected ? "true" : "false");
+    });
+
+  const trigger = selectRoot.querySelector(
+    "#sync-session-control-mode-trigger",
+  );
+  const menu = selectRoot.querySelector("#sync-session-control-mode-menu");
+  if (trigger) {
+    trigger.setAttribute(
+      "aria-expanded",
+      menu && !menu.hidden ? "true" : "false",
+    );
+  }
+
+  return activeConfig.value;
+}
+
+function getSyncSessionControlModeValue(modal) {
+  if (
+    SYNC_SESSION_MODAL_HELPERS &&
+    typeof SYNC_SESSION_MODAL_HELPERS.getControlModeValue === "function"
+  ) {
+    return SYNC_SESSION_MODAL_HELPERS.getControlModeValue(
+      modal,
+      SYNC_SESSION_CONTROL_MODE_OPTIONS,
+    );
+  }
+  if (!modal) return SYNC_SESSION_CONTROL_MODE_OPTIONS[0].value;
+  const selectRoot = modal.querySelector("#sync-session-control-mode-select");
+  const current =
+    selectRoot?.dataset?.value || SYNC_SESSION_CONTROL_MODE_OPTIONS[0].value;
+  return getSyncSessionControlModeConfig(current).value;
+}
+
+async function copySyncSessionCodeToClipboard(sessionCode) {
+  if (
+    SYNC_RUNTIME_HELPERS &&
+    typeof SYNC_RUNTIME_HELPERS.copyTextToClipboard === "function"
+  ) {
+    return SYNC_RUNTIME_HELPERS.copyTextToClipboard(sessionCode, {
+      navigatorRef: typeof navigator !== "undefined" ? navigator : null,
+      documentRef: typeof document !== "undefined" ? document : null,
+    });
+  }
+  const text = String(sessionCode || "").trim();
+  if (!text) return false;
+
+  if (
+    typeof navigator !== "undefined" &&
+    navigator.clipboard &&
+    typeof navigator.clipboard.writeText === "function"
+  ) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (_) {}
+  }
+
+  if (typeof document === "undefined") return false;
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  textarea.style.pointerEvents = "none";
+  document.body.appendChild(textarea);
+  textarea.select();
+  textarea.setSelectionRange(0, textarea.value.length);
+  let copied = false;
+  try {
+    copied = !!document.execCommand("copy");
+  } catch (_) {
+    copied = false;
+  }
+  document.body.removeChild(textarea);
+  return copied;
+}
+
+function showSyncSessionToast(options = {}) {
+  if (typeof window.showPoseChronoToast !== "function") return;
+  const toastType = String(options?.type || "info")
+    .trim()
+    .toLowerCase();
+  if (toastType === "error" && typeof document !== "undefined") {
+    const limit = getSyncErrorToastLimit();
+    const activeErrorToasts = document.querySelectorAll(
+      "#posechrono-toast-container .pc-toast.pc-toast-error",
+    ).length;
+    if (activeErrorToasts >= limit) {
+      return;
+    }
+  }
+  window.showPoseChronoToast(options);
+}
+
+function getSyncTransferModalElements() {
+  if (typeof document === "undefined") return null;
+  const modal = document.getElementById("sync-transfer-modal");
+  if (!modal) return null;
+  return {
+    modal,
+    titleEl: modal.querySelector("#sync-transfer-modal-title"),
+    statusEl: modal.querySelector("#sync-transfer-modal-status"),
+    progressTrackEl: modal.querySelector("#sync-transfer-modal-progress-track"),
+    progressFillEl: modal.querySelector("#sync-transfer-modal-progress-fill"),
+    progressTextEl: modal.querySelector("#sync-transfer-modal-progress-text"),
+    metaEl: modal.querySelector("#sync-transfer-modal-meta"),
+  };
+}
+
+function setSyncTransferModalTone(elements, tone = "warning") {
+  if (!elements) return;
+  const statusEl = elements.statusEl;
+  const trackEl = elements.progressTrackEl;
+  if (statusEl) {
+    statusEl.classList.remove("is-success", "is-warning", "is-error");
+    if (tone === "success") statusEl.classList.add("is-success");
+    else if (tone === "error") statusEl.classList.add("is-error");
+    else statusEl.classList.add("is-warning");
+  }
+  if (trackEl) {
+    trackEl.classList.remove("is-success", "is-error");
+    if (tone === "success") trackEl.classList.add("is-success");
+    if (tone === "error") trackEl.classList.add("is-error");
+  }
+}
+
+function clearSyncTransferModalAutoCloseTimer() {
+  if (syncTransferModalAutoCloseTimer) {
+    clearTimeout(syncTransferModalAutoCloseTimer);
+    syncTransferModalAutoCloseTimer = null;
+  }
+}
+
+function openSyncTransferModal(options = {}) {
+  const elements = getSyncTransferModalElements();
+  if (!elements) return;
+  clearSyncTransferModalAutoCloseTimer();
+
+  if (syncTransferAbortController) {
+    try {
+      syncTransferAbortController.abort();
+    } catch (_) {}
+  }
+  syncTransferAbortController = new AbortController();
+
+  const title = String(options.title || "Online transfer").trim();
+  const status = String(options.status || "Preparing transfer...").trim();
+  const meta = String(options.meta || "").trim();
+  const tone = String(options.tone || "warning").trim();
+
+  if (elements.titleEl) elements.titleEl.textContent = title;
+  if (elements.statusEl) elements.statusEl.textContent = status;
+  if (elements.metaEl) elements.metaEl.textContent = meta;
+  updateSyncTransferModalProgress({ done: 0, total: 0, percent: 0 });
+  setSyncTransferModalTone(elements, tone);
+
+  const cancelBtn = elements.modal.querySelector(
+    "#sync-transfer-modal-cancel-btn",
+  );
+  if (cancelBtn) {
+    cancelBtn.classList.remove("hidden");
+    cancelBtn.disabled = false;
+  }
+
+  elements.modal.classList.remove("hidden");
+}
+
+function getSyncTransferAbortSignal() {
+  return syncTransferAbortController
+    ? syncTransferAbortController.signal
+    : null;
+}
+
+function cancelSyncTransfer() {
+  if (syncTransferAbortController) {
+    try {
+      syncTransferAbortController.abort();
+    } catch (_) {}
+    syncTransferAbortController = null;
+  }
+  closeSyncTransferModal();
+}
+
+function updateSyncTransferModalProgress(options = {}) {
+  const elements = getSyncTransferModalElements();
+  if (!elements) return;
+  const done = Math.max(0, Number(options.done || 0) || 0);
+  const total = Math.max(0, Number(options.total || 0) || 0);
+  const hasPercent = Number.isFinite(Number(options.percent));
+  const rawPercent = hasPercent
+    ? Number(options.percent)
+    : total > 0
+      ? (done / total) * 100
+      : 0;
+  const percent = Math.max(0, Math.min(100, rawPercent));
+  const roundedPercent = Math.max(0, Math.min(100, Math.round(percent)));
+
+  if (elements.progressFillEl) {
+    elements.progressFillEl.style.width = `${percent.toFixed(1)}%`;
+  }
+  if (elements.progressTrackEl) {
+    elements.progressTrackEl.setAttribute(
+      "aria-valuenow",
+      String(roundedPercent),
+    );
+  }
+
+  const progressText =
+    total > 0 ? `${done}/${total} (${roundedPercent}%)` : `${roundedPercent}%`;
+  if (elements.progressTextEl)
+    elements.progressTextEl.textContent = progressText;
+}
+
+function updateSyncTransferModalState(options = {}) {
+  const elements = getSyncTransferModalElements();
+  if (!elements) return;
+  const status = String(options.status || "").trim();
+  const meta = String(options.meta || "").trim();
+  const tone = String(options.tone || "").trim();
+  if (status && elements.statusEl) {
+    elements.statusEl.textContent = status;
+  }
+  if (typeof options.meta === "string" && elements.metaEl) {
+    elements.metaEl.textContent = meta;
+  }
+  if (tone) {
+    setSyncTransferModalTone(elements, tone);
+  }
+  updateSyncTransferModalProgress(options);
+}
+
+function closeSyncTransferModal(options = {}) {
+  const elements = getSyncTransferModalElements();
+  if (!elements) return;
+  const delayMs = Math.max(0, Number(options.delayMs || 0) || 0);
+  clearSyncTransferModalAutoCloseTimer();
+  const closeNow = () => {
+    elements.modal.classList.add("hidden");
+    const cancelBtn = elements.modal.querySelector(
+      "#sync-transfer-modal-cancel-btn",
+    );
+    if (cancelBtn) cancelBtn.disabled = true;
+  };
+  if (delayMs > 0) {
+    syncTransferModalAutoCloseTimer = setTimeout(() => {
+      syncTransferModalAutoCloseTimer = null;
+      closeNow();
+    }, delayMs);
+    return;
+  }
+  closeNow();
+}
+
+function getSyncErrorToastLimit() {
+  try {
+    const raw =
+      typeof localStorage !== "undefined"
+        ? localStorage.getItem("posechrono-sync-error-toast-limit")
+        : null;
+    const parsed = Number.parseInt(String(raw || "").trim(), 10);
+    if (Number.isFinite(parsed)) {
+      return Math.max(
+        SYNC_ERROR_TOAST_LIMIT_MIN,
+        Math.min(SYNC_ERROR_TOAST_LIMIT_MAX, parsed),
+      );
+    }
+  } catch (_) {}
+  return SYNC_ERROR_TOAST_LIMIT_DEFAULT;
+}
+
+function toggleSyncSessionControlModeMenu(modal) {
+  if (
+    SYNC_SESSION_MODAL_HELPERS &&
+    typeof SYNC_SESSION_MODAL_HELPERS.toggleControlModeMenu === "function"
+  ) {
+    SYNC_SESSION_MODAL_HELPERS.toggleControlModeMenu(modal);
+    return;
+  }
+  if (!modal) return;
+  const selectRoot = modal.querySelector("#sync-session-control-mode-select");
+  const trigger = modal.querySelector("#sync-session-control-mode-trigger");
+  const menu = modal.querySelector("#sync-session-control-mode-menu");
+  if (!selectRoot || !trigger || !menu) return;
+
+  const nextOpenState = menu.hidden;
+  menu.hidden = !nextOpenState;
+  selectRoot.classList.toggle("is-open", nextOpenState);
+  trigger.setAttribute("aria-expanded", nextOpenState ? "true" : "false");
+}
+
+function setSyncSessionModalRole(nextRole) {
+  const modal = document.getElementById("sync-session-modal");
+  if (
+    SYNC_SESSION_CONTROLLER &&
+    typeof SYNC_SESSION_CONTROLLER.setModalRole === "function"
+  ) {
+    syncSessionModalRole = SYNC_SESSION_CONTROLLER.setModalRole({
+      modal,
+      nextRole,
+      state: syncSessionServiceState,
+      onRoleChanged: (role) => {
+        syncSessionModalRole = role;
+      },
+      onAfterRoleUpdated: ({ modal: activeModal }) => {
+        updateSyncSessionModalPanelsVisibility(
+          activeModal,
+          syncSessionServiceState,
+        );
+        closeSyncSessionControlModeMenu(activeModal);
+        renderSyncSessionStatus(activeModal);
+      },
+    });
+    return;
+  }
+
+  const role = nextRole === "join" ? "join" : "host";
+  syncSessionModalRole = role;
+  if (!modal) return;
+  modal
+    .querySelectorAll(".sync-session-role-btn[data-sync-role]")
+    .forEach((btn) => {
+      const isActive = btn.dataset.syncRole === role;
+      btn.classList.toggle("active", isActive);
+      btn.setAttribute("aria-pressed", isActive ? "true" : "false");
+    });
+  updateSyncSessionModalPanelsVisibility(modal, syncSessionServiceState);
+  closeSyncSessionControlModeMenu(modal);
+  renderSyncSessionStatus(modal);
+}
+
+function openSyncSessionModal() {
+  if (!isSyncFeatureEnabled()) {
+    return;
+  }
+  const modal = document.getElementById("sync-session-modal");
+  if (!modal) return;
+  syncSessionLastFocusedElement = document.activeElement;
+  ensureSyncSessionService(modal);
+  setSyncSessionModalRole(syncSessionModalRole || "host");
+  updateSyncSessionControlModeSelect(modal);
+  closeSyncSessionControlModeMenu(modal);
+  const activeSyncSession = isSyncSessionActive(syncSessionServiceState);
+  const primaryActionTarget =
+    syncSessionModalRole === "join"
+      ? modal.querySelector("#sync-session-join-btn")
+      : modal.querySelector("#sync-session-create-btn");
+  const focusTarget = activeSyncSession
+    ? modal.querySelector("#sync-session-leave-btn")
+    : primaryActionTarget || modal.querySelector(".modal-close-btn");
+  if (
+    SYNC_SESSION_CONTROLLER &&
+    typeof SYNC_SESSION_CONTROLLER.openModal === "function"
+  ) {
+    SYNC_SESSION_CONTROLLER.openModal({
+      modal,
+      role: syncSessionModalRole || "host",
+      state: syncSessionServiceState,
+      restoreFocusTarget: focusTarget,
+    });
+    return;
+  }
+
+  modal.classList.remove("hidden");
+  setTimeout(() => {
+    if (focusTarget && typeof focusTarget.focus === "function") {
+      focusTarget.focus();
+    }
+  }, 0);
+}
+
+function closeSyncSessionModal(options = {}) {
+  const { restoreFocus = true } = options;
+  const modal = document.getElementById("sync-session-modal");
+  if (!modal) return;
+  if (
+    SYNC_SESSION_CONTROLLER &&
+    typeof SYNC_SESSION_CONTROLLER.closeModal === "function"
+  ) {
+    SYNC_SESSION_CONTROLLER.closeModal({
+      modal,
+      restoreFocus,
+      lastFocusedElement: syncSessionLastFocusedElement,
+      onBeforeClose: ({ modal: activeModal }) => {
+        closeSyncSessionControlModeMenu(activeModal);
+        hideSyncSessionParticipantsTooltip();
+      },
+    });
+    syncSessionLastFocusedElement = null;
+    return;
+  }
+
+  closeSyncSessionControlModeMenu(modal);
+  hideSyncSessionParticipantsTooltip();
+  modal.classList.add("hidden");
+  if (
+    restoreFocus &&
+    syncSessionLastFocusedElement &&
+    typeof syncSessionLastFocusedElement.focus === "function"
+  ) {
+    syncSessionLastFocusedElement.focus();
+  }
+  syncSessionLastFocusedElement = null;
+}
+
+function setupSyncSessionModalBindings() {
+  if (syncSessionModalBindingsReady) return;
+  if (!isSyncFeatureEnabled()) return;
+  const modal = document.getElementById("sync-session-modal");
+  if (!modal) return;
+
+  const closeBtn = modal.querySelector("#close-sync-session-modal");
+  const createBtn = modal.querySelector("#sync-session-create-btn");
+  const joinBtn = modal.querySelector("#sync-session-join-btn");
+  const leaveBtn = modal.querySelector("#sync-session-leave-btn");
+  const hostPasswordInput = modal.querySelector("#sync-session-host-password");
+  const joinCodeInput = modal.querySelector("#sync-session-code");
+  const joinPseudoInput = modal.querySelector("#sync-session-guest-pseudo");
+  const joinPasswordInput = modal.querySelector("#sync-session-password");
+  const guestActionNotificationsInput = modal.querySelector(
+    "#sync-session-guest-action-notifications-btn",
+  );
+  const invitePanel = modal.querySelector("#sync-session-invite-panel");
+  const copyCodeBtn =
+    modal.querySelector("#sync-session-code-row") ||
+    modal.querySelector("#sync-session-copy-code-btn");
+  const copyServerAddressHostBtn = modal.querySelector(
+    "#sync-session-copy-server-address-host-btn",
+  );
+  const copyServerAddressConnectedBtn = modal.querySelector(
+    "#sync-session-copy-server-address-connected-btn",
+  );
+  const exportPackBtn = modal.querySelector("#sync-session-export-pack-btn");
+  const importPackBtn = modal.querySelector("#sync-session-import-pack-btn");
+  const publishOnlinePackBtn = modal.querySelector(
+    "#sync-session-publish-online-pack-btn",
+  );
+  const downloadOnlinePackBtn = modal.querySelector(
+    "#sync-session-download-online-pack-btn",
+  );
+  const statusEl = modal.querySelector("#sync-session-status");
+  const controlModeSelect = modal.querySelector(
+    "#sync-session-control-mode-select",
+  );
+  const controlModeTrigger = modal.querySelector(
+    "#sync-session-control-mode-trigger",
+  );
+  const controlModeMenu = modal.querySelector(
+    "#sync-session-control-mode-menu",
+  );
+
+  // --- Relay URL field ---
+  const relayUrlInput = modal.querySelector("#sync-session-relay-url");
+  const relayUrlSaveBtn = modal.querySelector(
+    "#sync-session-relay-url-save-btn",
+  );
+  const relayUrlRow = relayUrlInput ? relayUrlInput.closest(".sync-session-relay-url-row") || relayUrlInput.parentElement : null;
+  const isLoopbackRelayUrl = (url) => {
+    try {
+      const parsed = new URL(String(url || "").trim());
+      const host = String(parsed.hostname || "").trim().toLowerCase();
+      return host === "localhost" || host === "127.0.0.1" || host === "::1";
+    } catch (_) {
+      return false;
+    }
+  };
+  const isUnshareableRelayUrl = (url) => {
+    try {
+      const parsed = new URL(String(url || "").trim());
+      const host = String(parsed.hostname || "").trim().toLowerCase();
+      return (
+        host === "0.0.0.0" ||
+        host === "::" ||
+        isLoopbackRelayUrl(url)
+      );
+    } catch (_) {
+      return true;
+    }
+  };
+  const extractRelayUrlFromText = (text) => {
+    const raw = String(text || "").trim();
+    if (!raw) return "";
+    const match = raw.match(/wss?:\/\/[^\s"'<>]+/i);
+    if (!match) return "";
+    let candidate = String(match[0] || "").trim();
+    candidate = candidate.replace(/[),.;]+$/, "");
+    try {
+      const parsed = new URL(candidate);
+      if (parsed.protocol !== "ws:" && parsed.protocol !== "wss:") return "";
+      return parsed.toString().replace(/\/$/, "");
+    } catch (_) {
+      return "";
+    }
+  };
+  const rememberSuggestedLocalRelayUrl = (candidateUrl) => {
+    const normalized = extractRelayUrlFromText(candidateUrl);
+    if (!normalized) return;
+    if (isUnshareableRelayUrl(normalized)) return;
+    syncSessionSuggestedLocalRelayUrl = normalized;
+  };
+  const resolveShareableRelayUrl = async () => {
+    const current = String(relayUrlInput?.value || "").trim();
+    if (current && !isUnshareableRelayUrl(current)) return current;
+    if (syncSessionSuggestedLocalRelayUrl) return syncSessionSuggestedLocalRelayUrl;
+    try {
+      if (
+        typeof navigator !== "undefined" &&
+        navigator.clipboard &&
+        typeof navigator.clipboard.readText === "function"
+      ) {
+        const clipboardText = await navigator.clipboard.readText();
+        const clipUrl = extractRelayUrlFromText(clipboardText);
+        if (clipUrl && !isUnshareableRelayUrl(clipUrl)) {
+          rememberSuggestedLocalRelayUrl(clipUrl);
+          return clipUrl;
+        }
+      }
+    } catch (_) {}
+    return current;
+  };
+  const copyActionFeedbackTimers = new WeakMap();
+  const pulseCopyButton = (buttonEl) => {
+    if (!buttonEl) return;
+    const previousTimer = copyActionFeedbackTimers.get(buttonEl);
+    if (previousTimer) clearTimeout(previousTimer);
+    buttonEl.classList.add("is-copied");
+    const timer = setTimeout(() => {
+      buttonEl.classList.remove("is-copied");
+      copyActionFeedbackTimers.delete(buttonEl);
+    }, 1400);
+    copyActionFeedbackTimers.set(buttonEl, timer);
+  };
+  const handleCopyServerAddressClick = async (event) => {
+    const sourceButton = event?.currentTarget || null;
+    const address = await resolveShareableRelayUrl();
+    if (!address) {
+      showSyncSessionToast({
+        type: "error",
+        message: getI18nText(
+          "sync.copyServerAddressEmpty",
+          "Aucune adresse serveur à copier.",
+        ),
+        duration: 2600,
+      });
+      return;
+    }
+    const copied = await copySyncSessionCodeToClipboard(address);
+    if (!copied) {
+      showSyncSessionToast({
+        type: "error",
+        message: getI18nText(
+          "sync.errorCopyFailed",
+          "Impossible de copier l'adresse serveur.",
+        ),
+        duration: 2600,
+      });
+      return;
+    }
+    if (relayUrlInput && String(relayUrlInput.value || "").trim() !== address) {
+      relayUrlInput.value = address;
+      rememberSuggestedLocalRelayUrl(address);
+    }
+    pulseCopyButton(sourceButton);
+    if (isUnshareableRelayUrl(address)) {
+      const loopbackMessage = decodeHtmlEntities(
+        getI18nText(
+          "sync.copyServerAddressLoopback",
+          "Adresse locale copiée : {{address}} (même appareil uniquement).",
+          { address },
+        ),
+      );
+      showSyncSessionToast({
+        type: "warning",
+        message: loopbackMessage,
+        duration: 3600,
+      });
+      return;
+    }
+    const copiedMessage = decodeHtmlEntities(
+      getI18nText(
+        "sync.copyServerAddressDone",
+        "Adresse serveur copiée : {{address}}",
+        { address },
+      ),
+    );
+    showSyncSessionToast({
+      type: "success",
+      message: copiedMessage,
+      duration: 3200,
+    });
+  };
+  const buildInviteClipboardPayload = async () => {
+    const address = String(await resolveShareableRelayUrl()).trim();
+    const sessionCode = normalizeSyncSessionCode(
+      syncSessionServiceState?.sessionCode || joinCodeInput?.value || "",
+    );
+    if (!address || !sessionCode) {
+      return { ok: false, address, sessionCode, text: "" };
+    }
+    const text = decodeHtmlEntities(
+      getI18nText(
+        "sync.copyInvitePayloadTemplate",
+        "Adresse du serveur :\n{{address}}\n\nCode de session :\n{{code}}",
+        { address, code: sessionCode },
+      ),
+    );
+    return { ok: true, address, sessionCode, text };
+  };
+  const handleInvitePanelBackgroundCopyClick = async (event) => {
+    if (!invitePanel) return;
+    // Only trigger when clicking empty panel area, not interactive children.
+    if (event.target !== invitePanel) return;
+    const payload = await buildInviteClipboardPayload();
+    if (!payload.ok) {
+      showSyncSessionToast({
+        type: "error",
+        message: getI18nText(
+          "sync.copyInvitePayloadFailed",
+          "Impossible de copier l'invitation complète.",
+        ),
+        duration: 2600,
+      });
+      return;
+    }
+    const copied = await copySyncSessionCodeToClipboard(payload.text);
+    if (!copied) {
+      showSyncSessionToast({
+        type: "error",
+        message: getI18nText(
+          "sync.copyInvitePayloadFailed",
+          "Impossible de copier l'invitation complète.",
+        ),
+        duration: 2600,
+      });
+      return;
+    }
+    pulseCopyButton(copyCodeBtn);
+    if (copyServerAddressConnectedBtn) pulseCopyButton(copyServerAddressConnectedBtn);
+    pulseCopyButton(invitePanel);
+    showSyncSessionToast({
+      type: "success",
+      message: getI18nText(
+        "sync.copyInvitePayloadDone",
+        "Invitation complète copiée (adresse + code).",
+      ),
+      duration: 2600,
+    });
+  };
+  if (relayUrlInput) {
+    const RELAY_URL_STORAGE_KEY = "posechrono-sync-ws-url";
+    const savedUrl = (() => {
+      try {
+        return localStorage.getItem(RELAY_URL_STORAGE_KEY) || "";
+      } catch (_) {
+        return "";
+      }
+    })();
+    const configUrl = (() => {
+      try {
+        return String(CONFIG?.SYNC?.wsUrl || "").trim();
+      } catch (_) {
+        return "";
+      }
+    })();
+    relayUrlInput.value = savedUrl || configUrl || "";
+    rememberSuggestedLocalRelayUrl(relayUrlInput.value);
+
+    const isLocalRelayUrl = (url) => {
+      try {
+        const parsed = new URL(url);
+        const h = parsed.hostname;
+        return (
+          h === "localhost" ||
+          h === "127.0.0.1" ||
+          h.startsWith("192.168.") ||
+          h.startsWith("10.") ||
+          h.startsWith("172.16.") ||
+          h.startsWith("172.17.") ||
+          h.startsWith("172.18.") ||
+          h.startsWith("172.19.") ||
+          h.startsWith("172.2") ||
+          h.startsWith("172.30.") ||
+          h.startsWith("172.31.")
+        );
+      } catch (_) {
+        return false;
+      }
+    };
+
+    const saveRelayUrl = () => {
+      const value = relayUrlInput.value.trim();
+      const currentEffectiveUrl = savedUrl || configUrl || "";
+      const urlChanged = value !== currentEffectiveUrl;
+
+      // Reject non-local URLs that don't use wss://
+      if (value && value.startsWith("ws://") && !isLocalRelayUrl(value)) {
+        showSyncSessionToast({
+          type: "error",
+          message: getI18nText(
+            "sync.errorTlsRequired",
+            "Secure connection (wss://) required for internet relays.",
+          ),
+          duration: 3200,
+        });
+        relayUrlInput.focus();
+        return;
+      }
+
+      try {
+        if (value && value !== configUrl) {
+          localStorage.setItem(RELAY_URL_STORAGE_KEY, value);
+        } else {
+          localStorage.removeItem(RELAY_URL_STORAGE_KEY);
+        }
+        // Also ensure transport mode is "ws" when a ws:// URL is set
+        if (
+          value &&
+          (value.startsWith("ws://") || value.startsWith("wss://"))
+        ) {
+          localStorage.setItem("posechrono-sync-transport", "ws");
+        }
+      } catch (_) {}
+      rememberSuggestedLocalRelayUrl(value);
+      if (urlChanged) {
+        // Transport is created at startup — reload immediately to apply the new URL.
+        localStorage.setItem('posechrono-reopen-sync-modal', 'true');
+        localStorage.setItem('posechrono-reopen-sync-modal-role', syncSessionModalRole || 'host');
+        location.reload();
+        return;
+      }
+      if (relayUrlSaveBtn) {
+        relayUrlSaveBtn.classList.add("saved");
+        setTimeout(() => relayUrlSaveBtn.classList.remove("saved"), 1200);
+      }
+    };
+
+    if (relayUrlSaveBtn) {
+      relayUrlSaveBtn.addEventListener("click", saveRelayUrl);
+    }
+    relayUrlInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        saveRelayUrl();
+      }
+    });
+  }
+
+  if (copyServerAddressHostBtn) {
+    copyServerAddressHostBtn.addEventListener(
+      "click",
+      handleCopyServerAddressClick,
+    );
+  }
+  if (copyServerAddressConnectedBtn) {
+    copyServerAddressConnectedBtn.addEventListener(
+      "click",
+      handleCopyServerAddressClick,
+    );
+  }
+  if (invitePanel) {
+    invitePanel.addEventListener("click", handleInvitePanelBackgroundCopyClick);
+  }
+
+  // --- Connection type (Internet / Local) ---
+  const publicSyncAllowed = CONFIG?.SYNC?.allowPublicSync !== false;
+
+  const connInternetBtn = modal.querySelector("#sync-conn-internet-btn");
+  const connLocalBtn = modal.querySelector("#sync-conn-local-btn");
+  const hostLocalSection = modal.querySelector(".sync-session-host-local-section");
+  const joinLocalSection = modal.querySelector(".sync-session-join-local-section");
+  const startLocalServerBtn = modal.querySelector("#sync-session-start-local-server-btn");
+  const connTypeHint = modal.querySelector("#sync-conn-type-hint");
+
+  // When public sync is disabled: reset any saved "internet" preference to "local"
+  if (!publicSyncAllowed) {
+    if (UIPreferences.get("syncConnectionType", "local") === "internet") {
+      UIPreferences.set("syncConnectionType", "local");
+    }
+  }
+
+  const updateConnTypeUI = (type) => {
+    const effectiveType = (!publicSyncAllowed && type === "internet") ? "local" : type;
+    if (connInternetBtn) connInternetBtn.classList.toggle("active", effectiveType === "internet");
+    if (connLocalBtn) connLocalBtn.classList.toggle("active", effectiveType === "local");
+    if (connInternetBtn) connInternetBtn.setAttribute("aria-pressed", effectiveType === "internet" ? "true" : "false");
+    if (connLocalBtn) connLocalBtn.setAttribute("aria-pressed", effectiveType === "local" ? "true" : "false");
+
+    const isLocal = effectiveType === "local";
+    if (hostLocalSection) hostLocalSection.classList.toggle("hidden", !isLocal);
+    if (joinLocalSection) joinLocalSection.classList.toggle("hidden", !isLocal);
+    // Hide the relay URL field in internet mode (non-technical users don't need it)
+    if (relayUrlRow) relayUrlRow.classList.toggle("hidden", !isLocal);
+
+    if (connTypeHint) {
+      if (isLocal) {
+        connTypeHint.setAttribute("data-i18n", "sync.connLocalHint");
+        connTypeHint.textContent = getI18nText("sync.connLocalHint", "Dessiner avec des artistes sur le même réseau");
+      } else {
+        connTypeHint.setAttribute("data-i18n", "sync.connInternetHint");
+        connTypeHint.textContent = getI18nText("sync.connInternetHint", "Dessiner avec des artistes où qu'ils soient");
+      }
+    }
+  };
+
+  const currentConnType = UIPreferences.get("syncConnectionType", "local");
+  updateConnTypeUI(currentConnType);
+
+  if (connInternetBtn && publicSyncAllowed) {
+    connInternetBtn.addEventListener("click", () => {
+      if (UIPreferences.get("syncConnectionType", "local") === "internet") return;
+      UIPreferences.set("syncConnectionType", "internet");
+      updateConnTypeUI("internet");
+      if (relayUrlInput) {
+        relayUrlInput.value = "wss://posechrono-sync-online.onrender.com";
+        if (relayUrlSaveBtn) relayUrlSaveBtn.click();
+      }
+    });
+  }
+
+  if (connLocalBtn) {
+    connLocalBtn.addEventListener("click", () => {
+      if (UIPreferences.get("syncConnectionType", "local") === "local") return;
+      UIPreferences.set("syncConnectionType", "local");
+      updateConnTypeUI("local");
+      if (relayUrlInput) {
+        relayUrlInput.value = "ws://127.0.0.1:8787";
+        if (relayUrlSaveBtn) relayUrlSaveBtn.click();
+      }
+    });
+  }
+
+  if (startLocalServerBtn) {
+    // Check if local server is reachable and update button state
+    const markServerReady = () => {
+      startLocalServerBtn.classList.add("is-ready");
+      startLocalServerBtn.textContent = getI18nText("sync.localServerReady", "✓ Serveur local prêt");
+      updateSyncSessionNetworkStatus(modal);
+    };
+    const markServerPending = () => {
+      startLocalServerBtn.classList.remove("is-ready");
+      startLocalServerBtn.textContent = getI18nText("sync.startLocalServer", "Démarrer mon serveur local");
+      updateSyncSessionNetworkStatus(modal);
+    };
+
+    const readSuggestedRelayUrlFromHealth = (payload) => {
+      if (!payload || typeof payload !== "object") return "";
+      const directCandidate = extractRelayUrlFromText(
+        String(payload.suggestedRelayUrl || ""),
+      );
+      if (directCandidate && !isUnshareableRelayUrl(directCandidate)) {
+        return directCandidate;
+      }
+      const relayUrls = Array.isArray(payload.relayUrls) ? payload.relayUrls : [];
+      for (const candidate of relayUrls) {
+        const normalized = extractRelayUrlFromText(String(candidate || ""));
+        if (!normalized || isUnshareableRelayUrl(normalized)) continue;
+        return normalized;
+      }
+      return "";
+    };
+
+    const pingLocalServer = async (wsUrl) => {
+      // Use HTTP /health endpoint instead of raw WebSocket to avoid protocol violations
+      try {
+        const httpUrl = wsUrl.replace(/^ws:\/\//, "http://").replace(/^wss:\/\//, "https://") + "/health";
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 2500);
+        let response = null;
+        try {
+          response = await fetch(httpUrl, { signal: ctrl.signal });
+        } finally {
+          clearTimeout(timer);
+        }
+        const ok = !!response && response.ok;
+        let payload = null;
+        if (response) {
+          try {
+            payload = await response.json();
+          } catch (_) {}
+        }
+        const suggestedUrl = readSuggestedRelayUrlFromHealth(payload);
+        return { ok, suggestedUrl };
+      } catch (_) {
+        return { ok: false, suggestedUrl: "" };
+      }
+    };
+
+    // Check on modal open + periodic health check
+    const getLocalUrl = () => relayUrlInput?.value?.trim() || "ws://127.0.0.1:8787";
+    const connType = UIPreferences.get("syncConnectionType", "local");
+
+    const runHealthCheck = async () => {
+      const url = getLocalUrl();
+      if (!url.startsWith("ws://")) return;
+      const health = await pingLocalServer(url);
+      if (health.suggestedUrl) {
+        rememberSuggestedLocalRelayUrl(health.suggestedUrl);
+      }
+      if (health.ok) markServerReady(); else markServerPending();
+    };
+
+    if (connType === "local") {
+      runHealthCheck();
+    }
+
+    // Keep checking every 5s while modal is visible
+    const healthInterval = setInterval(() => {
+      const ct = UIPreferences.get("syncConnectionType", "local");
+      if (ct !== "local" || modal.classList.contains("hidden")) {
+        return;
+      }
+      runHealthCheck();
+    }, 5000);
+
+    // Clean up interval when modal closes
+    const observer = new MutationObserver(() => {
+      if (modal.classList.contains("hidden")) {
+        clearInterval(healthInterval);
+        observer.disconnect();
+      }
+    });
+    observer.observe(modal, { attributes: true, attributeFilter: ["class"] });
+
+    startLocalServerBtn.addEventListener("click", () => {
+      if (startLocalServerBtn.classList.contains("is-ready")) return;
+
+      const platform = getPlatformAdapter();
+      if (platform && platform.system) {
+        try {
+          const urlObj = new URL(window.location.href);
+          let basePath = decodeURIComponent(urlObj.pathname);
+          basePath = basePath.replace(/^\/+([a-zA-Z]:\/)/, '$1');
+          const batDir = basePath.substring(0, basePath.lastIndexOf('/'));
+          const batPath = batDir + '/js/syncroModule/start_local_sync_server.bat';
+          const safePath = batPath.replace(/\//g, '\\');
+          
+          if (platform.system.openPath) {
+            platform.system.openPath(safePath);
+          } else if (platform.system.showItemInFolder) {
+            platform.system.showItemInFolder(safePath);
+          }
+        } catch (e) {
+          console.warn("[Sync] Failed to launch local server script:", e);
+        }
+      }
+
+      startLocalServerBtn.textContent = getI18nText("sync.localServerStarting", "Lancement…");
+
+      // Poll until server is reachable
+      let pollAttempts = 0;
+      const pollUrl = relayUrlInput?.value?.trim() || "ws://127.0.0.1:8787";
+      const pollTimer = setInterval(async () => {
+        pollAttempts++;
+        if (pollAttempts > 15) { clearInterval(pollTimer); markServerPending(); return; }
+        const health = await pingLocalServer(pollUrl);
+        if (health.suggestedUrl) {
+          rememberSuggestedLocalRelayUrl(health.suggestedUrl);
+        }
+        if (health.ok) {
+          clearInterval(pollTimer);
+          markServerReady();
+          const startedAddress =
+            health.suggestedUrl || (await resolveShareableRelayUrl());
+          const startedAddressLabel = String(startedAddress || pollUrl).trim();
+          showSyncSessionToast({
+            type: "success",
+            message:
+              getI18nText("sync.localServerStarted", "Serveur local démarré !") +
+              " (IP copiée : " +
+              startedAddressLabel +
+              ")",
+            duration: 4000,
+          });
+        }
+      }, 2000);
+
+      // Auto-fill workflow: poll clipboard for the new IP pasted by the .bat
+      // Only pre-fills the input — the user must click "Apply" to save.
+      let autoFillDone = false;
+      const checkClipboard = async () => {
+        if (autoFillDone) return;
+        try {
+          let text = "";
+          if (navigator.clipboard && navigator.clipboard.readText) {
+            text = await navigator.clipboard.readText();
+          }
+          const detectedUrl = extractRelayUrlFromText(text);
+          if (detectedUrl && detectedUrl.includes(":8787")) {
+            rememberSuggestedLocalRelayUrl(detectedUrl);
+            updateSyncSessionNetworkStatus(modal);
+            autoFillDone = true;
+            if (relayUrlInput && relayUrlInput.value !== detectedUrl) {
+              relayUrlInput.value = detectedUrl;
+              // Do NOT auto-save: the user must click Apply to confirm.
+            }
+          }
+        } catch(e) {}
+      };
+
+      window.addEventListener('focus', checkClipboard);
+
+      let attempts = 0;
+      const pollInterval = setInterval(() => {
+        attempts++;
+        if (attempts > 30 || autoFillDone) {
+          clearInterval(pollInterval);
+          window.removeEventListener('focus', checkClipboard);
+          return;
+        }
+        checkClipboard();
+      }, 1000);
+    });
+  }
+
+  updateSyncSessionControlModeSelect(modal);
+  ensureSyncSessionService(modal);
+  updateSyncSessionGuestActionNotificationsUi(modal);
+  let syncControlModeUpdateInFlight = false;
+
+  const handleCreateClick = async () => {
+    const service = ensureSyncSessionService(modal);
+    if (!service || typeof service.hostSession !== "function") {
+      showSyncSessionToast({
+        type: "error",
+        message: getI18nText("sync.errorServiceUnavailable", "Sync service unavailable in this build."),
+        duration: 2600,
+      });
+      return;
+    }
+
+    const controlMode = getSyncSessionControlModeValue(modal);
+    const passwordRaw = String(hostPasswordInput?.value || "");
+    const password = await syncHashPassword(passwordRaw);
+
+    if (createBtn) createBtn.disabled = true;
+    try {
+      const result = await service.hostSession({
+        controlMode,
+        password,
+      });
+      if (hostPasswordInput) hostPasswordInput.value = "";
+
+      const sessionCode = result?.sessionCode || "";
+      if (joinCodeInput && sessionCode) {
+        joinCodeInput.value = sessionCode;
+      }
+
+      renderSyncSessionStatus(modal);
+      scheduleSyncRuntimeState("host-session-created", {
+        includeMediaOrder: true,
+        force: true,
+      });
+      if (typeof service.publishSessionPack === "function") {
+        try {
+          const currentPack = buildSyncSessionPackManifest();
+          await service.publishSessionPack({
+            pack: currentPack,
+          });
+        } catch (_) {}
+      }
+      const autoCopied = sessionCode
+        ? await copySyncSessionCodeToClipboard(sessionCode)
+        : false;
+      showSyncSessionToast({
+        type: "success",
+        message: autoCopied
+          ? getI18nText("sync.sessionCreatedCopied", "Session created and code copied: {{code}}", { code: sessionCode })
+          : getI18nText("sync.sessionCreated", "Session created: {{code}}", { code: sessionCode }),
+        duration: 2400,
+      });
+    } catch (error) {
+      const errorCode = error && typeof error === "object" ? String(error.message || "").trim() : "";
+      const message = errorCode === "invalid-password"
+        ? getI18nText("sync.errorHostPasswordInvalid", "Host password is incorrect.")
+        : getSyncSessionErrorMessage(error);
+      setSyncSessionStatus(modal, message, "error");
+      if (errorCode === "invalid-password") {
+        flashSyncSessionInputError(hostPasswordInput);
+      }
+      showSyncSessionToast({
+        type: "error",
+        message,
+        duration: 2600,
+      });
+    } finally {
+      if (createBtn) createBtn.disabled = false;
+    }
+  };
+
+  const handleJoinClick = async () => {
+    if (joinBtn && joinBtn.disabled) return;
+    if (joinBtn) joinBtn.disabled = true;
+    const service = ensureSyncSessionService(modal);
+    if (!service || typeof service.joinSession !== "function") {
+      showSyncSessionToast({
+        type: "error",
+        message: getI18nText("sync.errorServiceUnavailable", "Sync service unavailable in this build."),
+        duration: 2600,
+      });
+      if (joinBtn) joinBtn.disabled = false;
+      return;
+    }
+
+    const reEnableJoinBtn = () => { if (joinBtn) joinBtn.disabled = false; };
+
+    const sessionCode = normalizeSyncSessionCode(joinCodeInput?.value || "");
+    if (!sessionCode) {
+      const message = getSyncSessionErrorMessage({
+        message: "missing-session-code",
+      });
+      setSyncSessionStatus(modal, message, "warning");
+      flashSyncSessionCodeInputError(joinCodeInput);
+      showSyncSessionToast({
+        type: "warning",
+        message,
+        duration: 2200,
+      });
+      reEnableJoinBtn();
+      return;
+    }
+    if (!isSyncSessionCodeFormatValid(sessionCode)) {
+      const message = getSyncSessionErrorMessage({
+        message: "invalid-session-code",
+      });
+      setSyncSessionStatus(modal, message, "warning");
+      flashSyncSessionCodeInputError(joinCodeInput);
+      showSyncSessionToast({
+        type: "warning",
+        message,
+        duration: 2200,
+      });
+      reEnableJoinBtn();
+      return;
+    }
+
+    const password = await syncHashPassword(String(joinPasswordInput?.value || ""));
+    const participantRawValue = String(joinPseudoInput?.value || "");
+    const participantSanitizedInput =
+      sanitizeSyncGuestPseudoInputValue(participantRawValue);
+    if (participantSanitizedInput !== participantRawValue) {
+      if (joinPseudoInput) {
+        joinPseudoInput.value = participantSanitizedInput;
+      }
+      notifySyncGuestPseudoValidationError(joinPseudoInput);
+      reEnableJoinBtn();
+      return;
+    }
+    const participantName = normalizeSyncGuestPseudoValue(
+      participantSanitizedInput,
+    );
+    try {
+      const result = await service.joinSession({
+        sessionCode,
+        password,
+        participantName,
+      });
+      if (joinPasswordInput) joinPasswordInput.value = "";
+      const joinedCode = result?.sessionCode || sessionCode;
+      if (joinCodeInput && joinedCode) {
+        joinCodeInput.value = joinedCode;
+      }
+
+      renderSyncSessionStatus(modal);
+      showSyncSessionToast({
+        type: "success",
+        message: getI18nText("sync.sessionJoined", "Session joined: {{code}}", { code: joinedCode }),
+        duration: 2400,
+      });
+    } catch (error) {
+      const errorCode =
+        error && typeof error === "object"
+          ? String(error.message || "").trim()
+          : "";
+      const message = errorCode === "invalid-password"
+        ? getI18nText("sync.errorGuestPasswordInvalid", "Session password is incorrect.")
+        : getSyncSessionErrorMessage(error);
+      setSyncSessionStatus(modal, message, "error");
+      if (errorCode === "invalid-password") {
+        flashSyncSessionInputError(joinPasswordInput);
+        const nowMs = Date.now();
+        if (nowMs - syncSessionLastInvalidPasswordToastAt >= 1200) {
+          syncSessionLastInvalidPasswordToastAt = nowMs;
+          showSyncSessionToast({
+            type: "error",
+            message,
+            duration: 1800,
+          });
+        }
+      } else {
+        showSyncSessionToast({
+          type: "error",
+          message,
+          duration: 2600,
+        });
+      }
+    } finally {
+      if (joinBtn) joinBtn.disabled = false;
+    }
+  };
+
+  const handleLeaveClick = async () => {
+    const service = ensureSyncSessionService(modal);
+    if (!service || typeof service.leaveSession !== "function") {
+      return;
+    }
+    const wasHost = isSyncSessionConnectedAsHost(syncSessionServiceState);
+    // Confirm before the host leaves (destroys the session for everyone)
+    if (wasHost) {
+      const { confirmed } = await showPoseChronoConfirmDialog({
+        title: getI18nText(
+          "sync.closeOnlineSessionLabel",
+          "Close online session",
+        ),
+        message: getI18nText(
+          "sync.confirmHostLeave",
+          "You are the host. If you leave, the session will be closed for all participants. Continue?",
+        ),
+        confirmText: getI18nText(
+          "sync.closeOnlineSessionLabel",
+          "Close online session",
+        ),
+      });
+      if (!confirmed) return;
+    }
+    if (leaveBtn) leaveBtn.disabled = true;
+    try {
+      syncParticipantTransferInProgress = false;
+      await service.leaveSession();
+      syncSessionLastParticipantsCount = null;
+      setSyncSessionModalRole(wasHost ? "host" : "join");
+      renderSyncSessionStatus(modal);
+      // Re-enable inputs that may have been disabled during the active session
+      if (hostPasswordInput) hostPasswordInput.disabled = false;
+      if (joinPasswordInput) joinPasswordInput.disabled = false;
+      if (createBtn) createBtn.disabled = false;
+      if (joinBtn) joinBtn.disabled = false;
+      showSyncSessionToast({
+        type: "info",
+        message: wasHost
+          ? getI18nText("sync.sessionClosed", "Online session closed.")
+          : getI18nText("sync.sessionLeft", "Session left."),
+        duration: 1800,
+      });
+    } catch (error) {
+      setSyncSessionStatus(
+        modal,
+        wasHost
+          ? getI18nText("sync.errorSessionCloseFailed", "Failed to close the online session.")
+          : getI18nText("sync.errorSessionLeaveFailed", "Failed to leave the session."),
+        "error",
+      );
+    } finally {
+      if (leaveBtn) leaveBtn.disabled = false;
+    }
+  };
+
+  const handleCopyClick = async () => {
+    const sessionCode = normalizeSyncSessionCode(
+      syncSessionServiceState?.sessionCode || joinCodeInput?.value || "",
+    );
+    if (!sessionCode) {
+      flashSyncSessionCodeInputError(joinCodeInput);
+      showSyncSessionToast({
+        type: "warning",
+        message: getI18nText("sync.errorNoCodeToCopy", "No session code to copy."),
+        duration: 1800,
+      });
+      return;
+    }
+
+    const copied = await copySyncSessionCodeToClipboard(sessionCode);
+    if (copied) {
+      pulseCopyButton(copyCodeBtn);
+      showSyncSessionToast({
+        type: "success",
+        message: getI18nText("sync.codeCopied", "Code copied: {{code}}", { code: sessionCode }),
+        duration: 1800,
+      });
+      return;
+    }
+
+    showSyncSessionToast({
+      type: "error",
+      message: getI18nText("sync.errorCopyFailed", "Failed to copy session code."),
+      duration: 2200,
+    });
+  };
+
+  const handleExportPackClick = async () => {
+    const pack = buildSyncSessionPackManifest();
+    const ok = downloadJsonPayload(createSyncSessionPackFilename(), pack);
+    if (ok) {
+      showSyncSessionToast({
+        type: "success",
+        message: getI18nText(
+          "sync.sessionPackExported",
+          "Session pack exported.",
+        ),
+        duration: 2200,
+      });
+      return;
+    }
+    showSyncSessionToast({
+      type: "error",
+      message: getI18nText(
+        "sync.sessionPackExportFailed",
+        "Session pack export failed.",
+      ),
+      duration: 2600,
+    });
+  };
+
+  const handleImportPackClick = async () => {
+    if (isSyncSessionParticipantActive()) {
+      showSyncSessionToast({
+        type: "warning",
+        message: getI18nText("sync.warnLeaveBeforeImport", "Leave the online session before importing a pack."),
+        duration: 2400,
+      });
+      return;
+    }
+    if (importPackBtn) importPackBtn.disabled = true;
+    try {
+      const text = await pickJsonFileText();
+      if (!text) {
+        showSyncSessionToast({
+          type: "warning",
+          message: getI18nText(
+            "sync.sessionPackImportNoFile",
+            "No file selected.",
+          ),
+          duration: 1800,
+        });
+        return;
+      }
+      let pack = null;
+      try {
+        pack = parseSyncSessionPackText(text);
+      } catch (error) {
+        const code = String(error?.message || "");
+        const isTooLarge = code === "sync-pack-too-large";
+        showSyncSessionToast({
+          type: "error",
+          message: isTooLarge
+            ? getI18nText(
+                "sync.sessionPackImportTooLarge",
+                "Session pack file too large.",
+              )
+            : getI18nText(
+                "sync.sessionPackImportInvalid",
+                "Invalid session pack file.",
+              ),
+          duration: 2600,
+        });
+        return;
+      }
+
+      const applyResult = applySyncSessionPackManifest(pack);
+      if (applyResult.pendingMedia) {
+        showSyncSessionToast({
+          type: "warning",
+          message: getI18nText(
+            "sync.sessionPackImportedPendingMedia",
+            "Session pack imported. Load local media to apply media order.",
+          ),
+          duration: 2600,
+        });
+        return;
+      }
+
+      showSyncSessionToast({
+        type: "success",
+        message: getI18nText(
+          "sync.sessionPackImported",
+          "Session pack imported.",
+        ),
+        duration: 2200,
+      });
+    } catch (_) {
+      showSyncSessionToast({
+        type: "error",
+        message: getI18nText(
+          "sync.sessionPackImportFailed",
+          "Session pack import failed.",
+        ),
+        duration: 2600,
+      });
+    } finally {
+      if (importPackBtn) importPackBtn.disabled = false;
+    }
+  };
+
+  const handlePublishOnlinePackClick = async () => {
+    const service = ensureSyncSessionService(modal);
+    if (!service || typeof service.publishSessionPack !== "function") {
+      showSyncSessionToast({
+        type: "error",
+        message: getI18nText(
+          "sync.onlinePackPublishUnavailable",
+          "Online config pack publishing is unavailable in this build.",
+        ),
+        duration: 2400,
+      });
+      return;
+    }
+    if (!isSyncSessionConnectedAsHost(syncSessionServiceState)) {
+      showSyncSessionToast({
+        type: "warning",
+        message: getI18nText(
+          "sync.onlinePackPublishHostRequired",
+          "Host a session first to publish an online config pack.",
+        ),
+        duration: 2200,
+      });
+      return;
+    }
+
+    if (publishOnlinePackBtn) publishOnlinePackBtn.disabled = true;
+    try {
+      setSyncSessionStatus(modal, getI18nText("sync.uploadStatusPublishing", "Publishing online pack..."), "warning");
+      openSyncTransferModal({
+        title: getI18nText("sync.uploadModalTitle", "Upload online pack"),
+        status: getI18nText("sync.uploadStatusPublishingSettings", "Publishing session settings..."),
+        tone: "warning",
+      });
+      const pack = buildSyncSessionPackManifest();
+      let packMeta = await service.publishSessionPack({
+        pack,
+      });
+      const mediaUploadSummary = await publishSyncSessionMediaPack(
+        service,
+        pack,
+        {
+          onProgress: (progress = {}) => {
+            const stage = String(progress.stage || "upload").trim();
+            const done = Math.max(0, Number(progress.done || 0) || 0);
+            const total = Math.max(0, Number(progress.total || 0) || 0);
+            const selected = Math.max(0, Number(progress.selected || 0) || 0);
+            const uploaded = Math.max(0, Number(progress.uploaded || 0) || 0);
+            const failed = Math.max(0, Number(progress.failed || 0) || 0);
+            const skipped = Math.max(0, Number(progress.skipped || 0) || 0);
+            const hasProgressTotal = total > 0;
+            const progressTotal = hasProgressTotal
+              ? total
+              : Math.max(1, selected);
+            const progressDone =
+              stage === "upload" ? Math.min(progressTotal, done) : 0;
+
+            const statusLabel =
+              stage === "prepare"
+                ? getI18nText("sync.uploadStatusPreparing", "Preparing media files...")
+                : getI18nText("sync.uploadStatusUploading", "Uploading media files...");
+            const metaLabel =
+              stage === "prepare"
+                ? `${selected} selected - ${skipped} skipped`
+                : `${uploaded} uploaded - ${failed} failed - ${skipped} skipped`;
+
+            updateSyncTransferModalState({
+              status: statusLabel,
+              tone: "warning",
+              done: progressDone,
+              total: progressTotal,
+              meta: metaLabel,
+            });
+          },
+        },
+      );
+      if (mediaUploadSummary.supported) {
+        const effectivePack = buildSyncSessionPackFromUploadedMedia(
+          pack,
+          mediaUploadSummary.uploadedIdentities,
+        );
+        if (effectivePack && typeof service.publishSessionPack === "function") {
+          try {
+            const republishedMeta = await service.publishSessionPack({
+              pack: effectivePack,
+            });
+            if (republishedMeta && typeof republishedMeta === "object") {
+              packMeta = republishedMeta;
+            }
+          } catch (error) {
+            console.warn(
+              "[Sync] Failed to publish effective online pack:",
+              error,
+            );
+          }
+          const appliedHostSelection =
+            applySyncHostOnlinePackMediaSelection(effectivePack);
+          const appliedPackManifest =
+            applySyncSessionPackManifest(effectivePack);
+          if (
+            appliedHostSelection ||
+            (appliedPackManifest && appliedPackManifest.reorderedMedia)
+          ) {
+            scheduleSyncRuntimeState("online-pack-published", {
+              includeMediaOrder: true,
+              force: true,
+            });
+          }
+          if (drawingScreen && !drawingScreen.classList.contains("hidden")) {
+            updateDisplay(false);
+          }
+        }
+      }
+
+      renderSyncSessionStatus(modal);
+      const hash = String(packMeta?.hash || "").trim();
+      setSyncSessionStatus(modal, getI18nText("sync.uploadStatusPublished", "Online pack published."), "success");
+      if (mediaUploadSummary.supported) {
+        const uploaded = Math.max(
+          0,
+          Number(mediaUploadSummary.uploadedCount || 0) || 0,
+        );
+        const selected = Math.max(
+          0,
+          Number(mediaUploadSummary.selectedCount || 0) || 0,
+        );
+        const failed = Math.max(
+          0,
+          Number(mediaUploadSummary.failedCount || 0) || 0,
+        );
+        const failedRateLimited = Math.max(
+          0,
+          Number(mediaUploadSummary.failedRateLimited || 0) || 0,
+        );
+        const failedTimeout = Math.max(
+          0,
+          Number(mediaUploadSummary.failedTimeout || 0) || 0,
+        );
+        const failedDisconnected = Math.max(
+          0,
+          Number(mediaUploadSummary.failedDisconnected || 0) || 0,
+        );
+        const failedOther = Math.max(
+          0,
+          Number(mediaUploadSummary.failedOther || 0) || 0,
+        );
+        const skipped =
+          Math.max(0, Number(mediaUploadSummary.skippedMissing || 0) || 0) +
+          Math.max(0, Number(mediaUploadSummary.skippedUnsupported || 0) || 0) +
+          Math.max(0, Number(mediaUploadSummary.skippedTooLarge || 0) || 0) +
+          Math.max(0, Number(mediaUploadSummary.skippedFetch || 0) || 0) +
+          Math.max(0, Number(mediaUploadSummary.skippedCountLimit || 0) || 0);
+        const skippedMissing = Math.max(
+          0,
+          Number(mediaUploadSummary.skippedMissing || 0) || 0,
+        );
+        const skippedUnsupported = Math.max(
+          0,
+          Number(mediaUploadSummary.skippedUnsupported || 0) || 0,
+        );
+        const skippedTooLarge = Math.max(
+          0,
+          Number(mediaUploadSummary.skippedTooLarge || 0) || 0,
+        );
+        const skippedFileTooLarge = Math.max(
+          0,
+          Number(mediaUploadSummary.skippedFileTooLarge || 0) || 0,
+        );
+        const skippedTotalBudget = Math.max(
+          0,
+          Number(mediaUploadSummary.skippedTotalBudget || 0) || 0,
+        );
+        const skippedFetch = Math.max(
+          0,
+          Number(mediaUploadSummary.skippedFetch || 0) || 0,
+        );
+        const summaryTone = failed > 0 || skipped > 0 ? "warning" : "success";
+        const effectiveTotal = Math.max(selected, uploaded + failed, 1);
+        const summaryMessageBase = getI18nText(
+          "sync.onlineMediaUploadSummary",
+          "Online media upload: {{uploaded}}/{{selected}} file(s) sent ({{failed}} failed, {{skipped}} skipped).",
+          {
+            uploaded,
+            selected,
+            failed,
+            skipped,
+          },
+        );
+        const detailParts = [];
+        if (failedRateLimited > 0) {
+          detailParts.push(`${failedRateLimited} failed (rate-limited)`);
+        }
+        if (failedTimeout > 0) {
+          detailParts.push(`${failedTimeout} failed (timeout)`);
+        }
+        if (failedDisconnected > 0) {
+          detailParts.push(`${failedDisconnected} failed (disconnected)`);
+        }
+        if (failedOther > 0) {
+          detailParts.push(`${failedOther} failed (other)`);
+        }
+        if (skippedFileTooLarge > 0) {
+          detailParts.push(
+            `${skippedFileTooLarge} file(s) > ${Math.floor(
+              SYNC_SESSION_MEDIA_MAX_FILE_BYTES / (1024 * 1024),
+            )}MB`,
+          );
+        }
+        if (skippedTotalBudget > 0) {
+          detailParts.push(
+            `${skippedTotalBudget} skipped by total cap (${Math.floor(
+              SYNC_SESSION_MEDIA_MAX_TOTAL_BYTES / (1024 * 1024),
+            )}MB)`,
+          );
+        }
+        if (skippedUnsupported > 0) {
+          detailParts.push(`${skippedUnsupported} unsupported format`);
+        }
+        if (skippedFetch > 0) {
+          detailParts.push(`${skippedFetch} read/fetch failure`);
+        }
+        if (skippedMissing > 0) {
+          detailParts.push(`${skippedMissing} missing source`);
+        }
+        const summaryMessage =
+          detailParts.length > 0
+            ? `${summaryMessageBase} Details: ${detailParts.join(", ")}.`
+            : summaryMessageBase;
+
+        updateSyncTransferModalState({
+          status:
+            summaryTone === "success"
+              ? getI18nText("sync.uploadStatusCompleted", "Upload completed.")
+              : getI18nText("sync.uploadStatusCompletedWarnings", "Upload completed with warnings."),
+          tone: summaryTone,
+          done: Math.min(effectiveTotal, uploaded + failed),
+          total: effectiveTotal,
+          meta: summaryMessage,
+        });
+        closeSyncTransferModal({ delayMs: 900 });
+        showSyncSessionToast({
+          type: summaryTone,
+          message:
+            hash && summaryTone === "success"
+              ? `${summaryMessage} (hash: ${hash.slice(0, 10)}...)`
+              : summaryMessage,
+          duration: 3000,
+        });
+
+        const saturationSignals =
+          failedRateLimited +
+          failedTimeout +
+          failedDisconnected +
+          skippedFileTooLarge +
+          skippedTotalBudget;
+        if (saturationSignals > 0) {
+          showSyncSessionToast({
+            type: "warning",
+            message: getI18nText(
+              "sync.onlineMediaUploadSaturationHint",
+              "Transfer quality warning: reduce file count/size or retry with fewer participants for better reliability.",
+            ),
+            duration: 3600,
+          });
+        }
+      } else if (mediaUploadSummary.relayUnsupported) {
+        updateSyncTransferModalState({
+          status: getI18nText("sync.uploadStatusSkipped", "Upload skipped."),
+          tone: "warning",
+          done: 0,
+          total: 1,
+          meta: getI18nText("sync.uploadRelayNoMediaMeta", "Relay does not support media transfer yet."),
+        });
+        closeSyncTransferModal({ delayMs: 1200 });
+        showSyncSessionToast({
+          type: "warning",
+          message: getI18nText("sync.uploadRelayNoMediaToast", "Relay does not support media transfer yet. Settings pack was published, media upload skipped."),
+          duration: 3200,
+        });
+        setSyncSessionStatus(
+          modal,
+          getI18nText("sync.uploadStatusRelayNoMedia", "Online pack published (relay does not support media transfer yet)."),
+          "warning",
+        );
+      } else {
+        updateSyncTransferModalState({
+          status: getI18nText("sync.uploadSettingsPublished", "Settings published."),
+          tone: "success",
+          done: 1,
+          total: 1,
+          meta: hash ? `hash: ${hash.slice(0, 10)}...` : "",
+        });
+        closeSyncTransferModal({ delayMs: 900 });
+        showSyncSessionToast({
+          type: "success",
+          message: hash
+            ? getI18nText("sync.onlinePackPublishedWithHash", "Online config pack published (no media files, hash: {{hash}}...).", { hash: hash.slice(0, 10) })
+            : getI18nText("sync.onlinePackPublished", "Online config pack published (no media files)."),
+          duration: 2200,
+        });
+      }
+    } catch (error) {
+      if (String(error?.message || "") === "transfer-cancelled") {
+        setSyncSessionStatus(
+          modal,
+          getI18nText("sync.transferCancelled", "Transfer cancelled."),
+          "warning",
+        );
+        closeSyncTransferModal();
+        showSyncSessionToast({
+          type: "warning",
+          message: getI18nText("sync.transferCancelled", "Transfer cancelled."),
+          duration: 1800,
+        });
+        return;
+      }
+      const message = getSyncSessionErrorMessage(error);
+      setSyncSessionStatus(modal, message, "error");
+      updateSyncTransferModalState({
+        status: getI18nText("sync.uploadStatusFailed", "Upload failed."),
+        tone: "error",
+        meta: message,
+      });
+      closeSyncTransferModal({ delayMs: 1200 });
+      showSyncSessionToast({
+        type: "error",
+        message,
+        duration: 2600,
+      });
+    } finally {
+      if (publishOnlinePackBtn) publishOnlinePackBtn.disabled = false;
+    }
+  };
+
+  const handleDownloadOnlinePackClick = async () => {
+    const service = ensureSyncSessionService(modal);
+    if (!service || typeof service.fetchSessionPack !== "function") {
+      showSyncSessionToast({
+        type: "error",
+        message: getI18nText(
+          "sync.onlinePackDownloadUnavailable",
+          "Online config pack download is unavailable in this build.",
+        ),
+        duration: 2400,
+      });
+      return;
+    }
+
+    const sessionRunning =
+      !!drawingScreen && !drawingScreen.classList.contains("hidden");
+    if (sessionRunning) {
+      showSyncSessionToast({
+        type: "warning",
+        message: getI18nText(
+          "sync.onlinePackApplyStopSession",
+          "Stop the active session before applying an online config pack.",
+        ),
+        duration: 2400,
+      });
+      return;
+    }
+
+    if (downloadOnlinePackBtn) {
+      downloadOnlinePackBtn.disabled = true;
+      downloadOnlinePackBtn.setAttribute("aria-busy", "true");
+    }
+    syncParticipantTransferInProgress = true;
+    void publishSyncParticipantState("downloading", { force: true });
+    try {
+      setSyncSessionStatus(
+        modal,
+        getI18nText(
+          "sync.onlinePackDownloadInProgress",
+          "Downloading online config pack...",
+        ),
+        "warning",
+      );
+      openSyncTransferModal({
+        title: getI18nText("sync.downloadModalTitle", "Download online pack"),
+        status: getI18nText("sync.downloadStatusDownloading", "Downloading session settings..."),
+        tone: "warning",
+      });
+      const payload = await service.fetchSessionPack();
+      if (!payload || !payload.pack || typeof payload.pack !== "object") {
+        throw new Error("session-pack-not-found");
+      }
+
+      const packText = JSON.stringify(payload.pack);
+      const remoteHash = String(payload.hash || "")
+        .trim()
+        .toLowerCase();
+      if (/^[a-f0-9]{64}$/.test(remoteHash)) {
+        const localHash = await computeSyncSessionPackSha256Hex(packText);
+        if (!localHash || localHash !== remoteHash) {
+          throw new Error("session-pack-integrity-failed");
+        }
+      }
+
+      const pack = parseSyncSessionPackText(packText);
+      const downloadResult = await downloadSyncSessionMediaPack(service, {
+        onProgress: ({ stage = "", done = 0, total = 0, skipped = 0 }) => {
+          const normalizedStage = String(stage || "").trim();
+          const safeDone = Math.max(0, Number(done || 0) || 0);
+          const safeTotal = Math.max(0, Number(total || 0) || 0);
+          const safeSkipped = Math.max(0, Number(skipped || 0) || 0);
+          const statusLabel =
+            normalizedStage === "manifest"
+              ? getI18nText("sync.downloadStatusReadingManifest", "Reading media manifest...")
+              : getI18nText("sync.downloadStatusDownloadingMedia", "Downloading media files...");
+          const totalForProgress = Math.max(0, safeTotal);
+          const doneForProgress =
+            totalForProgress > 0 ? Math.min(totalForProgress, safeDone) : 0;
+          const metaLabel =
+            normalizedStage === "manifest"
+              ? `${safeTotal} file(s) listed`
+              : `${safeSkipped} skipped`;
+          updateSyncTransferModalState({
+            status: statusLabel,
+            tone: "warning",
+            done: doneForProgress,
+            total: totalForProgress,
+            meta: metaLabel,
+          });
+        },
+      });
+      const expectedMediaFiles = Math.max(
+        0,
+        Number(downloadResult?.filesCount || 0) || 0,
+        Array.isArray(pack?.mediaRefs) ? pack.mediaRefs.length : 0,
+      );
+      const downloadedMediaFiles = Math.max(
+        0,
+        Number(downloadResult?.downloadedCount || 0) || 0,
+      );
+      if (
+        downloadResult.supported &&
+        expectedMediaFiles > 0 &&
+        downloadedMediaFiles !== expectedMediaFiles
+      ) {
+        throw new Error(
+          `session-media-incomplete:${downloadedMediaFiles}/${expectedMediaFiles}`,
+        );
+      }
+      updateSyncTransferModalState({
+        status: getI18nText("sync.downloadStatusApplying", "Applying downloaded pack..."),
+        tone: "warning",
+      });
+      const hasAppliedDownloadedMedia = applySyncDownloadedMediaPackToState(
+        pack,
+        downloadResult,
+      );
+      const applyResult = applySyncSessionPackManifest(pack);
+
+      if (applyResult.pendingMedia) {
+        clearSyncParticipantPackValidation();
+        syncParticipantTransferInProgress = false;
+        void publishSyncParticipantState("missing", { force: true });
+        renderSyncSessionStatus(modal);
+        showSyncSessionToast({
+          type: "warning",
+          message: getI18nText(
+            "sync.sessionPackImportedPendingMedia",
+            "Session pack imported. Load local media to apply media order.",
+          ),
+          duration: 2600,
+        });
+        updateSyncTransferModalState({
+          status: getI18nText("sync.downloadStatusCompletedWarnings", "Download completed with warnings."),
+          tone: "warning",
+          meta: "Local media still required for full media order.",
+        });
+        closeSyncTransferModal({ delayMs: 1200 });
+        return;
+      }
+
+      markSyncParticipantPackValidated(syncSessionServiceState, {
+        packHash: remoteHash,
+        packUpdatedAt: Math.max(0, Number(payload.updatedAt || 0) || 0),
+        mediaUpdatedAt: Math.max(
+          0,
+          Number(downloadResult.mediaUpdatedAt || 0) || 0,
+        ),
+      });
+      syncParticipantTransferInProgress = false;
+      void publishSyncParticipantState("ready", { force: true });
+      renderSyncSessionStatus(modal);
+      if (downloadResult.supported) {
+        const downloaded = Math.max(
+          0,
+          Number(downloadResult.downloadedCount || 0) || 0,
+        );
+        const filesCount = Math.max(
+          0,
+          Number(downloadResult.filesCount || 0) || 0,
+        );
+        const skipped = Math.max(
+          0,
+          Number(downloadResult.skippedCount || 0) || 0,
+        );
+        const skippedRateLimited = Math.max(
+          0,
+          Number(downloadResult.skippedRateLimited || 0) || 0,
+        );
+        const skippedTimeout = Math.max(
+          0,
+          Number(downloadResult.skippedTimeout || 0) || 0,
+        );
+        const skippedDisconnected = Math.max(
+          0,
+          Number(downloadResult.skippedDisconnected || 0) || 0,
+        );
+        const skippedOther = Math.max(
+          0,
+          Number(downloadResult.skippedOther || 0) || 0,
+        );
+        const summaryTone =
+          filesCount <= 0
+            ? "warning"
+            : filesCount > 0 && downloaded <= 0
+              ? "error"
+              : skipped > 0
+                ? "warning"
+                : "success";
+        const summaryMessageBase = getI18nText(
+          "sync.onlineMediaDownloadSummary",
+          "Online media download: {{downloaded}}/{{filesCount}} file(s) received ({{skipped}} skipped).",
+          {
+            downloaded,
+            filesCount,
+            skipped,
+          },
+        );
+        const detailParts = [];
+        if (skippedRateLimited > 0) {
+          detailParts.push(`${skippedRateLimited} rate-limited`);
+        }
+        if (skippedTimeout > 0) {
+          detailParts.push(`${skippedTimeout} timeout`);
+        }
+        if (skippedDisconnected > 0) {
+          detailParts.push(`${skippedDisconnected} disconnected`);
+        }
+        if (skippedOther > 0) {
+          detailParts.push(`${skippedOther} other`);
+        }
+        const summaryMessage =
+          detailParts.length > 0
+            ? `${summaryMessageBase} Details: ${detailParts.join(", ")}.`
+            : summaryMessageBase;
+        updateSyncTransferModalState({
+          status:
+            summaryTone === "error"
+              ? getI18nText("sync.downloadStatusCompletedErrors", "Download completed with errors.")
+              : summaryTone === "warning"
+                ? getI18nText("sync.downloadStatusCompletedWarnings", "Download completed with warnings.")
+                : getI18nText("sync.downloadStatusCompleted", "Download completed."),
+          tone: summaryTone,
+          done: filesCount > 0 ? Math.min(filesCount, downloaded + skipped) : 1,
+          total: Math.max(1, filesCount),
+          meta: summaryMessage,
+        });
+        closeSyncTransferModal({ delayMs: 900 });
+        if (filesCount > 0 && downloaded <= 0) {
+          showSyncSessionToast({
+            type: "error",
+            message: getI18nText("sync.errorNoMediaDownloaded", "No online media file could be downloaded."),
+            duration: 2800,
+          });
+        } else if (filesCount <= 0) {
+          showSyncSessionToast({
+            type: "warning",
+            message: getI18nText("sync.errorNoMediaPublished", "No online media file was published for this session."),
+            duration: 2600,
+          });
+        } else {
+          showSyncSessionToast({
+            type: summaryTone,
+            message: summaryMessage,
+            duration: 2800,
+          });
+        }
+      } else if (downloadResult.relayUnsupported) {
+        updateSyncTransferModalState({
+          status: getI18nText("sync.downloadStatusCompletedWarnings", "Download completed with warnings."),
+          tone: "warning",
+          done: 1,
+          total: 1,
+          meta: getI18nText("sync.downloadRelayNoMediaMeta", "Relay does not support media transfer yet."),
+        });
+        closeSyncTransferModal({ delayMs: 1200 });
+        showSyncSessionToast({
+          type: "warning",
+          message: getI18nText("sync.downloadRelayNoMediaToast", "Relay does not support media transfer yet. Settings pack was applied without media files."),
+          duration: 3200,
+        });
+      } else {
+        updateSyncTransferModalState({
+          status: getI18nText("sync.downloadStatusCompleted", "Download completed."),
+          tone: "success",
+          done: 1,
+          total: 1,
+          meta: getI18nText(
+            "sync.onlinePackDownloadedApplied",
+            "Online config pack downloaded and applied.",
+          ),
+        });
+        closeSyncTransferModal({ delayMs: 900 });
+        showSyncSessionToast({
+          type: "success",
+          message: getI18nText(
+            "sync.onlinePackDownloadedApplied",
+            "Online config pack downloaded and applied.",
+          ),
+          duration: 2200,
+        });
+      }
+      if (
+        hasAppliedDownloadedMedia &&
+        drawingScreen &&
+        !drawingScreen.classList.contains("hidden")
+      ) {
+        updateDisplay(false);
+      }
+    } catch (error) {
+      const code = String(error?.message || "").trim();
+      if (code === "transfer-cancelled") {
+        syncParticipantTransferInProgress = false;
+        void publishSyncParticipantState("missing", { force: true });
+        setSyncSessionStatus(
+          modal,
+          getI18nText("sync.transferCancelled", "Transfer cancelled."),
+          "warning",
+        );
+        closeSyncTransferModal();
+        showSyncSessionToast({
+          type: "warning",
+          message: getI18nText("sync.transferCancelled", "Transfer cancelled."),
+          duration: 1800,
+        });
+        return;
+      }
+      const message =
+        code === "session-pack-integrity-failed"
+          ? getI18nText(
+              "sync.onlinePackIntegrityFailed",
+              "Online config pack integrity check failed.",
+            )
+          : getSyncSessionErrorMessage(error);
+      setSyncSessionStatus(modal, message, "error");
+      syncParticipantTransferInProgress = false;
+      void publishSyncParticipantState("missing", { force: true });
+      updateSyncTransferModalState({
+        status: getI18nText("sync.downloadStatusFailed", "Download failed."),
+        tone: "error",
+        meta: message,
+      });
+      closeSyncTransferModal({ delayMs: 1200 });
+      showSyncSessionToast({
+        type: "error",
+        message,
+        duration: 2600,
+      });
+    } finally {
+      if (downloadOnlinePackBtn) {
+        downloadOnlinePackBtn.disabled = false;
+        downloadOnlinePackBtn.removeAttribute("aria-busy");
+      }
+    }
+  };
+
+  if (
+    SYNC_SESSION_CONTROLLER &&
+    typeof SYNC_SESSION_CONTROLLER.bindSessionModalEvents === "function"
+  ) {
+    SYNC_SESSION_CONTROLLER.bindSessionModalEvents({
+      modal,
+      closeBtn,
+      createBtn,
+      joinBtn,
+      leaveBtn,
+      copyCodeBtn,
+      statusEl,
+      controlModeSelect,
+      controlModeTrigger,
+      controlModeMenu,
+      joinPseudoInput,
+      guestActionNotificationsInput,
+      onCloseRequested: () => closeSyncSessionModal(),
+      onCloseControlModeMenu: () => closeSyncSessionControlModeMenu(modal),
+      onToggleControlModeMenu: () => toggleSyncSessionControlModeMenu(modal),
+      onControlModeOptionSelected: async (controlModeValue) => {
+        if (syncControlModeUpdateInFlight) return;
+        const previousControlMode = getSyncSessionControlModeValue(modal);
+        const nextControlMode =
+          getSyncSessionControlModeConfig(controlModeValue).value;
+        if (previousControlMode === nextControlMode) {
+          closeSyncSessionControlModeMenu(modal);
+          return;
+        }
+
+        updateSyncSessionControlModeSelect(modal, nextControlMode);
+        closeSyncSessionControlModeMenu(modal);
+
+        const service = ensureSyncSessionService(modal);
+        if (!service || typeof service.updateSessionMeta !== "function") {
+          updateSyncSessionControlModeSelect(modal, previousControlMode);
+          showSyncSessionToast({
+            type: "error",
+            message: getI18nText(
+              "sync.errorServiceUnavailable",
+              "Sync service unavailable in this build.",
+            ),
+            duration: 2200,
+          });
+          return;
+        }
+
+        const controlModeTriggerEl = modal.querySelector(
+          "#sync-session-control-mode-trigger",
+        );
+        syncControlModeUpdateInFlight = true;
+        if (controlModeTriggerEl) {
+          controlModeTriggerEl.disabled = true;
+        }
+        try {
+          const updated = await service.updateSessionMeta({
+            controlMode: nextControlMode,
+          });
+          if (updated === false) {
+            throw new Error("request-failed");
+          }
+          if (syncSessionServiceState && typeof syncSessionServiceState === "object") {
+            syncSessionServiceState = {
+              ...syncSessionServiceState,
+              controlMode: nextControlMode,
+            };
+          }
+          renderSyncSessionStatus(modal);
+        } catch (error) {
+          updateSyncSessionControlModeSelect(modal, previousControlMode);
+          renderSyncSessionStatus(modal);
+          showSyncSessionToast({
+            type: "error",
+            message: getSyncSessionErrorMessage(error),
+            duration: 2200,
+          });
+        } finally {
+          syncControlModeUpdateInFlight = false;
+          if (controlModeTriggerEl) {
+            controlModeTriggerEl.disabled = false;
+          }
+        }
+      },
+      onStatusTriggerShow: (trigger) =>
+        showSyncSessionParticipantsTooltip(trigger),
+      onStatusTriggerHide: () => hideSyncSessionParticipantsTooltip(),
+      isPseudoCharAllowed: (char) => isSyncGuestPseudoCharAllowed(char),
+      sanitizePseudoInputValue: (value) =>
+        sanitizeSyncGuestPseudoInputValue(value),
+      onPseudoValidationError: (inputEl) =>
+        notifySyncGuestPseudoValidationError(inputEl),
+      onGuestActionNotificationsChanged: (checked) => {
+        setSyncGuestActionNotificationsEnabled(!!checked);
+        updateSyncSessionGuestActionNotificationsUi(modal);
+      },
+      onRoleButtonClicked: (role) => setSyncSessionModalRole(role),
+      onCreateClicked: handleCreateClick,
+      onJoinClicked: handleJoinClick,
+      onLeaveClicked: handleLeaveClick,
+      onCopyClicked: handleCopyClick,
+    });
+  } else {
+    if (closeBtn) {
+      closeBtn.addEventListener("click", () => closeSyncSessionModal());
+    }
+    if (createBtn) createBtn.addEventListener("click", handleCreateClick);
+    if (joinBtn) joinBtn.addEventListener("click", handleJoinClick);
+    if (leaveBtn) leaveBtn.addEventListener("click", handleLeaveClick);
+    if (copyCodeBtn) copyCodeBtn.addEventListener("click", handleCopyClick);
+    if (guestActionNotificationsInput) {
+      guestActionNotificationsInput.addEventListener("change", () => {
+        setSyncGuestActionNotificationsEnabled(
+          !!guestActionNotificationsInput.checked,
+        );
+        updateSyncSessionGuestActionNotificationsUi(modal);
+      });
+    }
+  }
+  if (exportPackBtn) {
+    exportPackBtn.addEventListener("click", handleExportPackClick);
+  }
+  if (importPackBtn) {
+    importPackBtn.addEventListener("click", handleImportPackClick);
+  }
+  if (publishOnlinePackBtn) {
+    publishOnlinePackBtn.addEventListener(
+      "click",
+      handlePublishOnlinePackClick,
+    );
+  }
+  if (downloadOnlinePackBtn) {
+    downloadOnlinePackBtn.addEventListener(
+      "click",
+      handleDownloadOnlinePackClick,
+    );
+  }
+
+  const transferCancelBtn = document.getElementById(
+    "sync-transfer-modal-cancel-btn",
+  );
+  if (transferCancelBtn) {
+    transferCancelBtn.addEventListener("click", () => cancelSyncTransfer());
+  }
+
+  syncSessionModalBindingsReady = true;
+}
+
 platformRuntimeOnRun(async () => {
+  const wasRuntimeAlreadyCompleted = runtimeLifecycleCompleted;
   await runRuntimeLifecycle();
+  if (!wasRuntimeAlreadyCompleted) return;
+  await refreshSelectionOnRuntimeRunIfNeeded();
 });
 
 // Filet de sécurité: certains environnements Eagle peuvent rater un hook runtime
@@ -5521,10 +13388,21 @@ async function loadTranslations() {
 
 async function applyPreferredLanguage(language, options = {}) {
   const persist = options.persist !== false;
+  const reloadPage = !!options.reloadPage;
   const preferredLanguage = resolveI18nLanguage(language, "en");
 
   if (persist) {
     UIPreferences.set(PREF_KEY_PREFERRED_LANGUAGE, preferredLanguage);
+  }
+
+  if (reloadPage) {
+    try {
+      Object.keys(localStorage)
+        .filter((k) => k.startsWith("posechrono-i18n-cache"))
+        .forEach((k) => localStorage.removeItem(k));
+    } catch (_) {}
+    location.reload();
+    return true;
   }
 
   if (typeof i18next === "undefined") {
@@ -5557,10 +13435,14 @@ async function applyPreferredLanguage(language, options = {}) {
   );
   updateButtonLabels();
   updateSidebarTooltips();
+  if (typeof refreshDrawingToolbarTooltips === "function") {
+    refreshDrawingToolbarTooltips();
+  }
   updateGlobalSettingsModalState();
   if (typeof updateFolderInfo === "function") {
     updateFolderInfo();
   }
+  updateSyncSessionVisualIndicators(syncSessionServiceState);
 
   return true;
 }
@@ -5581,6 +13463,10 @@ function translateStaticHTML() {
       attr: "data-tooltip",
       key: "titlebar.settingsTooltip",
     },
+    "#titlebar-sync-btn": {
+      attr: "data-tooltip",
+      key: "titlebar.syncTooltip",
+    },
     "#pin-btn": { attr: "data-tooltip", key: "titlebar.pinTooltip" },
     "#minimize-btn": { attr: "data-tooltip", key: "titlebar.minimize" },
     "#maximize-btn": { attr: "data-tooltip", key: "titlebar.maximize" },
@@ -5597,6 +13483,10 @@ function translateStaticHTML() {
     // Boutons de contrôle
     "#auto-flip-btn span": { text: true, key: "filters.autoFlip" },
     "#home-progressive-blur-btn": {
+      attr: "data-tooltip",
+      key: "filters.progressiveBlurTooltip",
+    },
+    "#progressive-blur-btn": {
       attr: "data-tooltip",
       key: "filters.progressiveBlurTooltip",
     },
@@ -5852,14 +13742,14 @@ async function initPlugin() {
   nextBtn = document.getElementById("next-btn");
   stopBtn = document.getElementById("stop-btn");
   settingsBtn = document.getElementById("settings-btn");
-  toggleTimerBtn = document.getElementById("toggle-timer-btn");
-
   // Boutons de filtres
   flipHorizontalBtn = document.getElementById("flip-horizontal-btn");
   flipVerticalBtn = document.getElementById("flip-vertical-btn");
   grayscaleBtn = document.getElementById("grayscale-btn");
   blurBtn = document.getElementById("blur-btn");
   annotateBtn = document.getElementById("annotate-btn");
+  gridSidebarBtn = document.getElementById("grid-btn");
+  silhouetteSidebarBtn = document.getElementById("silhouette-btn");
   progressiveBlurBtn = document.getElementById("progressive-blur-btn");
   homeProgressiveBlurBtn = document.getElementById("home-progressive-blur-btn");
 
@@ -5892,35 +13782,54 @@ async function initPlugin() {
     EventDelegation.setupMultiple(customStepsList, {
       // Gestion des inputs de modification
       input: {
-        'input[oninput*="updateStep"]': (e, target) => {
-          const match = target
-            .getAttribute("oninput")
-            ?.match(/updateStep\((\d+), '(\w+)', this\.value\)/);
-          if (match) {
-            const [, index, field] = match;
-            window.updateStep(parseInt(index), field, target.value);
+        "input[data-step-field]": (e, target) => {
+          const index = parseIntegerValue(target.dataset.stepIndex, -1);
+          const field = String(target.dataset.stepField || "").trim();
+          if (index >= 0 && field) {
+            window.updateStep(index, field, target.value);
           }
         },
-        'input[oninput*="updateStepHMS"]': (e, target) => {
-          const match = target
-            .getAttribute("oninput")
-            ?.match(/updateStepHMS\((\d+), '(\w)', this\.value\)/);
-          if (match) {
-            const [, index, type] = match;
-            window.updateStepHMS(parseInt(index), type, target.value);
+        "input[data-step-hms]": (e, target) => {
+          const index = parseIntegerValue(target.dataset.stepIndex, -1);
+          const type = String(target.dataset.stepHms || "").trim();
+          if (index >= 0 && type) {
+            window.updateStepHMS(index, type, target.value);
           }
         },
       },
       // Gestion des clics (suppression, drag)
       click: {
-        'button[onclick*="removeStepFromQueue"]': (e, target) => {
-          const match = target
-            .getAttribute("onclick")
-            ?.match(/removeStepFromQueue\((\d+)\)/);
-          if (match) {
-            const index = parseInt(match[1]);
+        "button[data-remove-step]": (e, target) => {
+          const index = parseIntegerValue(target.dataset.removeStep, -1);
+          if (index >= 0) {
             window.removeStepFromQueue(index);
           }
+        },
+      },
+      dragstart: {
+        ".drag-handle[data-step-index]": (e, target) => {
+          const index = parseIntegerValue(target.dataset.stepIndex, -1);
+          if (index >= 0) {
+            window.dragStep(e, index);
+          }
+        },
+      },
+      dragover: {
+        ".step-item[data-step-index]": (e, target) => {
+          window.handleDragOver(e, target);
+        },
+      },
+      drop: {
+        ".step-item[data-step-index]": (e, target) => {
+          const index = parseIntegerValue(target.dataset.stepIndex, -1);
+          if (index >= 0) {
+            window.dropStep(e, index, target);
+          }
+        },
+      },
+      dragend: {
+        ".drag-handle[data-step-index]": () => {
+          window.handleDragEnd();
         },
       },
     });
@@ -5930,25 +13839,23 @@ async function initPlugin() {
   reviewGrid = document.getElementById("review-grid");
   let closeReviewBtn = document.getElementById("close-review-btn");
 
-  // Chargement dynamique du module optionnel (desktop uniquement)
-  if (isDesktopStandaloneRuntime()) {
-    try {
-      if (!document.getElementById("gab-container-style")) {
-        const link = document.createElement("link");
-        link.id = "gab-container-style";
-        link.rel = "stylesheet";
-        link.href = "GabContainer/gab-style.css";
-        document.head.appendChild(link);
-      }
-      if (!document.getElementById("gab-container-module")) {
-        const script = document.createElement("script");
-        script.id = "gab-container-module";
-        script.src = "GabContainer/gab-module.js";
-        script.defer = true;
-        document.body.appendChild(script);
-      }
-    } catch (_) {}
-  }
+  // Chargement dynamique du module optionnel (présent uniquement si GabContainer/ existe)
+  try {
+    if (!document.getElementById("gab-container-style")) {
+      const link = document.createElement("link");
+      link.id = "gab-container-style";
+      link.rel = "stylesheet";
+      link.href = "GabContainer/gab-style.css";
+      document.head.appendChild(link);
+    }
+    if (!document.getElementById("gab-container-module")) {
+      const script = document.createElement("script");
+      script.id = "gab-container-module";
+      script.src = "GabContainer/gab-module.js";
+      script.defer = true;
+      document.body.appendChild(script);
+    }
+  } catch (_) {}
 
   // === Configuration initiale ===
   if (blurBtn) {
@@ -5971,17 +13878,19 @@ async function initPlugin() {
   }
 
   soundBtn.innerHTML = state.soundEnabled ? ICONS.SOUND_ON : ICONS.SOUND_OFF;
-  toggleTimerBtn.innerHTML = state.showTimer ? ICONS.TIMER_ON : ICONS.TIMER_OFF;
   grayscaleBtn.innerHTML = state.grayscale ? ICONS.BW_ON : ICONS.BW_OFF;
 
+  if (gridSidebarBtn) {
+    gridSidebarBtn.innerHTML = ICONS.GRID;
+    gridSidebarBtn.classList.toggle("active", !!state.gridEnabled);
+  }
+  if (silhouetteSidebarBtn) {
+    silhouetteSidebarBtn.innerHTML = ICONS.SILHOUETTE;
+    silhouetteSidebarBtn.classList.toggle("active", state.silhouetteEnabled);
+  }
+
   // === Activer le scrub sur les champs de saisie ===
-  document
-    .querySelectorAll(
-      ".time-field input, #custom-count-input, .time-input-group input",
-    )
-    .forEach((input) => {
-      makeInputScrubbable(input);
-    });
+  applyScrubbableBehavior(document);
 
   // === Lancer la configuration ===
   CONFIG.defaultSessionMode = loadPreferredDefaultSessionMode();
@@ -6006,6 +13915,7 @@ async function initPlugin() {
   }
 
   renderGlobalSettingsSections();
+  applySidebarVisibility();
   setupEventListeners();
   updateTimerDisplay();
 
@@ -6023,13 +13933,18 @@ async function initPlugin() {
 
   // === Appliquer les traductions i18n aux éléments HTML statiques ===
   translateStaticHTML();
-  refreshSessionDescription(state.sessionMode || CONFIG.defaultSessionMode || "classique");
+  refreshSessionDescription(
+    state.sessionMode || CONFIG.defaultSessionMode || "classique",
+  );
+  updateButtonLabels();
+  updateTimerDisplay();
 
   // === Mettre à jour les tooltips avec les raccourcis dynamiques ===
   updateSidebarTooltips();
 
   // === Subscriptions StateManager pour réactivité UI ===
   setupStateSubscriptions();
+  updateAnnotateButtonAvailability();
 
   // === Initialisation de la grille d'arrière-plan ===
   initBackgroundGrid();
@@ -6054,6 +13969,24 @@ function setBackgroundGridEnabled(enabled, persist = true) {
   }
 }
 
+function setAnimationsEnabled(enabled, persist = true) {
+  const next = !!enabled;
+  document.body.classList.toggle("no-animations", !next);
+  if (persist) {
+    UIPreferences.set("animationsEnabled", next);
+  }
+}
+
+function setShowProgressBar(value, persist = true) {
+  const next = !!value;
+  if (progressBar) {
+    progressBar.style.display = next ? "block" : "none";
+  }
+  if (persist) {
+    UIPreferences.set("showProgressBar", next);
+  }
+}
+
 function applyVisualPreferencesFromStore() {
   const gridEnabled = UIPreferences.get(
     "backgroundGridEnabled",
@@ -6071,6 +14004,15 @@ function applyVisualPreferencesFromStore() {
     "reviewDurationsVisible",
     true,
   );
+  const animationsEnabled = UIPreferences.get("animationsEnabled", true);
+  setAnimationsEnabled(animationsEnabled, false);
+  const showProgressBar = UIPreferences.get("showProgressBar", true);
+  setShowProgressBar(showProgressBar, false);
+  state.soundEnabled = !!UIPreferences.get(
+    PREF_KEY_SOUND_ENABLED_BY_DEFAULT,
+    true,
+  );
+  applySidebarVisibility();
 }
 
 function applyPreferredDefaultSessionMode(options = {}) {
@@ -6196,11 +14138,26 @@ function setupStateSubscriptions() {
     }
   });
 
-  // Mise à jour automatique du timer display
-  stateManager.subscribe("showTimer", (show) => {
-    if (toggleTimerBtn) {
-      toggleTimerBtn.innerHTML = show ? ICONS.TIMER_ON : ICONS.TIMER_OFF;
+  // Mise à jour automatique du bouton grille
+  stateManager.subscribe("gridEnabled", (enabled) => {
+    if (gridSidebarBtn) {
+      gridSidebarBtn.classList.toggle("active", !!enabled);
     }
+  });
+
+  // Mise à jour automatique du bouton silhouette
+  stateManager.subscribe("silhouetteEnabled", (enabled) => {
+    if (silhouetteSidebarBtn) {
+      silhouetteSidebarBtn.classList.toggle("active", enabled);
+    }
+  });
+
+  // Désactiver annotation sur médias non supportés (gif/vidéo)
+  stateManager.subscribe("isVideoFile", () => {
+    updateAnnotateButtonAvailability();
+  });
+  stateManager.subscribe("isGifFile", () => {
+    updateAnnotateButtonAvailability();
   });
 
   // Log des changements d'état critiques en développement
@@ -6264,6 +14221,21 @@ function setupEventListeners() {
   );
   const globalSettingsImportPrefsBtn = document.getElementById(
     "global-settings-import-prefs-btn",
+  );
+  const globalSettingsToggleAnimationsInput = document.getElementById(
+    "global-settings-toggle-animations-btn",
+  );
+  const globalSettingsIgnoreVideoFilesInput = document.getElementById(
+    "global-settings-ignore-video-files-btn",
+  );
+  const globalSettingsConfirmDeleteImageInput = document.getElementById(
+    "global-settings-confirm-delete-image-btn",
+  );
+  const globalSettingsEnableOnlineSyncInput = document.getElementById(
+    "global-settings-enable-online-sync-btn",
+  );
+  const globalSettingsShowProgressBarInput = document.getElementById(
+    "global-settings-show-progress-bar-btn",
   );
   const SESSION_PLANS_KEY = "posechrono_session_plans";
   const SESSION_PLANS_DB_KEY = STORAGE_KEYS.SESSION_PLANS_DB;
@@ -6462,6 +14434,142 @@ function setupEventListeners() {
     globalSettingsDefaultModeGroup,
   });
 
+  if (globalSettingsToggleAnimationsInput) {
+    globalSettingsToggleAnimationsInput.addEventListener("change", () => {
+      // checked = disable animations → animationsEnabled = false
+      setAnimationsEnabled(!globalSettingsToggleAnimationsInput.checked);
+      updateGlobalSettingsModalState();
+    });
+  }
+
+  if (globalSettingsIgnoreVideoFilesInput) {
+    globalSettingsIgnoreVideoFilesInput.addEventListener("change", () => {
+      const checked = globalSettingsIgnoreVideoFilesInput.checked;
+      UIPreferences.set("ignoreVideoFiles", checked);
+      if (!state.isRunning) {
+        void loadImages();
+      }
+      updateGlobalSettingsModalState();
+    });
+  }
+
+  if (globalSettingsConfirmDeleteImageInput) {
+    globalSettingsConfirmDeleteImageInput.addEventListener("change", () => {
+      UIPreferences.set(
+        PREF_KEY_CONFIRM_DELETE_IMAGE,
+        !!globalSettingsConfirmDeleteImageInput.checked,
+      );
+      updateGlobalSettingsModalState();
+    });
+  }
+
+  if (globalSettingsEnableOnlineSyncInput) {
+    globalSettingsEnableOnlineSyncInput.addEventListener("change", () => {
+      UIPreferences.set("syncEnabled", globalSettingsEnableOnlineSyncInput.checked);
+      updateGlobalSettingsModalState();
+      
+      const syncBtn = document.getElementById("titlebar-sync-btn");
+      if (syncBtn) {
+        if (isSyncFeatureEnabled()) {
+          syncBtn.classList.remove("hidden");
+          syncBtn.removeAttribute("aria-hidden");
+          syncBtn.removeAttribute("tabindex");
+        } else {
+          syncBtn.classList.add("hidden");
+          syncBtn.setAttribute("aria-hidden", "true");
+          syncBtn.setAttribute("tabindex", "-1");
+        }
+      }
+    });
+  }
+
+  if (globalSettingsShowProgressBarInput) {
+    globalSettingsShowProgressBarInput.addEventListener("change", () => {
+      setShowProgressBar(globalSettingsShowProgressBarInput.checked);
+      updateGlobalSettingsModalState();
+    });
+  }
+
+  const globalSettingsSoundEnabledByDefaultInput = document.getElementById(
+    "global-settings-sound-enabled-by-default-btn",
+  );
+  if (globalSettingsSoundEnabledByDefaultInput) {
+    globalSettingsSoundEnabledByDefaultInput.addEventListener("change", () => {
+      UIPreferences.set(
+        PREF_KEY_SOUND_ENABLED_BY_DEFAULT,
+        globalSettingsSoundEnabledByDefaultInput.checked,
+      );
+      updateGlobalSettingsModalState();
+    });
+  }
+
+  const globalSettingsSoundTickInput = document.getElementById(
+    "global-settings-sound-tick-btn",
+  );
+  if (globalSettingsSoundTickInput) {
+    globalSettingsSoundTickInput.addEventListener("change", () => {
+      UIPreferences.set(
+        PREF_KEY_SOUND_TICK,
+        globalSettingsSoundTickInput.checked,
+      );
+      updateGlobalSettingsModalState();
+    });
+  }
+
+  const globalSettingsTickThresholdGroup = document.getElementById(
+    "global-settings-tick-threshold-group",
+  );
+  if (globalSettingsTickThresholdGroup) {
+    globalSettingsTickThresholdGroup.addEventListener("click", (e) => {
+      const btn = e.target.closest(".search-toggle-btn[data-threshold]");
+      if (!btn) return;
+      UIPreferences.set(
+        PREF_KEY_TICK_SOUND_THRESHOLD,
+        Number(btn.dataset.threshold),
+      );
+      updateGlobalSettingsModalState();
+    });
+  }
+
+  const globalSettingsSoundEndInput = document.getElementById(
+    "global-settings-sound-end-btn",
+  );
+  if (globalSettingsSoundEndInput) {
+    globalSettingsSoundEndInput.addEventListener("change", () => {
+      UIPreferences.set(
+        PREF_KEY_SOUND_END,
+        globalSettingsSoundEndInput.checked,
+      );
+      updateGlobalSettingsModalState();
+    });
+  }
+
+  const globalSettingsSoundImageChangeInput = document.getElementById(
+    "global-settings-sound-image-change-btn",
+  );
+  if (globalSettingsSoundImageChangeInput) {
+    globalSettingsSoundImageChangeInput.addEventListener("change", () => {
+      UIPreferences.set(
+        PREF_KEY_SOUND_IMAGE_CHANGE,
+        globalSettingsSoundImageChangeInput.checked,
+      );
+      updateGlobalSettingsModalState();
+    });
+  }
+
+  const globalSettingsSoundPauseInput = document.getElementById(
+    "global-settings-sound-pause-btn",
+  );
+  if (globalSettingsSoundPauseInput) {
+    globalSettingsSoundPauseInput.addEventListener("change", () => {
+      UIPreferences.set(
+        PREF_KEY_SOUND_PAUSE,
+        globalSettingsSoundPauseInput.checked,
+      );
+      updateGlobalSettingsModalState();
+    });
+  }
+
   const handleResetAllSettings = async () => {
     const { confirmed } = await showPoseChronoConfirmDialog({
       title: i18next.t("settings.global.resetSettings", {
@@ -6511,7 +14619,28 @@ function setupEventListeners() {
       CONFIG_RUNTIME_DEFAULTS.defaultSessionMode,
     );
     UIPreferences.set("reviewDurationsVisible", true);
+    UIPreferences.set("animationsEnabled", true);
+    UIPreferences.set("ignoreVideoFiles", false);
+    UIPreferences.set(PREF_KEY_CONFIRM_DELETE_IMAGE, true);
+    UIPreferences.set("showProgressBar", true);
+    UIPreferences.set(PREF_KEY_SOUND_ENABLED_BY_DEFAULT, true);
+    UIPreferences.set(PREF_KEY_SOUND_TICK, true);
+    UIPreferences.set(PREF_KEY_TICK_SOUND_THRESHOLD, 15);
+    UIPreferences.set(PREF_KEY_SOUND_END, true);
+    UIPreferences.set(PREF_KEY_SOUND_IMAGE_CHANGE, true);
+    UIPreferences.set(PREF_KEY_SOUND_PAUSE, true);
+    state.soundEnabled = true;
+    if (UIPreferences.setStringArray) {
+      UIPreferences.setStringArray(PREF_KEY_SIDEBAR_HIDDEN_BUTTONS, []);
+      UIPreferences.setStringArray(
+        PREF_KEY_SIDEBAR_BUTTON_ORDER,
+        SIDEBAR_DEFAULT_BUTTON_ORDER,
+      );
+    }
+    applySidebarVisibility();
     globalSettingsCollapsed.clear();
+    ["maintenance", "son"].forEach((k) => globalSettingsCollapsed.add(k));
+    saveGlobalSettingsCollapsedState();
     globalSettingsCategoriesInitialized = false;
 
     CONFIG.enableFlipAnimation = CONFIG_RUNTIME_DEFAULTS.enableFlipAnimation;
@@ -6527,7 +14656,10 @@ function setupEventListeners() {
 
     applyTheme(CONFIG_RUNTIME_DEFAULTS.currentTheme);
     try {
-      await platformPreferenceSet("theme", CONFIG_RUNTIME_DEFAULTS.currentTheme);
+      await platformPreferenceSet(
+        "theme",
+        CONFIG_RUNTIME_DEFAULTS.currentTheme,
+      );
     } catch (_) {}
 
     applyVisualPreferencesFromStore();
@@ -6543,441 +14675,441 @@ function setupEventListeners() {
     updateButtonLabels();
     updateSidebarTooltips();
 
+    // Clear i18n cache and reload immediately to apply defaults.
+    try {
+      Object.keys(localStorage)
+        .filter((k) => k.includes("posechrono-i18n-cache"))
+        .forEach((k) => localStorage.removeItem(k));
+    } catch (_) {}
+    localStorage.setItem("posechrono-reopen-global-settings-modal", "true");
+    localStorage.setItem("posechrono-show-reset-settings-toast", "true");
+    location.reload();
+  };
+
+  const handleExportPreferencesClick = async () => {
+    const { confirmed, selections } = await showPreferencesPackageDialog({
+      mode: "export",
+      defaults: {
+        ui: true,
+        hotkeys: true,
+        plans: true,
+        timeline: false,
+      },
+      container: globalSettingsModal || settingsScreen || document.body,
+    });
+    if (!confirmed) return;
+
+    const selected = hasAnyPreferencesSectionSelected(selections);
+    if (!selected) {
+      if (typeof window.showPoseChronoToast === "function") {
+        window.showPoseChronoToast({
+          type: "info",
+          message: i18next.t("storage.nothingSelected", {
+            defaultValue: "No storage section selected.",
+          }),
+          duration: 2200,
+        });
+      }
+      return;
+    }
+
+    const sections = {};
+
+    if (selections.ui) {
+      sections.ui = UIPreferences.exportData();
+    }
+
+    if (selections.hotkeys) {
+      const hotkeysToSave = collectCustomHotkeysBindings();
+      sections.hotkeys = normalizeHotkeysPayload({
+        schemaVersion: STORAGE_SCHEMA_VERSION,
+        bindings: hotkeysToSave,
+      }).payload;
+    }
+
+    if (selections.plans) {
+      const plans = await loadSessionPlans();
+      sections.plans = normalizeSessionPlansPayload({
+        schemaVersion: STORAGE_SCHEMA_VERSION,
+        plans,
+      }).payload;
+    }
+
+    if (selections.timeline) {
+      try {
+        if (
+          window.TimelineData &&
+          typeof window.TimelineData.getData === "function"
+        ) {
+          sections.timeline = JSON.parse(
+            JSON.stringify(window.TimelineData.getData()),
+          );
+        } else {
+          sections.timeline = null;
+        }
+      } catch (e) {
+        console.warn("[Prefs] timeline export read failed:", e);
+        sections.timeline = null;
+      }
+    }
+
+    const payload = {
+      schemaVersion: PREFS_PACKAGE_SCHEMA_VERSION,
+      app: "PoseChrono",
+      exportedAt: new Date().toISOString(),
+      sections,
+    };
+
+    const ok = downloadJsonPayload(createPrefsBackupFilename(), payload);
     if (typeof window.showPoseChronoToast === "function") {
       window.showPoseChronoToast({
-        type: "success",
-        message: i18next.t("settings.global.resetSettingsDone", {
-          defaultValue: "All settings reset to defaults.",
-        }),
+        type: ok ? "success" : "error",
+        message: ok
+          ? i18next.t("settings.global.preferencesExportDone", {
+              defaultValue: "Preferences exported.",
+            })
+          : i18next.t("settings.global.preferencesExportError", {
+              defaultValue: "Preferences export failed.",
+            }),
         duration: 2400,
       });
     }
   };
 
-  const handleExportPreferencesClick = async () => {
-      const { confirmed, selections } = await showPreferencesPackageDialog({
-        mode: "export",
-        defaults: {
-          ui: true,
-          hotkeys: true,
-          plans: true,
-          timeline: false,
-        },
-        container: globalSettingsModal || settingsScreen || document.body,
-      });
-      if (!confirmed) return;
+  const handleImportPreferencesClick = async () => {
+    const text = await pickJsonFileText();
+    if (!text) return;
 
-      const selected = hasAnyPreferencesSectionSelected(selections);
-      if (!selected) {
-        if (typeof window.showPoseChronoToast === "function") {
-          window.showPoseChronoToast({
-            type: "info",
-            message: i18next.t("storage.nothingSelected", {
-              defaultValue: "No storage section selected.",
-            }),
-            duration: 2200,
-          });
-        }
-        return;
-      }
+    let parsed = null;
+    try {
+      parsed = JSON.parse(text);
+    } catch (_) {
+      showPoseChronoErrorMessage(
+        i18next.t("settings.global.preferencesImportInvalid", {
+          defaultValue: "Invalid backup file.",
+        }),
+      );
+      return;
+    }
 
-      const sections = {};
+    if (!isValidPreferencesPackage(parsed)) {
+      showPoseChronoErrorMessage(
+        i18next.t("settings.global.preferencesImportInvalid", {
+          defaultValue: "Invalid backup file.",
+        }),
+      );
+      return;
+    }
 
-      if (selections.ui) {
-        sections.ui = UIPreferences.exportData();
-      }
+    const available = getAvailablePreferencesSections(parsed);
 
-      if (selections.hotkeys) {
-        const hotkeysToSave = collectCustomHotkeysBindings();
-        sections.hotkeys = normalizeHotkeysPayload({
-          schemaVersion: STORAGE_SCHEMA_VERSION,
-          bindings: hotkeysToSave,
-        }).payload;
-      }
+    const { confirmed, selections } = await showPreferencesPackageDialog({
+      mode: "import",
+      available,
+      defaults: available,
+      container: globalSettingsModal || settingsScreen || document.body,
+    });
+    if (!confirmed) return;
 
-      if (selections.plans) {
-        const plans = await loadSessionPlans();
-        sections.plans = normalizeSessionPlansPayload({
-          schemaVersion: STORAGE_SCHEMA_VERSION,
-          plans,
-        }).payload;
-      }
-
-      if (selections.timeline) {
-        try {
-          if (
-            window.TimelineData &&
-            typeof window.TimelineData.getData === "function"
-          ) {
-            sections.timeline = JSON.parse(
-              JSON.stringify(window.TimelineData.getData()),
-            );
-          } else {
-            sections.timeline = null;
-          }
-        } catch (e) {
-          console.warn("[Prefs] timeline export read failed:", e);
-          sections.timeline = null;
-        }
-      }
-
-      const payload = {
-        schemaVersion: PREFS_PACKAGE_SCHEMA_VERSION,
-        app: "PoseChrono",
-        exportedAt: new Date().toISOString(),
-        sections,
-      };
-
-      const ok = downloadJsonPayload(createPrefsBackupFilename(), payload);
+    const selected = hasAnyPreferencesSectionSelected(selections);
+    if (!selected) {
       if (typeof window.showPoseChronoToast === "function") {
         window.showPoseChronoToast({
-          type: ok ? "success" : "error",
-          message: ok
-            ? i18next.t("settings.global.preferencesExportDone", {
-                defaultValue: "Preferences exported.",
-              })
-            : i18next.t("settings.global.preferencesExportError", {
-                defaultValue: "Preferences export failed.",
-              }),
-          duration: 2400,
+          type: "info",
+          message: i18next.t("storage.nothingSelected", {
+            defaultValue: "No storage section selected.",
+          }),
+          duration: 2200,
         });
       }
-  };
+      return;
+    }
 
-  const handleImportPreferencesClick = async () => {
-      const text = await pickJsonFileText();
-      if (!text) return;
-
-      let parsed = null;
-      try {
-        parsed = JSON.parse(text);
-      } catch (_) {
-        showPoseChronoErrorMessage(
-          i18next.t("settings.global.preferencesImportInvalid", {
-            defaultValue: "Invalid backup file.",
-          }),
-        );
-        return;
-      }
-
-      if (!isValidPreferencesPackage(parsed)) {
-        showPoseChronoErrorMessage(
-          i18next.t("settings.global.preferencesImportInvalid", {
-            defaultValue: "Invalid backup file.",
-          }),
-        );
-        return;
-      }
-
-      const available = getAvailablePreferencesSections(parsed);
-
-      const { confirmed, selections } = await showPreferencesPackageDialog({
-        mode: "import",
-        available,
-        defaults: available,
-        container: globalSettingsModal || settingsScreen || document.body,
-      });
-      if (!confirmed) return;
-
-      const selected = hasAnyPreferencesSectionSelected(selections);
-      if (!selected) {
-        if (typeof window.showPoseChronoToast === "function") {
-          window.showPoseChronoToast({
-            type: "info",
-            message: i18next.t("storage.nothingSelected", {
-              defaultValue: "No storage section selected.",
-            }),
-            duration: 2200,
-          });
-        }
-        return;
-      }
-
-      const applied = [];
-      try {
-        if (selections.ui && parsed.sections.ui) {
-          UIPreferences.importData(parsed.sections.ui, { persist: true });
-          applyVisualPreferencesFromStore();
-          applyPreferredDefaultSessionMode({ syncUi: true });
-          globalSettingsCollapsed.clear();
-          globalSettingsCategoriesInitialized = false;
-          initGlobalSettingsCategoryToggles();
-          applied.push(
-            i18next.t("settings.global.packageSectionUi", {
-              defaultValue: "UI preferences",
-            }),
-          );
-        }
-
-        if (selections.hotkeys && parsed.sections.hotkeys) {
-          const normalizedHotkeys = normalizeHotkeysPayload(
-            parsed.sections.hotkeys,
-          );
-          await PoseChronoStorage.setJson(
-            STORAGE_KEYS.HOTKEYS_DB,
-            normalizedHotkeys.payload,
-          );
-          try {
-            localStorage.removeItem(HOTKEYS_STORAGE_KEY);
-          } catch (_) {}
-          applyCustomHotkeysToConfig(normalizedHotkeys.bindings, {
-            resetToDefaults: true,
-          });
-          updateButtonLabels();
-          updateSidebarTooltips();
-          applied.push(
-            i18next.t("settings.global.packageSectionHotkeys", {
-              defaultValue: "Keyboard shortcuts",
-            }),
-          );
-        }
-
-        if (selections.plans && parsed.sections.plans) {
-          const normalizedPlans = normalizeSessionPlansPayload(
-            parsed.sections.plans,
-          );
-          sessionPlansCache = normalizedPlans.plans;
-          await PoseChronoStorage.setJson(
-            SESSION_PLANS_DB_KEY,
-            normalizedPlans.payload,
-          );
-          try {
-            localStorage.removeItem(SESSION_PLANS_KEY);
-          } catch (_) {}
-          if (
-            sessionPlansModal &&
-            !sessionPlansModal.classList.contains("hidden")
-          ) {
-            await displaySavedPlans();
-          }
-          applied.push(
-            i18next.t("settings.global.packageSectionPlans", {
-              defaultValue: "Session plans",
-            }),
-          );
-        }
-
-        if (selections.timeline && parsed.sections.timeline) {
-          if (
-            window.TimelineData &&
-            typeof window.TimelineData.importJSON === "function"
-          ) {
-            window.TimelineData.importJSON(
-              JSON.stringify(parsed.sections.timeline),
-            );
-          } else {
-            await PoseChronoStorage.setJson(STORAGE_KEYS.TIMELINE_DB, {
-              schemaVersion: STORAGE_SCHEMA_VERSION,
-              data: parsed.sections.timeline,
-            });
-          }
-          refreshTimelineViewsSafely("preferences-import");
-          applied.push(
-            i18next.t("settings.global.packageSectionTimeline", {
-              defaultValue: "Timeline history",
-            }),
-          );
-        }
-
-        updateGlobalSettingsModalState();
-
-        if (typeof window.showPoseChronoToast === "function") {
-          window.showPoseChronoToast({
-            type: "success",
-            message: i18next.t("settings.global.preferencesImportDone", {
-              defaultValue: "Preferences imported: {{targets}}",
-              targets: applied.join(", "),
-            }),
-            duration: 3000,
-          });
-        }
-      } catch (e) {
-        console.error("[Prefs] import error:", e);
-        showPoseChronoErrorMessage(
-          i18next.t("settings.global.preferencesImportError", {
-            defaultValue: "Preferences import failed.",
+    const applied = [];
+    try {
+      if (selections.ui && parsed.sections.ui) {
+        UIPreferences.importData(parsed.sections.ui, { persist: true });
+        applyVisualPreferencesFromStore();
+        applyPreferredDefaultSessionMode({ syncUi: true });
+        globalSettingsCollapsed.clear();
+        globalSettingsCategoriesInitialized = false;
+        initGlobalSettingsCategoryToggles();
+        applied.push(
+          i18next.t("settings.global.packageSectionUi", {
+            defaultValue: "UI preferences",
           }),
         );
       }
+
+      if (selections.hotkeys && parsed.sections.hotkeys) {
+        const normalizedHotkeys = normalizeHotkeysPayload(
+          parsed.sections.hotkeys,
+        );
+        await PoseChronoStorage.setJson(
+          STORAGE_KEYS.HOTKEYS_DB,
+          normalizedHotkeys.payload,
+        );
+        try {
+          localStorage.removeItem(HOTKEYS_STORAGE_KEY);
+        } catch (_) {}
+        applyCustomHotkeysToConfig(normalizedHotkeys.bindings, {
+          resetToDefaults: true,
+        });
+        updateButtonLabels();
+        updateSidebarTooltips();
+        applied.push(
+          i18next.t("settings.global.packageSectionHotkeys", {
+            defaultValue: "Keyboard shortcuts",
+          }),
+        );
+      }
+
+      if (selections.plans && parsed.sections.plans) {
+        const normalizedPlans = normalizeSessionPlansPayload(
+          parsed.sections.plans,
+        );
+        sessionPlansCache = normalizedPlans.plans;
+        await PoseChronoStorage.setJson(
+          SESSION_PLANS_DB_KEY,
+          normalizedPlans.payload,
+        );
+        try {
+          localStorage.removeItem(SESSION_PLANS_KEY);
+        } catch (_) {}
+        if (
+          sessionPlansModal &&
+          !sessionPlansModal.classList.contains("hidden")
+        ) {
+          await displaySavedPlans();
+        }
+        applied.push(
+          i18next.t("settings.global.packageSectionPlans", {
+            defaultValue: "Session plans",
+          }),
+        );
+      }
+
+      if (selections.timeline && parsed.sections.timeline) {
+        if (
+          window.TimelineData &&
+          typeof window.TimelineData.importJSON === "function"
+        ) {
+          window.TimelineData.importJSON(
+            JSON.stringify(parsed.sections.timeline),
+          );
+        } else {
+          await PoseChronoStorage.setJson(STORAGE_KEYS.TIMELINE_DB, {
+            schemaVersion: STORAGE_SCHEMA_VERSION,
+            data: parsed.sections.timeline,
+          });
+        }
+        refreshTimelineViewsSafely("preferences-import");
+        applied.push(
+          i18next.t("settings.global.packageSectionTimeline", {
+            defaultValue: "Timeline history",
+          }),
+        );
+      }
+
+      updateGlobalSettingsModalState();
+
+      if (typeof window.showPoseChronoToast === "function") {
+        window.showPoseChronoToast({
+          type: "success",
+          message: i18next.t("settings.global.preferencesImportDone", {
+            defaultValue: "Preferences imported: {{targets}}",
+            targets: applied.join(", "),
+          }),
+          duration: 3000,
+        });
+      }
+    } catch (e) {
+      console.error("[Prefs] import error:", e);
+      showPoseChronoErrorMessage(
+        i18next.t("settings.global.preferencesImportError", {
+          defaultValue: "Preferences import failed.",
+        }),
+      );
+    }
   };
 
   const handleSavePlanClick = async () => {
-      const name = planNameInput.value.trim();
-      if (!SESSION_PLAN_UTILS?.getPlanSaveValidation) {
-        logMissingShared("SESSION_PLAN_UTILS.getPlanSaveValidation");
-        return;
-      }
-      const saveValidation = SESSION_PLAN_UTILS.getPlanSaveValidation({
-        name,
-        queueLength: state.customQueue.length,
-      });
+    const name = planNameInput.value.trim();
+    if (!SESSION_PLAN_UTILS?.getPlanSaveValidation) {
+      logMissingShared("SESSION_PLAN_UTILS.getPlanSaveValidation");
+      return;
+    }
+    const saveValidation = SESSION_PLAN_UTILS.getPlanSaveValidation({
+      name,
+      queueLength: state.customQueue.length,
+    });
 
-      if (!saveValidation.ok && saveValidation.reason === "empty-name") {
-        // Shake et bordure rouge sur l'input
-        planNameInput.classList.add("input-error");
-        planNameInput.focus();
-        setTimeout(() => {
-          planNameInput.classList.remove("input-error");
-        }, 600);
-        return;
-      }
-
-      if (!saveValidation.ok && saveValidation.reason === "empty-queue") {
-        // Shake sur le bouton de sauvegarde
-        savePlanBtn.classList.add("shake");
-        setTimeout(() => {
-          savePlanBtn.classList.remove("shake");
-        }, 400);
-        return;
-      }
-
-      const plans = await loadSessionPlans();
-      if (!SESSION_PLAN_UTILS?.createPlanEntry) {
-        logMissingShared("SESSION_PLAN_UTILS.createPlanEntry");
-        return;
-      }
-      const newPlan = SESSION_PLAN_UTILS.createPlanEntry({
-        name,
-        queue: state.customQueue,
-        date: Date.now(),
-      });
-
-      plans.push(newPlan);
-      await saveSessionPlans(plans);
-
-      planNameInput.value = "";
-      planNameInput.blur();
-      await displaySavedPlans();
-
-      // Feedback visuel
-      savePlanBtn.textContent = i18next.t("notifications.planSaved");
+    if (!saveValidation.ok && saveValidation.reason === "empty-name") {
+      // Shake et bordure rouge sur l'input
+      planNameInput.classList.add("input-error");
+      planNameInput.focus();
       setTimeout(() => {
-        const saveBtnLabel = i18next.t("modes.custom.saveBtn", {
-          defaultValue: "Save",
-        });
-        savePlanBtn.innerHTML = `
+        planNameInput.classList.remove("input-error");
+      }, 600);
+      return;
+    }
+
+    if (!saveValidation.ok && saveValidation.reason === "empty-queue") {
+      // Shake sur le bouton de sauvegarde
+      savePlanBtn.classList.add("shake");
+      setTimeout(() => {
+        savePlanBtn.classList.remove("shake");
+      }, 400);
+      return;
+    }
+
+    const plans = await loadSessionPlans();
+    if (!SESSION_PLAN_UTILS?.createPlanEntry) {
+      logMissingShared("SESSION_PLAN_UTILS.createPlanEntry");
+      return;
+    }
+    const newPlan = SESSION_PLAN_UTILS.createPlanEntry({
+      name,
+      queue: state.customQueue,
+      date: Date.now(),
+    });
+
+    plans.push(newPlan);
+    await saveSessionPlans(plans);
+
+    planNameInput.value = "";
+    planNameInput.blur();
+    await displaySavedPlans();
+
+    // Feedback visuel
+    savePlanBtn.textContent = i18next.t("notifications.planSaved");
+    setTimeout(() => {
+      const saveBtnLabel = i18next.t("modes.custom.saveBtn", {
+        defaultValue: "Save",
+      });
+      savePlanBtn.innerHTML = `
           <svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="currentColor">
             <path d="M840-680v480q0 33-23.5 56.5T760-120H200q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h480l160 160Zm-80 34L646-760H200v560h560v-446ZM480-240q50 0 85-35t35-85q0-50-35-85t-85-35q-50 0-85 35t-35 85q0 50 35 85t85 35ZM240-560h360v-160H240v160Zm-40-86v446-560 114Z"/>
           </svg>
           ${saveBtnLabel}
         `;
-        // Réactiver explicitement l'input
-        planNameInput.disabled = false;
-        planNameInput.readOnly = false;
-      }, 2000);
+      // Réactiver explicitement l'input
+      planNameInput.disabled = false;
+      planNameInput.readOnly = false;
+    }, 2000);
   };
 
   const handleSavedPlansListClick = async (e) => {
-      const loadBtn = e.target.closest(".plan-load-btn");
-      const deleteBtn = e.target.closest(".plan-delete-btn");
-      const planName = e.target.closest(".plan-name");
+    const loadBtn = e.target.closest(".plan-load-btn");
+    const deleteBtn = e.target.closest(".plan-delete-btn");
+    const planName = e.target.closest(".plan-name");
 
-      if (loadBtn) {
-        const index = parseInt(loadBtn.dataset.index, 10);
-        const plans = await loadSessionPlans();
-        if (plans[index]) {
-          state.customQueue = JSON.parse(JSON.stringify(plans[index].steps));
-          renderCustomQueue();
-          updateStartButtonState();
-          sessionPlansModal.classList.add("hidden");
+    if (loadBtn) {
+      const index = parseInt(loadBtn.dataset.index, 10);
+      const plans = await loadSessionPlans();
+      if (plans[index]) {
+        state.customQueue = JSON.parse(JSON.stringify(plans[index].steps));
+        renderCustomQueue();
+        updateStartButtonState();
+        sessionPlansModal.classList.add("hidden");
+      }
+    } else if (deleteBtn) {
+      const index = parseInt(deleteBtn.dataset.index, 10);
+      const plans = await loadSessionPlans();
+      const plan = plans[index];
+      if (!plan) return;
+
+      const title = i18next.t("modes.custom.managePlans", {
+        defaultValue: "Session Plans",
+      });
+      if (!SESSION_PLAN_UTILS?.formatPlanDeleteSummary) {
+        logMissingShared("SESSION_PLAN_UTILS.formatPlanDeleteSummary");
+        return;
+      }
+      const summaryLine = SESSION_PLAN_UTILS.formatPlanDeleteSummary(plan, {
+        formatDuration,
+        calculatePlanDuration,
+        calculatePlanPoses,
+        getPlanWord,
+      }).summary;
+      const message = `${i18next.t("modes.custom.confirmDeletePlan", { defaultValue: "Delete this plan?" })}\n${summaryLine}`;
+
+      const { confirmed } = await showPoseChronoConfirmDialog({
+        title,
+        message,
+        confirmText: i18next.t("notifications.deleteConfirm", {
+          defaultValue: "Delete",
+        }),
+        cancelText: i18next.t("notifications.deleteCancel", {
+          defaultValue: "Cancel",
+        }),
+        container: sessionPlansModal,
+      });
+
+      if (confirmed) {
+        await deletePlanWithUndo(index);
+      }
+    } else if (planName && planName.contentEditable === "false") {
+      // Activer l'édition du nom
+      const originalName = planName.textContent;
+      planName.contentEditable = "true";
+      planName.style.cursor = "text";
+      planName.focus();
+
+      // Sélectionner tout le texte
+      const range = document.createRange();
+      range.selectNodeContents(planName);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+
+      // Fonction pour sauvegarder les modifications
+      const saveName = () => {
+        const newName = planName.textContent.trim();
+        if (newName && newName !== originalName) {
+          const index = parseInt(planName.dataset.index, 10);
+          (async () => {
+            const plans = await loadSessionPlans();
+            if (plans[index]) {
+              plans[index].name = newName;
+              await saveSessionPlans(plans);
+            }
+          })().catch((err) => {
+            console.error("[Plans] rename error:", err);
+          });
+        } else if (!newName) {
+          planName.textContent = originalName;
         }
-      } else if (deleteBtn) {
-        const index = parseInt(deleteBtn.dataset.index, 10);
-        const plans = await loadSessionPlans();
-        const plan = plans[index];
-        if (!plan) return;
+        planName.contentEditable = "false";
+        planName.style.cursor = "pointer";
+      };
 
-        const title = i18next.t("modes.custom.managePlans", {
-          defaultValue: "Session Plans",
-        });
-        if (!SESSION_PLAN_UTILS?.formatPlanDeleteSummary) {
-          logMissingShared("SESSION_PLAN_UTILS.formatPlanDeleteSummary");
-          return;
-        }
-        const summaryLine = SESSION_PLAN_UTILS.formatPlanDeleteSummary(plan, {
-          formatDuration,
-          calculatePlanDuration,
-          calculatePlanPoses,
-          getPlanWord,
-        }).summary;
-        const message = `${i18next.t("modes.custom.confirmDeletePlan", { defaultValue: "Delete this plan?" })}\n${summaryLine}`;
-
-        const { confirmed } = await showPoseChronoConfirmDialog({
-          title,
-          message,
-          confirmText: i18next.t("notifications.deleteConfirm", {
-            defaultValue: "Delete",
-          }),
-          cancelText: i18next.t("notifications.deleteCancel", {
-            defaultValue: "Cancel",
-          }),
-          container: sessionPlansModal,
-        });
-
-        if (confirmed) {
-          await deletePlanWithUndo(index);
-        }
-      } else if (planName && planName.contentEditable === "false") {
-        // Activer l'édition du nom
-        const originalName = planName.textContent;
-        planName.contentEditable = "true";
-        planName.style.cursor = "text";
-        planName.focus();
-
-        // Sélectionner tout le texte
-        const range = document.createRange();
-        range.selectNodeContents(planName);
-        const selection = window.getSelection();
-        selection.removeAllRanges();
-        selection.addRange(range);
-
-        // Fonction pour sauvegarder les modifications
-        const saveName = () => {
-          const newName = planName.textContent.trim();
-          if (newName && newName !== originalName) {
-            const index = parseInt(planName.dataset.index, 10);
-            (async () => {
-              const plans = await loadSessionPlans();
-              if (plans[index]) {
-                plans[index].name = newName;
-                await saveSessionPlans(plans);
-              }
-            })().catch((err) => {
-              console.error("[Plans] rename error:", err);
-            });
-          } else if (!newName) {
-            planName.textContent = originalName;
-          }
-          planName.contentEditable = "false";
-          planName.style.cursor = "pointer";
-        };
-
-        // Sauvegarder avec Entrée
-        const handleKeydown = (e) => {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            saveName();
-            planName.removeEventListener("keydown", handleKeydown);
-            planName.removeEventListener("blur", handleBlur);
-          } else if (e.key === "Escape") {
-            planName.textContent = originalName;
-            planName.contentEditable = "false";
-            planName.style.cursor = "pointer";
-            planName.removeEventListener("keydown", handleKeydown);
-            planName.removeEventListener("blur", handleBlur);
-          }
-        };
-
-        // Sauvegarder à la perte de focus
-        const handleBlur = () => {
+      // Sauvegarder avec Entrée
+      const handleKeydown = (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
           saveName();
           planName.removeEventListener("keydown", handleKeydown);
           planName.removeEventListener("blur", handleBlur);
-        };
+        } else if (e.key === "Escape") {
+          planName.textContent = originalName;
+          planName.contentEditable = "false";
+          planName.style.cursor = "pointer";
+          planName.removeEventListener("keydown", handleKeydown);
+          planName.removeEventListener("blur", handleBlur);
+        }
+      };
 
-        planName.addEventListener("keydown", handleKeydown);
-        planName.addEventListener("blur", handleBlur);
-      }
+      // Sauvegarder à la perte de focus
+      const handleBlur = () => {
+        saveName();
+        planName.removeEventListener("keydown", handleKeydown);
+        planName.removeEventListener("blur", handleBlur);
+      };
+
+      planName.addEventListener("keydown", handleKeydown);
+      planName.addEventListener("blur", handleBlur);
+    }
   };
 
   registerSessionPlansCrudBindings({
@@ -6989,7 +15121,7 @@ function setupEventListeners() {
 
   async function handleRepairStorageClick() {
     const { confirmed, selections } = await showStorageRepairDialog({
-      container: settingsScreen || document.body,
+      container: document.body,
       message: i18next.t("storage.repairMessageDetailed", {
         defaultValue:
           "Choose what to reset. Selected data will be deleted locally and cannot be recovered automatically.",
@@ -7164,12 +15296,14 @@ function setupEventListeners() {
     if (!memoryTotalDuration || !memoryTotalDurationValue) return;
 
     if (!SESSION_CONTROLS_BINDINGS_UTILS?.resolveMemoryTotalDurationDisplay) {
-      logMissingShared("SESSION_CONTROLS_BINDINGS_UTILS.resolveMemoryTotalDurationDisplay");
+      logMissingShared(
+        "SESSION_CONTROLS_BINDINGS_UTILS.resolveMemoryTotalDurationDisplay",
+      );
       memoryTotalDuration.style.display = "none";
       return;
     }
-    const viewModel = SESSION_CONTROLS_BINDINGS_UTILS.resolveMemoryTotalDurationDisplay(
-      {
+    const viewModel =
+      SESSION_CONTROLS_BINDINGS_UTILS.resolveMemoryTotalDurationDisplay({
         state,
         calculateTotalSeconds: (posesCount, drawingTime, displayTime) =>
           calculateMemoryTotalDurationSeconds(
@@ -7177,8 +15311,7 @@ function setupEventListeners() {
             drawingTime,
             displayTime,
           ),
-      },
-    );
+      });
     if (!viewModel.visible) {
       memoryTotalDuration.style.display = "none";
       return;
@@ -7253,6 +15386,19 @@ function setupEventListeners() {
 
   // === BOUTONS D'ACTION ===
   registerActionButtonsBindings();
+
+  // === PERSONNALISATION SIDEBAR ===
+  const sidebarEl = document.querySelector(".sidebar");
+  if (sidebarEl) {
+    sidebarEl.addEventListener("contextmenu", (e) => {
+      // Ne pas intercepter le clic droit sur un bouton (laisse les handlers existants gérer)
+      if (e.target.closest("button")) return;
+      // Le timer a son propre menu contextuel (reset chrono).
+      if (e.target.closest("#timer-display")) return;
+      e.preventDefault();
+      showSidebarContextMenu(e.clientX, e.clientY);
+    });
+  }
 
   // === RACCOURCIS CLAVIER ===
   registerCoreKeyboardListeners();
@@ -7384,7 +15530,9 @@ function registerSessionPlansModalBindings(input = {}) {
   const sessionPlansModal = input.sessionPlansModal || null;
   const planNameInput = input.planNameInput || null;
   const displaySavedPlans =
-    typeof input.displaySavedPlans === "function" ? input.displaySavedPlans : null;
+    typeof input.displaySavedPlans === "function"
+      ? input.displaySavedPlans
+      : null;
 
   const openPlansModal = async () => {
     if (!sessionPlansModal) return;
@@ -7442,12 +15590,16 @@ function registerGlobalSettingsControlBindings(input = {}) {
   const globalSettingsModal = input.globalSettingsModal || null;
   const closeGlobalSettingsModalBtn = input.closeGlobalSettingsModalBtn || null;
   const globalSettingsToggleGridBtn = input.globalSettingsToggleGridBtn || null;
-  const globalSettingsToggleThemeBtn = input.globalSettingsToggleThemeBtn || null;
-  const globalSettingsOpenHotkeysBtn = input.globalSettingsOpenHotkeysBtn || null;
+  const globalSettingsToggleThemeBtn =
+    input.globalSettingsToggleThemeBtn || null;
+  const globalSettingsOpenHotkeysBtn =
+    input.globalSettingsOpenHotkeysBtn || null;
   const globalSettingsTitlebarAlwaysVisibleInput =
     input.globalSettingsTitlebarAlwaysVisibleInput || null;
-  const globalSettingsLanguageSelect = input.globalSettingsLanguageSelect || null;
-  const globalSettingsDefaultModeGroup = input.globalSettingsDefaultModeGroup || null;
+  const globalSettingsLanguageSelect =
+    input.globalSettingsLanguageSelect || null;
+  const globalSettingsDefaultModeGroup =
+    input.globalSettingsDefaultModeGroup || null;
 
   if (!SESSION_CONTROLS_BINDINGS_UTILS?.bindGlobalSettingsControls) {
     console.error("[Bindings] global-settings-controls utils unavailable.");
@@ -7487,7 +15639,11 @@ function registerGlobalSettingsControlBindings(input = {}) {
       updateGlobalSettingsModalState();
     },
     onLanguageSelected: (language) => {
-      void applyPreferredLanguage(language, { persist: true }).catch((error) => {
+      localStorage.setItem('posechrono-reopen-global-settings-modal', 'true');
+      void applyPreferredLanguage(language, {
+        persist: true,
+        reloadPage: true,
+      }).catch((error) => {
         console.error("[i18n] Language switch failed:", error);
       });
     },
@@ -7507,9 +15663,12 @@ function registerGlobalSettingsControlBindings(input = {}) {
 
 function registerGlobalSettingsActionButtonsBindings(input = {}) {
   const globalResetSettingsBtn = input.globalResetSettingsBtn || null;
-  const globalSettingsExportPrefsBtn = input.globalSettingsExportPrefsBtn || null;
-  const globalSettingsImportPrefsBtn = input.globalSettingsImportPrefsBtn || null;
-  const globalSettingsRepairStorageBtn = input.globalSettingsRepairStorageBtn || null;
+  const globalSettingsExportPrefsBtn =
+    input.globalSettingsExportPrefsBtn || null;
+  const globalSettingsImportPrefsBtn =
+    input.globalSettingsImportPrefsBtn || null;
+  const globalSettingsRepairStorageBtn =
+    input.globalSettingsRepairStorageBtn || null;
   const onResetSettings =
     typeof input.onResetSettings === "function" ? input.onResetSettings : null;
   const onExportPreferences =
@@ -7570,19 +15729,17 @@ function registerSessionEntryAndModeBindings() {
       settingsScreen.classList.remove("hidden");
     },
     onSwitchMode: (mode) => switchMode(mode),
-    onAddCustomStep: () => {
-      if (customAddBtn) customAddBtn.click();
-    },
+    onAddCustomStep: () => addStepToQueue(false),
     onAddCustomPause: () => addStepToQueue(true),
   });
 }
 
 function registerClassicAndMemoryTypeBindings(input = {}) {
-  const durationBtns = input.durationBtns || null;
+  const durationBtns = Array.from(input.durationBtns || []);
   const hoursInput = input.hoursInput || null;
   const minutesInput = input.minutesInput || null;
   const secondsInput = input.secondsInput || null;
-  const memoryTypeBtns = input.memoryTypeBtns || null;
+  const memoryTypeBtns = Array.from(input.memoryTypeBtns || []);
   const memoryFlashSettings = input.memoryFlashSettings || null;
   const memoryProgressiveSettings = input.memoryProgressiveSettings || null;
 
@@ -7615,8 +15772,8 @@ function registerClassicAndMemoryTypeBindings(input = {}) {
 }
 
 function registerMemoryDurationControlsBindings(input = {}) {
-  const memoryFlashBtns = input.memoryFlashBtns || null;
-  const memoryProgressiveBtns = input.memoryProgressiveBtns || null;
+  const memoryFlashBtns = Array.from(input.memoryFlashBtns || []);
+  const memoryProgressiveBtns = Array.from(input.memoryProgressiveBtns || []);
   const memoryProgressiveMinutes = input.memoryProgressiveMinutes || null;
   const memoryProgressiveSeconds = input.memoryProgressiveSeconds || null;
   const memoryProgressiveCustomTime = input.memoryProgressiveCustomTime || null;
@@ -7647,7 +15804,8 @@ function registerMemoryDurationControlsBindings(input = {}) {
     getDurationFromButton: (btn) => getDurationFromButton(btn),
     onToggleDurationButtonsForValue: (buttons, value) =>
       toggleDurationButtonsForValue(buttons, value),
-    onClearDurationButtonsActive: (buttons) => clearDurationButtonsActive(buttons),
+    onClearDurationButtonsActive: (buttons) =>
+      clearDurationButtonsActive(buttons),
     onReadMinutesSecondsInputValues: (minutesEl, secondsEl) =>
       readMinutesSecondsInputValues(minutesEl, secondsEl),
     onUpdateMemoryTotalDuration: () => {
@@ -7691,7 +15849,8 @@ function registerMemoryDrawingTimeBindings(input = {}) {
 function registerMemoryPoseSlidersBindings(input = {}) {
   const memoryPosesSlider = input.memoryPosesSlider || null;
   const memoryPosesValue = input.memoryPosesValue || null;
-  const memoryProgressivePosesSlider = input.memoryProgressivePosesSlider || null;
+  const memoryProgressivePosesSlider =
+    input.memoryProgressivePosesSlider || null;
   const memoryProgressivePosesValue = input.memoryProgressivePosesValue || null;
   const updateMemoryTotalDuration =
     typeof input.updateMemoryTotalDuration === "function"
@@ -7733,13 +15892,14 @@ function registerCustomHmsTimerInputBindings(input = {}) {
   SESSION_CONTROLS_BINDINGS_UTILS.bindCustomHmsTimerInputs({
     inputs: hmsInputs,
     state,
-    domDurationButtons: DOMCache.durationBtns,
-    domInputGroups: DOMCache.inputGroups,
+    domDurationButtons: Array.from(DOMCache.durationBtns || []),
+    domInputGroups: Array.from(DOMCache.inputGroups || []),
     debounceMs: 50,
     createDebounce: (fn, ms) => PerformanceUtils.debounce(fn, ms),
     onReadHmsInputValues: () =>
       readHmsInputValues(hoursInput, minutesInput, secondsInput),
-    onClearDurationButtonsActive: (buttons) => clearDurationButtonsActive(buttons),
+    onClearDurationButtonsActive: (buttons) =>
+      clearDurationButtonsActive(buttons),
     onUpdateTimerDisplay: updateTimerDisplay,
   });
 }
@@ -7843,11 +16003,49 @@ function registerPrimarySessionControlsBindings() {
     },
     onShowBlurMenu: (x, y) => showBlurMenu(x, y),
     onToggleAnnotate: () => {
+      if (state.isVideoFile || state.isGifFile) return;
       void toggleDrawingModeSafely();
     },
     onToggleProgressiveBlur: toggleProgressiveBlur,
     onShowProgressiveBlurMenu: (x, y) => showProgressiveBlurMenu(x, y),
   });
+
+  if (gridSidebarBtn) {
+    gridSidebarBtn.addEventListener("click", () => {
+      const nextGridEnabled = !state.gridEnabled;
+      state.gridEnabled = nextGridEnabled;
+      if (
+        nextGridEnabled &&
+        state.gridMode === "none" &&
+        state.gridGuides.length === 0
+      ) {
+        // Éviter un "toggle vide": ajouter un repère vertical par défaut.
+        state.gridGuides.push({ type: "vertical", position: 50 });
+      }
+      updateGridOverlay();
+    });
+    gridSidebarBtn.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      showGridConfig();
+    });
+  }
+  if (silhouetteSidebarBtn) {
+    silhouetteSidebarBtn.addEventListener("click", () => {
+      state.silhouetteEnabled = !state.silhouetteEnabled;
+      applyImageFilters();
+      if (window.updateZoomContent && window.zoomFilters) {
+        window.zoomFilters.silhouette = state.silhouetteEnabled;
+        window.updateZoomContent();
+      }
+    });
+    silhouetteSidebarBtn.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      closeAllContextMenus();
+      showSilhouetteContextMenu(e.clientX, e.clientY);
+    });
+  }
 }
 
 function registerVideoControlsBindings() {
@@ -7909,13 +16107,11 @@ function registerTimerAndProgressBindings() {
   SESSION_CONTROLS_BINDINGS_UTILS.bindTimerControlsAndProgress({
     documentRef: document,
     soundBtn,
-    toggleTimerBtn,
     timerDisplay,
     progressBar,
     pauseCentralBlock,
     state,
     onToggleSound: toggleSound,
-    onToggleTimer: toggleTimer,
     onShowProgressBarContextMenu: (x, y) => showProgressBarContextMenu(x, y),
     onShowTimerContextMenu: (x, y) => showTimerContextMenu(x, y),
     onShowPauseCircleContextMenu: (x, y) => showPauseCircleContextMenu(x, y),
@@ -7944,7 +16140,9 @@ function registerMemoryOverlayButtonsBindings(input = {}) {
 }
 
 function registerSessionSurfaceInteractionsBindings() {
-  if (!SESSION_SURFACE_INTERACTIONS_BINDINGS_UTILS?.bindSessionSurfaceInteractions) {
+  if (
+    !SESSION_SURFACE_INTERACTIONS_BINDINGS_UTILS?.bindSessionSurfaceInteractions
+  ) {
     console.error("[Bindings] session-surface-interactions utils unavailable.");
     return;
   }
@@ -8071,7 +16269,9 @@ function handleSettingsScreenKeyboardShortcuts(e) {
   try {
     SETTINGS_SHORTCUTS_UTILS.handleSettingsScreenKeyboardShortcuts({
       event: e,
+      documentRef: document,
       settingsScreen,
+      reviewScreen,
       startBtn,
       getTopOpenModal:
         typeof getTopOpenModal === "function" ? getTopOpenModal : null,
@@ -8079,6 +16279,11 @@ function handleSettingsScreenKeyboardShortcuts(e) {
         if (startBtn && !startBtn.disabled) {
           startBtn.click();
         }
+      },
+      onReturnHome: () => {
+        if (reviewScreen) reviewScreen.classList.add("hidden");
+        document.body.classList.remove("review-active");
+        if (settingsScreen) settingsScreen.classList.remove("hidden");
       },
     });
   } catch (error) {
@@ -8152,7 +16357,8 @@ async function loadImages() {
     if (!startBtn && startBtnEl) startBtn = startBtnEl;
 
     const resolveSelectionStartMs =
-      typeof performance !== "undefined" && typeof performance.now === "function"
+      typeof performance !== "undefined" &&
+      typeof performance.now === "function"
         ? performance.now()
         : Date.now();
     const selection = await resolveSessionMediaSelection();
@@ -8185,13 +16391,23 @@ async function loadImages() {
       state.images = shuffleSessionMediaItems(state.images);
     }
 
+    const appliedPendingPackOrder = applyPendingSyncSessionPackMediaOrder();
+    if (appliedPendingPackOrder) {
+      showSyncSessionToast({
+        type: "success",
+        message: getI18nText(
+          "sync.sessionPackImportedPendingApplied",
+          "Session pack media order applied.",
+        ),
+        duration: 1900,
+      });
+    }
+
     if (state.images.length === 0) {
       if (folderInfoEl) {
         folderInfoEl.innerHTML = `<span class="warning-text">${i18next.t("settings.noImagesFound")}</span>`;
       }
-      if (startBtnEl) {
-        startBtnEl.disabled = true;
-      }
+      updateStartButtonState();
     } else {
       // Compter séparément images et vidéos
       const mediaCounts = countSessionMediaTypes(state.images);
@@ -8206,15 +16422,13 @@ async function loadImages() {
 
       if (folderInfoEl) {
         folderInfoEl.innerHTML = `
-      <div style="display: flex; align-items: baseline; justify-content: left; gap: 8px;">
+      <div class="folder-info-count">
         <span class="source-message-text">${sourceMessage}:</span>
         <span class="image-count-text">${countMessage}</span>
       </div>
     `;
       }
-      if (startBtnEl) {
-        startBtnEl.disabled = false;
-      }
+      updateStartButtonState();
 
       // Mettre à jour les sliders du mode mémoire avec le nombre d'images
       const memoryPosesSlider = document.getElementById("memory-poses-slider");
@@ -8320,6 +16534,25 @@ async function loadImages() {
         updateSliderGradient(memoryProgressivePosesSlider);
       }
     }
+    // ---- Widget multi-dossiers desktop ----
+    if (isDesktopStandaloneRuntime()) {
+      const folders = await platformFolderGetSelected();
+      const perFolderStats = {};
+      for (const img of state.images) {
+        if (!img.folderId) continue;
+        if (!perFolderStats[img.folderId])
+          perFolderStats[img.folderId] = { images: 0, videos: 0 };
+        if (isVideoFile(img)) perFolderStats[img.folderId].videos++;
+        else perFolderStats[img.folderId].images++;
+      }
+      renderDesktopFolderSources(folders, perFolderStats);
+    }
+
+    if (isSyncSessionHostActive()) {
+      scheduleSyncRuntimeState("media-loaded", {
+        includeMediaOrder: true,
+      });
+    }
     bootTrace(`loadImages#${runId}.end`, {
       items: state.images.length,
       durationMs: Math.round(
@@ -8341,6 +16574,9 @@ async function loadImages() {
 
 // LOGIQUE DE SESSION
 function startSession() {
+  if (isSyncSessionParticipantActive() && !syncRuntimeApplyInProgress) {
+    return;
+  }
   if (state.images.length === 0) return;
 
   state.imagesSeen = [];
@@ -8349,17 +16585,18 @@ function startSession() {
   state.totalSessionTime = 0;
   state.currentPoseTime = 0;
   state.sessionStartTime = Date.now();
+  state.sessionWasOnline = isSyncSessionOnlineForHistory(syncSessionServiceState);
 
   // Réinitialiser les états spécifiques au mode mémoire
   state.memoryHidden = false;
   hideMemoryOverlay();
 
   if (state.sessionMode === "classique") {
-    const { hours: h, minutes: m, seconds: s } = readHmsInputValues(
-      hoursInput,
-      minutesInput,
-      secondsInput,
-    );
+    const {
+      hours: h,
+      minutes: m,
+      seconds: s,
+    } = readHmsInputValues(hoursInput, minutesInput, secondsInput);
     const activeBtn = document.querySelector(
       "#mode-classique-settings .duration-btn.active",
     );
@@ -8420,15 +16657,23 @@ function startSession() {
   if (blurBtn)
     blurBtn.style.display = isRelax || isMemoryMode ? "none" : "flex";
   if (soundBtn) soundBtn.style.display = isRelax ? "none" : "flex";
-  if (toggleTimerBtn) toggleTimerBtn.style.display = isRelax ? "none" : "flex";
   if (playPauseBtn) playPauseBtn.style.display = "flex";
 
-  if (progressBar) progressBar.style.display = isRelax ? "none" : "block";
+  if (progressBar)
+    progressBar.style.display = isRelax
+      ? "none"
+      : UIPreferences.get("showProgressBar", true)
+        ? "block"
+        : "none";
 
   SoundManager.unlockAudioContext();
 
   updateDisplay();
   startTimer();
+  scheduleSyncRuntimeState("session-started", {
+    includeMediaOrder: true,
+    force: true,
+  });
 }
 
 function startTimer() {
@@ -8453,12 +16698,16 @@ function startTimer() {
       state.currentPoseTime++;
 
       updateRelaxDisplay(); // Mise à jour à chaque seconde
+      maybeScheduleSyncRuntimeHeartbeat();
     }, 1000);
     return;
   }
 
   // --- LOGIQUE MODE CLASSIQUE / CUSTOM / MEMORY ---
-  if (progressBar) progressBar.style.display = "block";
+  if (progressBar)
+    progressBar.style.display = UIPreferences.get("showProgressBar", true)
+      ? "block"
+      : "none";
   state.timerInterval = setInterval(() => {
     if (!state.isPlaying) return;
     state.timeRemaining--;
@@ -8516,7 +16765,7 @@ function startTimer() {
         stopTimer();
         // Attendre 1 seconde puis passer à l'image suivante
         setTimeout(() => {
-          nextImage();
+          nextImage({ sessionSource: "auto" });
         }, 1000);
         return;
       }
@@ -8528,6 +16777,7 @@ function startTimer() {
         selectedDuration: state.selectedDuration,
         timeRemaining: state.timeRemaining,
         isCustomPause,
+        thresholdOverride: UIPreferences.get(PREF_KEY_TICK_SOUND_THRESHOLD, 15),
       });
       if (tickDecision.playTick) {
         SoundManager.play("tick", { volume: tickDecision.volume });
@@ -8546,6 +16796,7 @@ function startTimer() {
 
     updateTimerDisplay();
     applyImageFilters(); // Mettre à jour le flou progressif chaque seconde
+    maybeScheduleSyncRuntimeHeartbeat();
 
     if (
       shouldAutoAdvanceOnTimerEndTick({
@@ -8555,7 +16806,9 @@ function startTimer() {
       })
     ) {
       stopTimer();
-      setTimeout(nextImage, 100);
+      setTimeout(() => {
+        nextImage({ sessionSource: "auto" });
+      }, 100);
     }
   }, 1000);
 }
@@ -8577,6 +16830,7 @@ function stopTimer() {
     clearInterval(state.timerInterval);
     state.timerInterval = null;
   }
+  scheduleSyncRuntimeState("timer-stopped");
 }
 
 function ensureSeenMetaForImage(image) {
@@ -8634,7 +16888,7 @@ function isReviewImageAnnotated(image) {
     }
   } catch (_) {}
 
-  const imageSrc = `file:///${image.filePath}`;
+  const imageSrc = getRuntimeMediaSourceFromItem(image);
   try {
     if (
       typeof drawingStateCache !== "undefined" &&
@@ -8669,7 +16923,16 @@ function ensureReviewDurationsVisibilityState() {
   }
 }
 
-function nextImage() {
+function nextImage(options = null) {
+  if (isSyncSessionParticipantActive() && !syncRuntimeApplyInProgress) {
+    return;
+  }
+  const sessionSource =
+    options &&
+    typeof options === "object" &&
+    String(options.sessionSource || "").trim() === "auto"
+      ? "auto"
+      : "manual";
   // Fermer le mode dessin overlay si actif
   if (typeof isDrawingModeActive !== "undefined" && isDrawingModeActive) {
     if (typeof closeDrawingMode === "function") {
@@ -8727,6 +16990,10 @@ function nextImage() {
       infoOverlay.remove();
       toggleImageInfo();
     }
+    scheduleSyncRuntimeState(
+      sessionSource === "manual" ? "image-next-manual" : "image-next-auto",
+      { force: true },
+    );
     return;
   }
 
@@ -8781,9 +17048,16 @@ function nextImage() {
     infoOverlay.remove();
     toggleImageInfo();
   }
+  scheduleSyncRuntimeState(
+    sessionSource === "manual" ? "image-next-manual" : "image-next-auto",
+    { force: true },
+  );
 }
 
 function nextPoseGroup() {
+  if (isSyncSessionParticipantActive() && !syncRuntimeApplyInProgress) {
+    return;
+  }
   // Passer au prochain groupe de poses (étape de type "pose")
   if (state.sessionMode !== "custom") return;
 
@@ -8812,10 +17086,14 @@ function nextPoseGroup() {
 
     updateDisplay();
     startTimer();
+    scheduleSyncRuntimeState("custom-group-next", { force: true });
   }
 }
 
 function previousPoseGroup() {
+  if (isSyncSessionParticipantActive() && !syncRuntimeApplyInProgress) {
+    return;
+  }
   // Revenir au groupe de poses précédent (étape de type "pose")
   if (state.sessionMode !== "custom") return;
 
@@ -8845,6 +17123,7 @@ function previousPoseGroup() {
 
     updateDisplay();
     startTimer();
+    scheduleSyncRuntimeState("custom-group-prev", { force: true });
   }
 }
 
@@ -8981,6 +17260,9 @@ function toggleGrayscale() {
 }
 
 function previousImage() {
+  if (isSyncSessionParticipantActive() && !syncRuntimeApplyInProgress) {
+    return;
+  }
   // Fermer le mode dessin overlay si actif
   if (typeof isDrawingModeActive !== "undefined" && isDrawingModeActive) {
     if (typeof closeDrawingMode === "function") {
@@ -9013,6 +17295,7 @@ function previousImage() {
     infoOverlay.remove();
     toggleImageInfo();
   }
+  scheduleSyncRuntimeState("image-prev-manual", { force: true });
 }
 
 function resetTransforms() {
@@ -9031,12 +17314,8 @@ function resetTransforms() {
 }
 
 function updateImageTransform() {
-  if (currentImage) {
-    currentImage.style.transform = `scaleX(${
-      state.flipHorizontal ? -1 : 1
-    }) scaleY(${state.flipVertical ? -1 : 1})`;
-    currentImage.style.filter = state.grayscale ? "grayscale(100%)" : "none";
-  }
+  // applyImageFilters couvre déjà les transforms ET tous les filtres (grayscale, blur, silhouette)
+  applyImageFilters();
 }
 
 // ================================================================
@@ -9376,6 +17655,22 @@ function seekVideo(e) {
   updateVideoTimeDisplay();
 }
 
+function updateAnnotateButtonAvailability() {
+  if (!annotateBtn) return;
+  const disabled = !!state.isVideoFile || !!state.isGifFile;
+  annotateBtn.classList.toggle("disabled", disabled);
+  annotateBtn.setAttribute("aria-disabled", disabled ? "true" : "false");
+
+  if (
+    disabled &&
+    typeof isDrawingModeActive !== "undefined" &&
+    isDrawingModeActive &&
+    typeof closeDrawingMode === "function"
+  ) {
+    closeDrawingMode();
+  }
+}
+
 /**
  * Gère l'affichage du média (image ou vidéo)
  * @param {Object} media - Objet média depuis state.images
@@ -9383,7 +17678,23 @@ function seekVideo(e) {
  */
 function updateMediaElement(media, shouldAnimateFlip = false) {
   const isVideo = isVideoFile(media);
+  const isGif = !isVideo && isGifFile(media);
   state.isVideoFile = isVideo;
+  state.isGifFile = isGif;
+
+  const abortAllMissing = () => {
+    state.consecutiveSkipCount = 0;
+    stopTimer();
+    if (drawingScreen) drawingScreen.classList.add("hidden");
+    if (reviewScreen) reviewScreen.classList.add("hidden");
+    if (settingsScreen) settingsScreen.classList.remove("hidden");
+    showPoseChronoToast({
+      type: "error",
+      message: i18next.t("settings.allMediaMissing"),
+      duration: 4000,
+    });
+  };
+  updateAnnotateButtonAvailability();
 
   if (isVideo) {
     // === AFFICHAGE VIDÉO ===
@@ -9391,13 +17702,14 @@ function updateMediaElement(media, shouldAnimateFlip = false) {
     currentVideo.style.display = "block";
 
     // Nettoyer et charger la vidéo
-    currentVideo.src = `file:///${media.filePath}`;
+    currentVideo.src = getRuntimeMediaSourceFromItem(media);
     currentVideo.playbackRate = state.videoPlaybackRate;
     currentVideo.loop = state.videoLoop;
     currentVideo.muted = true; // Toujours muet (pas de son nécessaire)
 
     // Événements vidéo
     currentVideo.onloadedmetadata = () => {
+      state.consecutiveSkipCount = 0;
       applyImageFilters();
       setTimeout(() => updateGridOverlay(), 100);
       updateVideoTimeDisplay();
@@ -9418,7 +17730,13 @@ function updateMediaElement(media, shouldAnimateFlip = false) {
     };
 
     currentVideo.onerror = () => {
-      console.error("Erreur de chargement vidéo:", media.filePath);
+      console.warn("[Plugin] Vidéo manquante/corrompue, passage à la suivante:", media.filePath);
+      state.consecutiveSkipCount = (state.consecutiveSkipCount || 0) + 1;
+      if (state.consecutiveSkipCount < state.images.length) {
+        nextImage({ sessionSource: "auto" });
+      } else {
+        abortAllMissing();
+      }
     };
 
     // Synchroniser lecture avec session si en cours
@@ -9455,7 +17773,7 @@ function updateMediaElement(media, shouldAnimateFlip = false) {
     currentImage.classList.remove("flip-animation");
 
     // Charger l'image
-    currentImage.src = `file:///${media.filePath}`;
+    currentImage.src = getRuntimeMediaSourceFromItem(media);
 
     // Appliquer les filtres une fois que l'image est chargée
     const applyFiltersOnLoad = () => {
@@ -9472,11 +17790,23 @@ function updateMediaElement(media, shouldAnimateFlip = false) {
       }
     };
 
+    currentImage.onerror = () => {
+      console.warn("[Plugin] Image/GIF manquant(e)/corrompu(e), passage à la suivante:", media.filePath);
+      state.consecutiveSkipCount = (state.consecutiveSkipCount || 0) + 1;
+      if (state.consecutiveSkipCount < state.images.length) {
+        nextImage({ sessionSource: "auto" });
+      } else {
+        abortAllMissing();
+      }
+    };
+
     if (currentImage.complete) {
+      state.consecutiveSkipCount = 0;
       applyFiltersOnLoad();
       setTimeout(() => updateGridOverlay(), 100);
     } else {
       currentImage.onload = () => {
+        state.consecutiveSkipCount = 0;
         applyFiltersOnLoad();
         setTimeout(() => updateGridOverlay(), 100);
       };
@@ -9493,7 +17823,6 @@ function updateDisplay(shouldAnimateFlip = false) {
     state.customQueue[state.currentStepIndex]?.type === "pause";
 
   const buttonsToDisable = [
-    toggleTimerBtn,
     soundBtn,
     flipHorizontalBtn,
     flipVerticalBtn,
@@ -9624,8 +17953,45 @@ function updateDisplay(shouldAnimateFlip = false) {
   }
 
   updateTimerDisplay();
+  applyGuestRestrictions();
   updateImageTransform();
   applyImageFilters();
+}
+
+function applyGuestRestrictions() {
+  const allBtns = [stopBtn, settingsBtn, deleteBtn, prevBtn, nextBtn, playPauseBtn, revealBtn];
+  
+  const resetStyles = (el) => {
+    if (!el) return;
+    el.style.removeProperty("pointer-events");
+    el.style.removeProperty("opacity");
+    el.style.removeProperty("cursor");
+  };
+
+  const applyStyles = (el) => {
+    if (!el) return;
+    el.style.setProperty("pointer-events", "none", "important");
+    el.style.setProperty("opacity", "0.3", "important");
+    el.style.setProperty("cursor", "not-allowed", "important");
+  };
+
+  if (!isSyncSessionParticipantActive()) {
+    allBtns.forEach(resetStyles);
+    return;
+  }
+
+  const controlMode = syncSessionServiceState?.controlMode || "host-only";
+  let toDisable = [];
+
+  if (controlMode === "host-only") {
+    toDisable = [stopBtn, settingsBtn, deleteBtn, prevBtn, nextBtn, playPauseBtn, revealBtn];
+  } else if (controlMode === "shared-pause") {
+    // Keep play/pause enabled
+    toDisable = [stopBtn, settingsBtn, deleteBtn, prevBtn, nextBtn, revealBtn];
+  }
+
+  allBtns.forEach(resetStyles);
+  toDisable.forEach(applyStyles);
 }
 
 // ================================================================
@@ -9758,18 +18124,24 @@ function showImageContextMenu(x, y) {
     applyImageFilters();
   };
 
+  const isGuest = isSyncSessionParticipantActive();
+  const guestControlMode = isGuest ? (syncSessionServiceState?.controlMode || "host-only") : null;
+  const isHostOnlyGuest = isGuest && guestControlMode === "host-only";
+
   const menuItems = [
     {
       text: state.isPlaying ? "Pause" : "Play",
       onClick: togglePlayPause,
       icon: state.isPlaying ? ICONS.PAUSE : ICONS.PLAY,
       shortcut: i18next.t("controls.spaceKey"),
+      disabled: isHostOnlyGuest,
     },
     {
       text: i18next.t("drawing.nextImage"),
       onClick: nextImage,
       icon: ICONS.NEXT,
       shortcut: "→",
+      disabled: isGuest,
     },
     {
       text: i18next.t("drawing.previousImage"),
@@ -9777,6 +18149,7 @@ function showImageContextMenu(x, y) {
       icon: ICONS.PREV,
       shortcut: "←",
       visible: state.currentIndex > 0,
+      disabled: isGuest,
     },
 
     "separator",
@@ -9788,7 +18161,7 @@ function showImageContextMenu(x, y) {
       },
       icon: ICON_DRAW,
       shortcut: CONFIG.HOTKEYS.DRAWING_TOOL_PENCIL.toUpperCase(),
-      visible: !state.isVideoFile,
+      visible: !state.isVideoFile && !state.isGifFile,
     },
 
     "separator",
@@ -9861,6 +18234,7 @@ function showImageContextMenu(x, y) {
       text: i18next.t(getRevealActionI18nKey()),
       onClick: revealImage,
       icon: ICONS.REVEAL,
+      disabled: isHostOnlyGuest,
     },
   ];
 
@@ -9891,7 +18265,11 @@ function showRevealMenu(x, y) {
   };
 
   menu.appendChild(
-    createMenuItem(i18next.t(getRevealActionI18nKey()), revealImage, ICONS.REVEAL),
+    createMenuItem(
+      i18next.t(getRevealActionI18nKey()),
+      revealImage,
+      ICONS.REVEAL,
+    ),
   );
 
   adjustMenuPosition(menu, x, y, true);
@@ -9958,6 +18336,633 @@ function showBlurMenu(x, y) {
   );
 
   adjustMenuPosition(menu, x, y, true);
+}
+
+// ================================================================
+// SIDEBAR CUSTOMIZATION
+// ================================================================
+
+/**
+ * Helpers de personnalisation de la sidebar:
+ * ordre des boutons + visibilité.
+ */
+function normalizeSidebarButtonOrder(input) {
+  const order = [];
+  const seen = new Set();
+
+  if (Array.isArray(input)) {
+    input.forEach((entry) => {
+      if (typeof entry !== "string") return;
+      const id = entry.trim();
+      if (!id || seen.has(id) || !SIDEBAR_CONFIGURABLE_BUTTON_IDS.has(id)) {
+        return;
+      }
+      seen.add(id);
+      order.push(id);
+    });
+  }
+
+  SIDEBAR_DEFAULT_BUTTON_ORDER.forEach((id) => {
+    if (seen.has(id)) return;
+    seen.add(id);
+    order.push(id);
+  });
+
+  return order;
+}
+
+function areStringArraysEqual(left, right) {
+  if (!Array.isArray(left) || !Array.isArray(right)) return false;
+  if (left.length !== right.length) return false;
+  for (let i = 0; i < left.length; i += 1) {
+    if (left[i] !== right[i]) return false;
+  }
+  return true;
+}
+
+function getSidebarButtonOrder() {
+  const rawOrder = UIPreferences.getStringArray
+    ? UIPreferences.getStringArray(PREF_KEY_SIDEBAR_BUTTON_ORDER)
+    : [];
+  const normalized = normalizeSidebarButtonOrder(rawOrder);
+
+  if (
+    UIPreferences.setStringArray &&
+    !areStringArraysEqual(rawOrder, normalized)
+  ) {
+    UIPreferences.setStringArray(PREF_KEY_SIDEBAR_BUTTON_ORDER, normalized);
+  }
+
+  return normalized;
+}
+
+function setSidebarButtonOrder(order) {
+  const normalized = normalizeSidebarButtonOrder(order);
+  if (UIPreferences.setStringArray) {
+    UIPreferences.setStringArray(PREF_KEY_SIDEBAR_BUTTON_ORDER, normalized);
+  }
+  return normalized;
+}
+
+function reorderSidebarButtonsInSection(sectionEl, orderedIds, beforeEl = null) {
+  if (!sectionEl || !Array.isArray(orderedIds)) return;
+  orderedIds.forEach((id) => {
+    const button = document.getElementById(id);
+    if (!button) return;
+    if (beforeEl) {
+      sectionEl.insertBefore(button, beforeEl);
+    } else {
+      sectionEl.appendChild(button);
+    }
+  });
+}
+
+function ensureProgressiveBlurSidebarDefaultHidden() {
+  if (
+    !UIPreferences.get ||
+    !UIPreferences.set ||
+    !UIPreferences.getStringArray ||
+    !UIPreferences.setStringArray
+  ) {
+    return;
+  }
+  const alreadyMigrated = !!UIPreferences.get(
+    PREF_KEY_SIDEBAR_PROGRESSIVE_BLUR_HIDDEN_MIGRATED,
+    false,
+  );
+  if (alreadyMigrated) return;
+
+  const hidden = UIPreferences.getStringArray(PREF_KEY_SIDEBAR_HIDDEN_BUTTONS);
+  if (!hidden.includes("progressive-blur-btn")) {
+    UIPreferences.setStringArray(PREF_KEY_SIDEBAR_HIDDEN_BUTTONS, [
+      ...hidden,
+      "progressive-blur-btn",
+    ]);
+  }
+  UIPreferences.set(PREF_KEY_SIDEBAR_PROGRESSIVE_BLUR_HIDDEN_MIGRATED, true);
+}
+
+function ensureProgressiveBlurSidebarDefaultOrder() {
+  if (
+    !UIPreferences.get ||
+    !UIPreferences.set ||
+    !UIPreferences.getStringArray ||
+    !UIPreferences.setStringArray
+  ) {
+    return;
+  }
+  const alreadyMigrated = !!UIPreferences.get(
+    PREF_KEY_SIDEBAR_PROGRESSIVE_BLUR_ORDER_MIGRATED,
+    false,
+  );
+  if (alreadyMigrated) return;
+
+  const currentOrder = normalizeSidebarButtonOrder(
+    UIPreferences.getStringArray(PREF_KEY_SIDEBAR_BUTTON_ORDER),
+  );
+  const withoutProgressive = currentOrder.filter(
+    (id) => id !== "progressive-blur-btn",
+  );
+  const blurIndex = withoutProgressive.indexOf("blur-btn");
+
+  if (blurIndex >= 0) {
+    withoutProgressive.splice(blurIndex + 1, 0, "progressive-blur-btn");
+  } else {
+    withoutProgressive.push("progressive-blur-btn");
+  }
+
+  UIPreferences.setStringArray(
+    PREF_KEY_SIDEBAR_BUTTON_ORDER,
+    normalizeSidebarButtonOrder(withoutProgressive),
+  );
+  UIPreferences.set(PREF_KEY_SIDEBAR_PROGRESSIVE_BLUR_ORDER_MIGRATED, true);
+}
+
+function applySidebarButtonOrder() {
+  const order = getSidebarButtonOrder();
+  const grouped = {
+    standalone: [],
+    filters: [],
+    actions: [],
+    secondary: [],
+  };
+
+  order.forEach((id) => {
+    const cfg = SIDEBAR_CONFIGURABLE_BUTTONS_BY_ID[id];
+    const group = cfg?.group;
+    if (!grouped[group]) return;
+    grouped[group].push(id);
+  });
+
+  const sidebarRoot = document.querySelector(".sidebar");
+  const controlsSection = sidebarRoot?.querySelector(".controls-section") || null;
+  reorderSidebarButtonsInSection(
+    sidebarRoot,
+    grouped.standalone,
+    controlsSection,
+  );
+
+  const transformSection = document.querySelector(".transform-controls");
+  const actionsDivider = document.getElementById("transform-actions-divider");
+  reorderSidebarButtonsInSection(
+    transformSection,
+    grouped.filters,
+    actionsDivider,
+  );
+  if (transformSection && actionsDivider) {
+    const firstActionButton = grouped.actions
+      .map((id) => document.getElementById(id))
+      .find((el) => !!el);
+    if (firstActionButton) {
+      transformSection.insertBefore(actionsDivider, firstActionButton);
+    } else {
+      transformSection.appendChild(actionsDivider);
+    }
+  }
+  reorderSidebarButtonsInSection(transformSection, grouped.actions);
+
+  const secondarySection = document.querySelector(".secondary-controls");
+  reorderSidebarButtonsInSection(secondarySection, grouped.secondary);
+}
+
+function applySidebarVisibility() {
+  ensureProgressiveBlurSidebarDefaultHidden();
+  ensureProgressiveBlurSidebarDefaultOrder();
+  applySidebarButtonOrder();
+
+  const hidden = UIPreferences.getStringArray
+    ? UIPreferences.getStringArray(PREF_KEY_SIDEBAR_HIDDEN_BUTTONS)
+    : [];
+
+  SIDEBAR_CONFIGURABLE_BUTTONS.forEach(({ id }) => {
+    const btn = document.getElementById(id);
+    if (btn) btn.classList.toggle("sb-btn-hidden", hidden.includes(id));
+  });
+
+  // Divider entre groupe "filters" et groupe "actions"
+  const divider = document.getElementById("transform-actions-divider");
+  if (divider) {
+    const filtersGroup = [
+      "flip-horizontal-btn",
+      "flip-vertical-btn",
+      "grayscale-btn",
+      "blur-btn",
+      "progressive-blur-btn",
+      "annotate-btn",
+      "grid-btn",
+      "silhouette-btn",
+    ];
+    const actionsGroup = ["reveal-btn", "delete-btn"];
+    const anyFiltersVisible = filtersGroup.some((id) => !hidden.includes(id));
+    const anyActionsVisible = actionsGroup.some((id) => !hidden.includes(id));
+    divider.classList.toggle(
+      "sb-btn-hidden",
+      !anyFiltersVisible || !anyActionsVisible,
+    );
+  }
+
+  // Section transform-controls: caché si tous ses boutons masquables sont masqués
+  const transformSection = document.querySelector(".transform-controls");
+  if (transformSection) {
+    const transformIds = [
+      "flip-horizontal-btn",
+      "flip-vertical-btn",
+      "grayscale-btn",
+      "blur-btn",
+      "progressive-blur-btn",
+      "annotate-btn",
+      "grid-btn",
+      "silhouette-btn",
+      "reveal-btn",
+      "delete-btn",
+    ];
+    const anyTransformVisible = transformIds.some((id) => !hidden.includes(id));
+    transformSection.classList.toggle("sb-btn-hidden", !anyTransformVisible);
+  }
+
+  // Section secondary-controls: caché si stop ET settings sont masqués
+  const secondarySection = document.querySelector(".secondary-controls");
+  if (secondarySection) {
+    const anySecondaryVisible =
+      !hidden.includes("stop-btn") || !hidden.includes("settings-btn");
+    secondarySection.classList.toggle("sb-btn-hidden", !anySecondaryVisible);
+  }
+}
+
+/**
+ * Affiche un mini menu contextuel pour la sidebar.
+ */
+function showSidebarContextMenu(x, y) {
+  closeAllContextMenus();
+
+  const menu = document.createElement("div");
+  menu.id = "sidebar-context-menu";
+  menu.className = "context-menu";
+
+  const item = document.createElement("div");
+  item.className = "context-menu-item";
+  item.innerHTML = `<span class="context-menu-item-icon">${ICONS.SIDEBAR}</span><span class="context-menu-text">${i18next.t("sidebar.config.openMenu", { defaultValue: "Régler la barre latérale" })}</span>`;
+  item.addEventListener("click", (e) => {
+    e.stopPropagation();
+    menu.remove();
+    showSidebarConfigModal();
+  });
+  menu.appendChild(item);
+
+  adjustMenuPosition(menu, x, y);
+}
+
+/**
+ * Affiche le modal de configuration de la barre latérale (masquer/afficher boutons).
+ */
+function showSidebarConfigModal() {
+  closeAllContextMenus();
+
+  const existing = document.getElementById("sidebar-config-popup");
+  if (existing) {
+    existing.remove();
+    return;
+  }
+
+  ensureProgressiveBlurSidebarDefaultHidden();
+
+  const hidden = UIPreferences.getStringArray
+    ? UIPreferences.getStringArray(PREF_KEY_SIDEBAR_HIDDEN_BUTTONS)
+    : [];
+
+  const t = (key, fb) => i18next.t(key, { defaultValue: fb });
+
+  const groups = [
+    {
+      key: "standalone",
+      label: null,
+      ids: ["sound-btn"],
+    },
+    {
+      key: "filters",
+      label: t("sidebar.config.groupFilters", "Filtres"),
+      ids: [
+        "flip-horizontal-btn",
+        "flip-vertical-btn",
+        "grayscale-btn",
+        "blur-btn",
+        "progressive-blur-btn",
+        "annotate-btn",
+        "grid-btn",
+        "silhouette-btn",
+      ],
+    },
+    {
+      key: "actions",
+      label: t("sidebar.config.groupActions", "Action sur le fichier"),
+      ids: ["reveal-btn", "delete-btn"],
+    },
+    {
+      key: "secondary",
+      label: t("sidebar.config.groupSecondary", "Session"),
+      ids: ["stop-btn", "settings-btn"],
+    },
+  ];
+
+  const DEFAULT_HIDDEN = [
+    "grid-btn",
+    "silhouette-btn",
+    "progressive-blur-btn",
+  ];
+  const getHidden = () =>
+    UIPreferences.getStringArray
+      ? UIPreferences.getStringArray(PREF_KEY_SIDEBAR_HIDDEN_BUTTONS)
+      : [];
+
+  const SVG_EYE_OPEN = `<svg xmlns="http://www.w3.org/2000/svg" height="18px" viewBox="0 -960 960 960" width="18px" fill="currentColor"><path d="M480-320q75 0 127.5-52.5T660-500q0-75-52.5-127.5T480-680q-75 0-127.5 52.5T300-500q0 75 52.5 127.5T480-320Zm0-72q-45 0-76.5-31.5T372-500q0-45 31.5-76.5T480-608q45 0 76.5 31.5T588-500q0 45-31.5 76.5T480-392Zm0 192q-146 0-266-81.5T40-500q54-137 174-218.5T480-800q146 0 266 81.5T920-500q-54 137-174 218.5T480-200Zm0-300Zm0 220q113 0 207.5-59.5T832-500q-50-101-144.5-160.5T480-720q-113 0-207.5 59.5T128-500q50 101 144.5 160.5T480-280Z"/></svg>`;
+  const SVG_EYE_OFF = `<svg xmlns="http://www.w3.org/2000/svg" height="18px" viewBox="0 -960 960 960" width="18px" fill="currentColor"><path d="m644-428-58-58q9-47-27-88t-93-32l-58-58q17-8 34.5-12t37.5-4q75 0 127.5 52.5T660-500q0 20-4 37.5T644-428Zm128 126-58-56q38-29 67.5-63.5T832-500q-50-101-143.5-160.5T480-720q-29 0-57 4t-55 12l-62-62q41-17 84-25.5t90-8.5q151 0 269 83.5T920-500q-23 59-60.5 109.5T772-302Zm20 246L624-222q-35 11-70.5 16.5T480-200q-151 0-269-83.5T40-500q21-53 53-98.5t73-81.5L56-792l56-56 736 736-56 56ZM222-624q-29 26-53 57t-41 67q50 101 143.5 160.5T480-280q20 0 39-2.5t39-5.5l-36-38q-11 3-21 4.5t-21 1.5q-75 0-127.5-52.5T300-500q0-11 1.5-21t4.5-21l-84-82Zm319 93Zm-151 75Z"/></svg>`;
+
+  let sidebarOrder = getSidebarButtonOrder();
+  let orderIndexMap = new Map(sidebarOrder.map((id, index) => [id, index]));
+
+  const refreshOrderIndexMap = () => {
+    orderIndexMap = new Map(sidebarOrder.map((id, index) => [id, index]));
+  };
+
+  const moveSidebarOrder = (sourceId, targetId, placeAfter) => {
+    if (!sourceId || !targetId || sourceId === targetId) return;
+    const next = sidebarOrder.filter((id) => id !== sourceId);
+    const targetIndex = next.indexOf(targetId);
+    if (targetIndex < 0) return;
+    next.splice(targetIndex + (placeAfter ? 1 : 0), 0, sourceId);
+    sidebarOrder = setSidebarButtonOrder(next);
+    refreshOrderIndexMap();
+    applySidebarVisibility();
+  };
+
+  const popup = document.createElement("div");
+  popup.id = "sidebar-config-popup";
+  popup.className = "sidebar-config-popup";
+
+  const headerEl = document.createElement("div");
+  headerEl.className = "sidebar-config-header";
+  headerEl.innerHTML = `
+    <div class="sidebar-config-title-wrap">
+      <span class="sidebar-config-title-icon">${ICONS.SIDEBAR}</span>
+      <h3 class="sidebar-config-title">${t("sidebar.config.title", "Barre latérale")}</h3>
+    </div>
+    <button type="button" class="sidebar-config-close modal-close-btn" aria-label="${t("sidebar.config.close", "Close")}">
+      ${ICONS.CLOSE || '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>'}
+    </button>
+  `;
+
+  const bodyEl = document.createElement("div");
+  bodyEl.className = "sidebar-config-body";
+
+  // Map id → item element for reset sync
+  const itemEls = {};
+  let draggedItemEl = null;
+
+  const clearModalDragClasses = () => {
+    bodyEl.querySelectorAll(".sidebar-config-item").forEach((el) => {
+      el.classList.remove("dragging", "drop-target-above", "drop-target-below");
+    });
+  };
+
+  const reorderConfigModalItems = () => {
+    bodyEl.querySelectorAll(".sidebar-config-group").forEach((groupEl) => {
+      const items = Array.from(
+        groupEl.querySelectorAll(".sidebar-config-item[data-btn-id]"),
+      );
+      items
+        .sort(
+          (a, b) =>
+            (orderIndexMap.get(a.dataset.btnId) ?? Number.MAX_SAFE_INTEGER) -
+            (orderIndexMap.get(b.dataset.btnId) ?? Number.MAX_SAFE_INTEGER),
+        )
+        .forEach((item) => groupEl.appendChild(item));
+    });
+  };
+
+  groups.forEach(({ label, ids }) => {
+    const groupEl = document.createElement("div");
+    groupEl.className = "sidebar-config-group";
+
+    if (label) {
+      const titleEl = document.createElement("div");
+      titleEl.className = "sidebar-config-group-title";
+      titleEl.textContent = label;
+      groupEl.appendChild(titleEl);
+    }
+
+    const orderedIds = ids
+      .filter((id) => !!SIDEBAR_CONFIGURABLE_BUTTONS_BY_ID[id])
+      .sort(
+        (a, b) =>
+          (orderIndexMap.get(a) ?? Number.MAX_SAFE_INTEGER) -
+          (orderIndexMap.get(b) ?? Number.MAX_SAFE_INTEGER),
+      );
+
+    orderedIds.forEach((id) => {
+      const cfg = SIDEBAR_CONFIGURABLE_BUTTONS_BY_ID[id];
+      if (!cfg) return;
+
+      const isHidden = hidden.includes(id);
+      const domBtn = document.getElementById(id);
+      const btnSvg =
+        id === "stop-btn"
+          ? '<span class="stop-square sidebar-config-stop-square" aria-hidden="true"></span>'
+          : domBtn?.querySelector("svg")?.outerHTML || "";
+
+      const itemEl = document.createElement("div");
+      itemEl.className =
+        "sidebar-config-item" + (isHidden ? " sidebar-config-item--hidden" : "");
+      itemEl.dataset.btnId = id;
+      itemEl.dataset.groupKey = cfg.group;
+
+      const dragHandleEl = document.createElement("span");
+      dragHandleEl.className = "sidebar-config-drag-handle";
+      dragHandleEl.textContent = "⋮⋮";
+      dragHandleEl.draggable = true;
+      dragHandleEl.setAttribute(
+        "data-tooltip",
+        t("sidebar.config.reorderHint", "Glisser pour réordonner"),
+      );
+      dragHandleEl.removeAttribute("title");
+      dragHandleEl.addEventListener("click", (e) => e.stopPropagation());
+      dragHandleEl.addEventListener("mousedown", (e) => e.stopPropagation());
+      dragHandleEl.addEventListener("dragstart", (e) => {
+        draggedItemEl = itemEl;
+        itemEl.classList.add("dragging");
+        bodyEl.classList.add("sidebar-config-body--dragging");
+        clearModalDragClasses();
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", id);
+      });
+      dragHandleEl.addEventListener("dragend", () => {
+        draggedItemEl = null;
+        bodyEl.classList.remove("sidebar-config-body--dragging");
+        clearModalDragClasses();
+      });
+
+      const btnIconEl = document.createElement("span");
+      btnIconEl.className = "sidebar-config-btn-icon";
+      btnIconEl.innerHTML = btnSvg;
+
+      const labelEl = document.createElement("span");
+      labelEl.className = "sidebar-config-item-label";
+      labelEl.textContent = t(cfg.i18nKey, cfg.fallback);
+
+      const eyeEl = document.createElement("span");
+      eyeEl.className = "sidebar-config-eye";
+      eyeEl.innerHTML = isHidden ? SVG_EYE_OFF : SVG_EYE_OPEN;
+
+      itemEl.appendChild(dragHandleEl);
+      itemEl.appendChild(btnIconEl);
+      itemEl.appendChild(labelEl);
+      itemEl.appendChild(eyeEl);
+
+      itemEl.addEventListener("dragover", (e) => {
+        if (!draggedItemEl || draggedItemEl === itemEl) return;
+        if (draggedItemEl.dataset.groupKey !== itemEl.dataset.groupKey) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+
+        const rect = itemEl.getBoundingClientRect();
+        const dropAfter = e.clientY - rect.top > rect.height / 2;
+        itemEl.classList.toggle("drop-target-above", !dropAfter);
+        itemEl.classList.toggle("drop-target-below", dropAfter);
+      });
+
+      itemEl.addEventListener("dragleave", () => {
+        itemEl.classList.remove("drop-target-above", "drop-target-below");
+      });
+
+      itemEl.addEventListener("drop", (e) => {
+        if (!draggedItemEl || draggedItemEl === itemEl) return;
+        if (draggedItemEl.dataset.groupKey !== itemEl.dataset.groupKey) return;
+        e.preventDefault();
+
+        const sourceId = draggedItemEl.dataset.btnId;
+        const targetId = itemEl.dataset.btnId;
+        if (!sourceId || !targetId) return;
+
+        const rect = itemEl.getBoundingClientRect();
+        const dropAfter = e.clientY - rect.top > rect.height / 2;
+
+        if (dropAfter) {
+          itemEl.after(draggedItemEl);
+        } else {
+          itemEl.before(draggedItemEl);
+        }
+
+        moveSidebarOrder(sourceId, targetId, dropAfter);
+        clearModalDragClasses();
+      });
+
+      itemEl.addEventListener("click", () => {
+        if (draggedItemEl) return;
+        const current = getHidden();
+        const nowHidden = current.includes(id);
+        const next = nowHidden
+          ? current.filter((v) => v !== id)
+          : [...current, id];
+        if (UIPreferences.setStringArray) {
+          UIPreferences.setStringArray(PREF_KEY_SIDEBAR_HIDDEN_BUTTONS, next);
+        }
+        applySidebarVisibility();
+        const visible = !next.includes(id);
+        itemEl.classList.toggle("sidebar-config-item--hidden", !visible);
+        eyeEl.innerHTML = visible ? SVG_EYE_OPEN : SVG_EYE_OFF;
+      });
+
+      itemEls[id] = { el: itemEl, eyeEl };
+      groupEl.appendChild(itemEl);
+    });
+
+    bodyEl.appendChild(groupEl);
+  });
+
+  const footerEl = document.createElement("div");
+  footerEl.className = "sidebar-config-footer";
+
+  const resetBtn = document.createElement("button");
+  resetBtn.type = "button";
+  resetBtn.id = "sidebar-config-reset-btn";
+  resetBtn.textContent = t("sidebar.config.resetBtn", "Réinitialiser");
+  resetBtn.addEventListener("click", () => {
+    if (UIPreferences.setStringArray) {
+      UIPreferences.setStringArray(
+        PREF_KEY_SIDEBAR_HIDDEN_BUTTONS,
+        DEFAULT_HIDDEN,
+      );
+    }
+    sidebarOrder = setSidebarButtonOrder(SIDEBAR_DEFAULT_BUTTON_ORDER);
+    refreshOrderIndexMap();
+    reorderConfigModalItems();
+    applySidebarVisibility();
+    Object.entries(itemEls).forEach(([btnId, { el, eyeEl }]) => {
+      const isHidden = DEFAULT_HIDDEN.includes(btnId);
+      el.classList.toggle("sidebar-config-item--hidden", isHidden);
+      eyeEl.innerHTML = isHidden ? SVG_EYE_OFF : SVG_EYE_OPEN;
+    });
+  });
+  footerEl.appendChild(resetBtn);
+
+  popup.appendChild(headerEl);
+  popup.appendChild(bodyEl);
+  popup.appendChild(footerEl);
+  document.body.appendChild(popup);
+
+  // Fermer via le bouton X
+  const closeBtn = popup.querySelector(".sidebar-config-close");
+  if (closeBtn) {
+    closeBtn.addEventListener("click", () => popup.remove());
+  }
+
+  // Fermer via Escape
+  const handleEscape = (e) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      popup.remove();
+      document.removeEventListener("keydown", handleEscape, true);
+    }
+  };
+  document.addEventListener("keydown", handleEscape, true);
+  popup.addEventListener("remove", () =>
+    document.removeEventListener("keydown", handleEscape, true),
+  );
+
+  // Drag sur le header
+  let isDragging = false,
+    dragStartX = 0,
+    dragStartY = 0,
+    popupStartX = 0,
+    popupStartY = 0;
+  const rect = popup.getBoundingClientRect();
+  popup.style.top = "50%";
+  popup.style.left = "50%";
+  popup.style.transform = "translate(-50%, -50%)";
+
+  headerEl.style.cursor = "move";
+  headerEl.style.userSelect = "none";
+
+  headerEl.addEventListener("mousedown", (e) => {
+    if (e.target.closest("button")) return;
+    isDragging = true;
+    const r = popup.getBoundingClientRect();
+    dragStartX = e.clientX;
+    dragStartY = e.clientY;
+    popupStartX = r.left;
+    popupStartY = r.top;
+    popup.style.transform = "none";
+    popup.style.left = r.left + "px";
+    popup.style.top = r.top + "px";
+  });
+  document.addEventListener("mousemove", (e) => {
+    if (!isDragging) return;
+    popup.style.left = popupStartX + e.clientX - dragStartX + "px";
+    popup.style.top = popupStartY + e.clientY - dragStartY + "px";
+  });
+  document.addEventListener("mouseup", () => {
+    isDragging = false;
+  });
 }
 
 // ================================================================
@@ -10553,6 +19558,82 @@ function drawDraggableGuide(svg, type, position, width, height, guideIndex) {
 }
 
 /**
+ * Affiche le menu contextuel de la silhouette (luminosité + inversion)
+ */
+function showSilhouetteContextMenu(x, y) {
+  const menu = document.createElement("div");
+  menu.className = "context-menu silhouette-ctx-menu";
+  menu.innerHTML = `
+    <div class="silhouette-ctx-section">
+      <div class="silhouette-ctx-row">
+        <span>${i18next.t("filters.brightness")}</span>
+        <span class="silhouette-ctx-brightness-val">${state.silhouetteBrightness.toFixed(2)}</span>
+      </div>
+      <input type="range" class="threshold-slider silhouette-ctx-slider" min="0" max="6" step="0.01" value="${state.silhouetteBrightness}">
+      <div class="silhouette-ctx-markers">
+        <span>0</span>
+        <span>3</span>
+        <span>6</span>
+      </div>
+    </div>
+    <div class="silhouette-ctx-divider"></div>
+    <div class="silhouette-ctx-row silhouette-ctx-invert-row">
+      <span>${i18next.t("filters.invertColors")}</span>
+      <label class="silhouette-switch">
+        <input type="checkbox" class="silhouette-ctx-invert-cb" ${state.silhouetteInvert ? "checked" : ""}>
+        <span class="silhouette-slider"></span>
+      </label>
+    </div>
+  `;
+
+  document.body.appendChild(menu);
+  adjustMenuPosition(menu, x, y);
+  menu.addEventListener("click", (e) => e.stopPropagation());
+  menu.addEventListener("mousedown", (e) => e.stopPropagation());
+
+  const slider = menu.querySelector(".silhouette-ctx-slider");
+  const brightnessVal = menu.querySelector(".silhouette-ctx-brightness-val");
+  const invertCb = menu.querySelector(".silhouette-ctx-invert-cb");
+
+  initSliderWithGradient(slider);
+
+  slider.addEventListener("input", (e) => {
+    const value = parseFloat(e.target.value);
+    brightnessVal.textContent = value.toFixed(2);
+    state.silhouetteBrightness = value;
+    updateSliderGradient(slider);
+    applyImageFilters();
+    if (window.updateZoomContent && window.zoomFilters?.silhouette) {
+      window.updateZoomContent();
+    }
+  });
+
+  const applyInvertToggle = (checked) => {
+    state.silhouetteInvert = !!checked;
+    applyImageFilters();
+    if (window.updateZoomContent && window.zoomFilters?.silhouette) {
+      window.updateZoomContent();
+    }
+  };
+
+  invertCb.addEventListener("input", (e) => {
+    applyInvertToggle(e.target.checked);
+  });
+
+  invertCb.addEventListener("change", (e) => {
+    applyInvertToggle(e.target.checked);
+  });
+
+  let leaveTimer;
+  menu.addEventListener("mouseleave", () => {
+    leaveTimer = setTimeout(() => menu.remove(), 300);
+  });
+  menu.addEventListener("mouseenter", () => {
+    clearTimeout(leaveTimer);
+  });
+}
+
+/**
  * Affiche le popup de configuration de la silhouette (filtre seuil)
  */
 function showSilhouetteConfig() {
@@ -10760,10 +19841,7 @@ function getSilhouetteFilterCSS() {
 }
 
 function closeAllContextMenus() {
-  const menus = document.querySelectorAll(
-    "#flip-animation-context-menu, #progressive-blur-context-menu, #image-context-menu, #next-image-context-menu, #prev-image-context-menu, #reveal-context-menu, #blur-context-menu, #timer-context-menu, #progressbar-context-menu, #pause-circle-context-menu, #settings-context-menu",
-  );
-  menus.forEach((menu) => menu.remove());
+  document.querySelectorAll(".context-menu").forEach((menu) => menu.remove());
 }
 
 function adjustMenuPosition(menu, x, y, preferAbove = false) {
@@ -10842,17 +19920,148 @@ function showFlipAnimationMenu(x, y) {
  * Menu contextuel pour l'écran settings (clic droit sur le body)
  * Permet d'activer/désactiver la grille et changer de thème
  */
+// ================================================================
+// DESKTOP MULTI-SOURCES WIDGET
+// ================================================================
+
+let desktopSourcesExpanded = false;
+
+function renderDesktopFolderSources(folders, perFolderStats) {
+  const widget = document.getElementById("desktop-sources-widget");
+  const folderInfoRow = document.getElementById("folder-info-row");
+  const chooseBtn = document.getElementById("choose-media-folder-btn");
+  if (!widget) return;
+
+  // Afficher le widget, masquer la ligne classique
+  widget.classList.remove("hidden");
+  if (folderInfoRow) folderInfoRow.style.display = "none";
+  if (chooseBtn) chooseBtn.style.display = "none";
+
+  const summaryEl = document.getElementById("desktop-sources-summary");
+  const listEl = document.getElementById("desktop-sources-list");
+  const toggleBtn = document.getElementById("desktop-sources-toggle");
+
+  // ---- Résumé ----
+  if (summaryEl) {
+    if (!folders || folders.length === 0) {
+      summaryEl.textContent = i18next.t(
+        "controls.selectMediaFolder",
+        "Choisir un dossier source",
+      );
+    } else {
+      const totalImages = state.images.filter(
+        (img) => !isVideoFile(img),
+      ).length;
+      const totalVideos = state.images.filter((img) => isVideoFile(img)).length;
+      const folderWord =
+        folders.length > 1
+          ? i18next.t("settings.foldersLabel", { defaultValue: "dossiers" })
+          : i18next.t("settings.folderLabel", { defaultValue: "dossier" });
+      const parts = [`${folders.length} ${folderWord}`];
+      if (totalImages > 0) parts.push(`${totalImages} img`);
+      if (totalVideos > 0) parts.push(`${totalVideos} vid`);
+      summaryEl.textContent = parts.join(" • ");
+    }
+  }
+
+  // ---- Liste déroulante ----
+  if (listEl) {
+    if (!folders || folders.length === 0) {
+      listEl.innerHTML = `<div class="desktop-sources-empty">${i18next.t("settings.noFoldersConfigured", { defaultValue: "Aucun dossier configuré" })}</div>`;
+    } else {
+      listEl.innerHTML = folders
+        .map((folder) => {
+          const stats = perFolderStats?.[folder.id] || { images: 0, videos: 0 };
+          const countParts = [];
+          if (stats.images > 0) countParts.push(`${stats.images} img`);
+          if (stats.videos > 0) countParts.push(`${stats.videos} vid`);
+          if (countParts.length === 0)
+            countParts.push(
+              i18next.t("settings.zeroMedia", { defaultValue: "0 média" }),
+            );
+          const countStr = countParts.join(", ");
+          const parentPath = escapeHtml(
+            folder.path.replace(/[/\\][^/\\]+$/, "") || folder.path,
+          );
+          return `
+            <div class="desktop-source-item">
+              <span class="desktop-source-item-icon">
+                <svg xmlns="http://www.w3.org/2000/svg" height="14px" viewBox="0 -960 960 960" width="14px" fill="currentColor"><path d="M160-160q-33 0-56.5-23.5T80-240v-480q0-33 23.5-56.5T160-800h240l80 80h320q33 0 56.5 23.5T880-640v400q0 33-23.5 56.5T800-160H160Z"/></svg>
+              </span>
+              <div class="desktop-source-item-info">
+                <span class="desktop-source-item-name">${escapeHtml(folder.name)}</span>
+                <span class="desktop-source-item-path">${parentPath}</span>
+              </div>
+              <span class="desktop-source-item-count">${escapeHtml(countStr)}</span>
+              <button
+                type="button"
+                class="desktop-source-remove-btn"
+                data-folder-id="${escapeHtml(folder.id)}"
+                aria-label="${i18next.t("settings.removeSourceFolder", { defaultValue: "Supprimer ce dossier" })}"
+                data-tooltip="${i18next.t("settings.removeSourceFolder", { defaultValue: "Supprimer ce dossier" })}"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" height="14px" viewBox="0 -960 960 960" width="14px" fill="currentColor"><path d="m256-200-56-56 224-224-224-224 56-56 224 224 224-224 56 56-224 224 224 224-56 56-224-224-224 224Z"/></svg>
+              </button>
+            </div>`;
+        })
+        .join("");
+
+      // Attacher les handlers de suppression
+      listEl.querySelectorAll(".desktop-source-remove-btn").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const fid = btn.dataset.folderId;
+          if (fid) removeDesktopMediaFolder(fid);
+        });
+      });
+    }
+
+    // Appliquer l'état expand/collapse
+    if (desktopSourcesExpanded) {
+      listEl.hidden = false;
+      widget.classList.add("expanded");
+      if (toggleBtn) toggleBtn.setAttribute("aria-expanded", "true");
+    } else {
+      listEl.hidden = true;
+      widget.classList.remove("expanded");
+      if (toggleBtn) toggleBtn.setAttribute("aria-expanded", "false");
+    }
+  }
+
+  // Attacher le toggle (une seule fois via dataset flag)
+  if (toggleBtn && !toggleBtn.dataset.sourcesToggleBound) {
+    toggleBtn.dataset.sourcesToggleBound = "1";
+    toggleBtn.addEventListener("click", () => {
+      desktopSourcesExpanded = !desktopSourcesExpanded;
+      if (listEl) listEl.hidden = !desktopSourcesExpanded;
+      widget.classList.toggle("expanded", desktopSourcesExpanded);
+      toggleBtn.setAttribute("aria-expanded", String(desktopSourcesExpanded));
+    });
+  }
+
+  // Attacher le bouton Ajouter (une seule fois)
+  const addBtn = document.getElementById("desktop-sources-add-btn");
+  if (addBtn && !addBtn.dataset.sourcesAddBound) {
+    addBtn.dataset.sourcesAddBound = "1";
+    addBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      selectDesktopMediaFolders();
+    });
+  }
+}
+
 async function selectDesktopMediaFolders() {
   if (!isDesktopStandaloneRuntime()) return false;
-
-  const result = await platformDialogShowOpenDialog({
-    title: i18next.t("controls.selectMediaFolder"),
-    properties: ["openDirectory", "multiSelections"],
-  });
-
-  if (!result || result.canceled) return false;
+  const folders = await platformFolderBrowseAndAdd();
+  if (!folders) return false;
   await loadImages();
   return true;
+}
+
+async function removeDesktopMediaFolder(folderId) {
+  if (!isDesktopStandaloneRuntime()) return;
+  await platformFolderRemove(folderId);
+  await loadImages();
 }
 
 function showSettingsContextMenu(x, y) {
@@ -11923,6 +21132,10 @@ if (typeof window !== "undefined") {
 
 async function confirmImageDeletionDialog(options = {}) {
   const { image = null, container = document.body } = options;
+  const shouldConfirmDeletion = shouldConfirmImageDeletion();
+  if (!shouldConfirmDeletion) {
+    return true;
+  }
 
   const title = i18next.t("drawing.deleteImage", {
     defaultValue: "Delete image",
@@ -11947,6 +21160,10 @@ async function confirmImageDeletionDialog(options = {}) {
   return confirmed;
 }
 
+function shouldConfirmImageDeletion() {
+  return !!UIPreferences.get(PREF_KEY_CONFIRM_DELETE_IMAGE, true);
+}
+
 function queueImageDeletionWithUndo(options = {}) {
   const {
     image = null,
@@ -11959,11 +21176,6 @@ function queueImageDeletionWithUndo(options = {}) {
   if (!image || typeof removeLocal !== "function") return false;
 
   removeLocal();
-
-  const deletedMsg = i18next.t("notifications.deleteQueued", {
-    defaultValue: "Deleted. Undo available for 10 seconds.",
-  });
-  const undoLabel = i18next.t("notifications.undo", { defaultValue: "Undo" });
 
   const runCommit = () => {
     if (typeof commitDelete === "function") {
@@ -11979,6 +21191,11 @@ function queueImageDeletionWithUndo(options = {}) {
       }
     }
   };
+
+  const deletedMsg = i18next.t("notifications.deleteQueued", {
+    defaultValue: "Deleted. Undo available for 10 seconds.",
+  });
+  const undoLabel = i18next.t("notifications.undo", { defaultValue: "Undo" });
 
   if (typeof window.schedulePoseChronoUndoAction === "function") {
     window.schedulePoseChronoUndoAction({
@@ -12550,12 +21767,9 @@ function findHotkeyConflict(hotkeyName, newValue) {
     logMissingShared("HOTKEYS_UTILS.findHotkeyConflict");
     return null;
   }
-  return hotkeysUtils.findHotkeyConflict(
-    CONFIG.HOTKEYS,
-    hotkeyName,
-    newValue,
-    { drawingPrefix: "DRAWING_" },
-  );
+  return hotkeysUtils.findHotkeyConflict(CONFIG.HOTKEYS, hotkeyName, newValue, {
+    drawingPrefix: "DRAWING_",
+  });
 }
 
 /**
@@ -13224,19 +22438,62 @@ function showTimerContextMenu(x, y) {
 
   const resetOption = document.createElement("div");
   resetOption.className = "context-menu-item";
-  resetOption.innerHTML = `
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-      <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
-      <path d="M3 3v5h5"/>
-    </svg>
-    Réinitialiser le timer
-  `;
+  const resetIcon = document.createElementNS(
+    "http://www.w3.org/2000/svg",
+    "svg",
+  );
+  resetIcon.setAttribute("width", "16");
+  resetIcon.setAttribute("height", "16");
+  resetIcon.setAttribute("viewBox", "0 0 24 24");
+  resetIcon.setAttribute("fill", "none");
+  resetIcon.setAttribute("stroke", "currentColor");
+  resetIcon.setAttribute("stroke-width", "2");
 
-  resetOption.onclick = () => {
-    state.timeRemaining = state.selectedDuration;
-    updateTimerDisplay();
-    closeAllContextMenus();
-  };
+  const resetPathPrimary = document.createElementNS(
+    "http://www.w3.org/2000/svg",
+    "path",
+  );
+  resetPathPrimary.setAttribute(
+    "d",
+    "M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8",
+  );
+  const resetPathSecondary = document.createElementNS(
+    "http://www.w3.org/2000/svg",
+    "path",
+  );
+  resetPathSecondary.setAttribute("d", "M3 3v5h5");
+  resetIcon.appendChild(resetPathPrimary);
+  resetIcon.appendChild(resetPathSecondary);
+
+  const resetLabel = document.createElement("span");
+  const resetTimerFallback =
+    getCurrentI18nLanguage() === "fr"
+      ? "Réinitialiser le chrono"
+      : "Reset timer";
+  resetLabel.textContent = getI18nText(
+    "timer.resetTimerOption",
+    resetTimerFallback,
+  );
+
+  resetOption.appendChild(resetIcon);
+  resetOption.appendChild(resetLabel);
+
+  const isGuest = isSyncSessionParticipantActive();
+  const guestControlMode = isGuest ? (syncSessionServiceState?.controlMode || "host-only") : null;
+  const isGuestDisabled = isGuest && (guestControlMode === "host-only" || guestControlMode === "shared-pause");
+
+  if (isGuestDisabled) {
+    resetOption.style.opacity = "0.4";
+    resetOption.style.cursor = "not-allowed";
+    resetOption.style.pointerEvents = "none";
+  } else {
+    resetOption.onclick = () => {
+      state.timeRemaining = state.selectedDuration;
+      updateTimerDisplay();
+      scheduleSyncRuntimeState("timer-reset", { force: true });
+      closeAllContextMenus();
+    };
+  }
 
   menu.appendChild(resetOption);
   document.body.appendChild(menu);
@@ -13279,7 +22536,7 @@ function showProgressBarContextMenu(x, y) {
 
   menu.appendChild(smoothOption);
   document.body.appendChild(menu);
-  adjustMenuPosition(menu, x, y, true);
+  adjustMenuPosition(menu, x, y, false);
 }
 
 function showPauseCircleContextMenu(x, y) {
@@ -13375,15 +22632,7 @@ function openZoomForImage(image, options = {}) {
     return;
   }
 
-  // Normaliser le chemin - éviter le double file:///
-  // Si le chemin commence déjà par file://, on l'utilise tel quel
-  // Sinon on retire les slashes initiaux et on ajoute file:///
-  let normalizedPath;
-  if (imagePath.startsWith("file://")) {
-    normalizedPath = imagePath;
-  } else {
-    normalizedPath = "file:///" + imagePath.replace(/^\/+/, "");
-  }
+  const normalizedPath = normalizeRuntimeMediaPath(imagePath);
 
   console.log("[openZoomForImage] Chemin normalisé:", normalizedPath);
 
@@ -13440,16 +22689,7 @@ function openZoomForImage(image, options = {}) {
 
     // Recalculer le chemin normalisé pour l'image courante (important pour la navigation)
     const currentImagePath = image.filePath || image.path || image.file;
-    let normalizedPath;
-    if (currentImagePath) {
-      if (currentImagePath.startsWith("file://")) {
-        normalizedPath = currentImagePath;
-      } else {
-        normalizedPath = "file:///" + currentImagePath.replace(/^\/+/, "");
-      }
-    } else {
-      normalizedPath = "";
-    }
+    const normalizedPath = normalizeRuntimeMediaPath(currentImagePath);
 
     const isVideo = isVideoFile(image);
 
@@ -13469,7 +22709,7 @@ function openZoomForImage(image, options = {}) {
 
       overlay.innerHTML = `
         <div class="zoom-video-wrapper">
-          <video id="zoom-video" src="${normalizedPath}"
+          <video id="zoom-video" src="${escapeHtml(normalizedPath)}"
                style="transform: ${transform}; filter: ${filter};"
                playsinline loop autoplay muted tabindex="-1"></video>
           <div class="video-controls-bar zoom-video-controls-bar">
@@ -13853,10 +23093,7 @@ function openZoomForImage(image, options = {}) {
         try {
           if (typeof image.moveToTrash === "function") {
             await image.moveToTrash();
-          } else if (
-            image?.id !== undefined &&
-            image?.id !== null
-          ) {
+          } else if (image?.id !== undefined && image?.id !== null) {
             await platformItemMoveToTrash([image.id]);
           }
         } catch (e) {
@@ -13910,8 +23147,7 @@ function openZoomForImage(image, options = {}) {
       (typeof isZoomDrawingModeActive !== "undefined" &&
         isZoomDrawingModeActive) ||
       !!(
-        zoomOverlayEl &&
-        zoomOverlayEl.classList.contains("zoom-drawing-active")
+        zoomOverlayEl && zoomOverlayEl.classList.contains("zoom-drawing-active")
       );
 
     // Navigation entre images (seulement si allowNavigation)
@@ -14049,7 +23285,11 @@ function openZoomForImage(image, options = {}) {
       e.preventDefault();
       zoomFilters.blur = !zoomFilters.blur;
       updateZoomContent();
-    } else if (!hasSystemModifier && e.shiftKey && key === hk.SILHOUETTE_MODAL) {
+    } else if (
+      !hasSystemModifier &&
+      e.shiftKey &&
+      key === hk.SILHOUETTE_MODAL
+    ) {
       e.preventDefault();
       showSilhouetteConfig();
     } else if (!hasSystemModifier && keyLow === hk.SILHOUETTE.toLowerCase()) {
@@ -14094,6 +23334,9 @@ function openZoomForImage(image, options = {}) {
 window.openZoomForImage = openZoomForImage;
 
 function showReview() {
+  if (isSyncSessionParticipantActive() && !syncRuntimeApplyInProgress) {
+    return;
+  }
   stopTimer();
   finalizeCurrentPoseForReview();
   ensureReviewDurationsVisibilityState();
@@ -14110,6 +23353,7 @@ function showReview() {
   drawingScreen.classList.add("hidden");
   reviewScreen.classList.remove("hidden");
   document.body.classList.add("review-active");
+  scheduleSyncRuntimeState("session-review", { force: true });
 
   // Fermer l'image info overlay s'il est ouvert
   const infoOverlay = document.getElementById("image-info-overlay");
@@ -14129,12 +23373,18 @@ function showReview() {
   const sessionPoses = reviewSummary.sessionPoses;
   const sessionTime = reviewSummary.sessionTime;
   if (reviewSummary.shouldRecord) {
-    const sessionDetails = buildReviewSessionDetailsPayload({
-      sessionMode: state.sessionMode || "classique",
-      memoryType: state.memoryType,
-      customQueue: state.customQueue,
-      imagesSeen: state.imagesSeen,
-    });
+    const sessionDetails = {
+      ...buildReviewSessionDetailsPayload({
+        sessionMode: state.sessionMode || "classique",
+        memoryType: state.memoryType,
+        customQueue: state.customQueue,
+        imagesSeen: state.imagesSeen,
+      }),
+      startTime: state.sessionStartTime || null,
+      isOnline:
+        state.sessionWasOnline ||
+        isSyncSessionOnlineForHistory(syncSessionServiceState),
+    };
     void ensureTimelineModuleLoaded("record-session")
       .then(() => {
         const root = getDrawBundleWindow();
@@ -14263,6 +23513,9 @@ function showReview() {
       div.className = "review-item";
       const img = document.createElement("img");
       img.src = item.src;
+      img.onerror = () => {
+        div.style.display = "none";
+      };
 
       // Ajouter un indicateur vidéo
       if (item.isVideo) {
@@ -14507,10 +23760,7 @@ function showReview() {
             } catch (e) {
               console.error("Erreur suppression:", e);
               try {
-                if (
-                  targetImage?.id !== undefined &&
-                  targetImage?.id !== null
-                ) {
+                if (targetImage?.id !== undefined && targetImage?.id !== null) {
                   await platformItemMoveToTrash([targetImage.id]);
                 }
               } catch (_) {}
@@ -14585,7 +23835,7 @@ function showReview() {
 
       overlay.innerHTML = `
         <div class="zoom-video-wrapper">
-          <video id="zoom-video" src="file:///${image.filePath}"
+          <video id="zoom-video" src="${getRuntimeMediaSourceFromItem(image)}"
                style="transform: ${transform}; filter: ${filter};"
                playsinline loop autoplay muted tabindex="-1"></video>
           <div class="video-controls-bar zoom-video-controls-bar">
@@ -14778,7 +24028,7 @@ function showReview() {
       zoomVideo.onclick = (e) => e.stopPropagation();
     } else {
       overlay.innerHTML = `
-        <img src="file:///${image.filePath}"
+        <img src="${getRuntimeMediaSourceFromItem(image)}"
              style="cursor: pointer; transform: ${transform}; filter: ${filter};">
         <div class="zoom-toolbar"></div>
       `;
@@ -15023,19 +24273,13 @@ function showReview() {
           try {
             if (typeof image.moveToTrash === "function") {
               await image.moveToTrash();
-            } else if (
-              image?.id !== undefined &&
-              image?.id !== null
-            ) {
+            } else if (image?.id !== undefined && image?.id !== null) {
               await platformItemMoveToTrash([image.id]);
             }
           } catch (e) {
             console.error("Erreur suppression:", e);
             try {
-              if (
-                image?.id !== undefined &&
-                image?.id !== null
-              ) {
+              if (image?.id !== undefined && image?.id !== null) {
                 await platformItemMoveToTrash([image.id]);
               }
             } catch (_) {}
@@ -15086,8 +24330,7 @@ function showReview() {
       (typeof isZoomDrawingModeActive !== "undefined" &&
         isZoomDrawingModeActive) ||
       !!(
-        zoomOverlayEl &&
-        zoomOverlayEl.classList.contains("zoom-drawing-active")
+        zoomOverlayEl && zoomOverlayEl.classList.contains("zoom-drawing-active")
       );
 
     // When zoom drawing is active, disable zoom-toolbar shortcuts and route
@@ -15235,7 +24478,11 @@ function showReview() {
       e.preventDefault();
       zoomFilters.blur = !zoomFilters.blur;
       updateZoomContent();
-    } else if (!hasSystemModifier && e.shiftKey && key === hk.SILHOUETTE_MODAL) {
+    } else if (
+      !hasSystemModifier &&
+      e.shiftKey &&
+      key === hk.SILHOUETTE_MODAL
+    ) {
       // Tester SHIFT+S en premier pour ouvrir le modal
       e.preventDefault();
       showSilhouetteConfig();
@@ -15388,6 +24635,18 @@ function updatePlayPauseIcon() {
 }
 
 function togglePlayPause() {
+  if (isSyncSessionParticipantActive() && !syncRuntimeApplyInProgress) {
+    if (!isSyncControlModeSharedPause()) {
+      return;
+    }
+    const requestType = state.isPlaying ? "pause" : "play";
+    void requestSyncSharedPlayback(
+      requestType,
+      `participant-toggle-${requestType}`,
+    );
+    return;
+  }
+
   state.isPlaying = !state.isPlaying;
   updatePlayPauseIcon();
 
@@ -15406,6 +24665,9 @@ function togglePlayPause() {
 
   if (state.isPlaying) startTimer();
   else stopTimer();
+  scheduleSyncRuntimeState(state.isPlaying ? "timer-resumed" : "timer-paused", {
+    force: true,
+  });
   // Note: La vidéo est contrôlée indépendamment via toggleVideoPlayPause()
 }
 
@@ -15413,13 +24675,15 @@ function toggleSound() {
   state.soundEnabled = !state.soundEnabled;
   soundBtn.innerHTML = state.soundEnabled ? ICONS.SOUND_ON : ICONS.SOUND_OFF;
   soundBtn.classList.toggle("muted", !state.soundEnabled);
-}
-
-function toggleTimer() {
-  state.showTimer = !state.showTimer;
-  progressBar.classList.toggle("hidden", !state.showTimer);
-  toggleTimerBtn.innerHTML = state.showTimer ? ICONS.TIMER_ON : ICONS.TIMER_OFF;
-  toggleTimerBtn.classList.toggle("active", state.showTimer);
+  if (soundBtn) {
+    soundBtn.setAttribute(
+      "data-tooltip",
+      state.soundEnabled
+        ? i18next.t("controls.muteSound", { defaultValue: "Mute sound" })
+        : i18next.t("controls.unmuteSound", { defaultValue: "Unmute sound" }),
+    );
+    soundBtn.removeAttribute("title");
+  }
 }
 
 function toggleSidebar() {
@@ -15790,7 +25054,7 @@ async function openTagsModal(reviewIndex = null, explicitImage = null) {
       }
 
       if (allTagNames.size === 0) {
-        availableTagsList.innerHTML = `<div style="color: #888; padding: 12px; text-align: center;">${i18next.t("tags.noTagsAvailable", { defaultValue: "No tags available. Create a new one above." })}</div>`;
+        availableTagsList.innerHTML = `<div class="tags-empty-msg">${i18next.t("tags.noTagsAvailable", { defaultValue: "No tags available. Create a new one above." })}</div>`;
         return;
       }
 
@@ -15871,7 +25135,7 @@ async function openTagsModal(reviewIndex = null, explicitImage = null) {
       });
     } catch (e) {
       console.error("Erreur lors du chargement des tags:", e);
-      availableTagsList.innerHTML = `<div style="color: #ff4545; padding: 12px;">${i18next.t("errors.tagError")}</div>`;
+      availableTagsList.innerHTML = `<div class="tags-error-msg">${i18next.t("errors.tagError")}</div>`;
     }
   }
 
@@ -16273,7 +25537,7 @@ async function copyImageToClipboard() {
     }
 
     // Fallback : méthode navigateur standard
-    const response = await fetch(`file:///${image.filePath}`);
+    const response = await fetch(getRuntimeMediaSourceFromItem(image));
     const blob = await response.blob();
     await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
     console.log(i18next.t("notifications.imageCopiedToClipboard"));
@@ -16303,13 +25567,13 @@ async function openImageInExplorer() {
       return;
     } else {
       // Fallback: ouvrir directement le fichier
-      window.open(`file:///${image.filePath}`);
+      window.open(getRuntimeMediaSourceFromItem(image));
     }
   } catch (e) {
     console.error("Erreur ouverture explorateur:", e);
     // Dernier fallback
     try {
-      window.open(`file:///${image.filePath}`);
+      window.open(getRuntimeMediaSourceFromItem(image));
     } catch (err) {
       console.error("Fallback échoué:", err);
     }
@@ -16450,19 +25714,13 @@ async function deleteImage() {
       try {
         if (typeof image.moveToTrash === "function") {
           await image.moveToTrash();
-        } else if (
-          imageId !== undefined &&
-          imageId !== null
-        ) {
+        } else if (imageId !== undefined && imageId !== null) {
           await platformItemMoveToTrash([imageId]);
         }
       } catch (e) {
         console.error("Erreur suppression:", e);
         try {
-          if (
-            imageId !== undefined &&
-            imageId !== null
-          ) {
+          if (imageId !== undefined && imageId !== null) {
             await platformItemMoveToTrash([imageId]);
           }
         } catch (err) {}
@@ -16559,10 +25817,10 @@ function applyImageFilters() {
 
 function addStepToQueue(isPause = false) {
   try {
-    const hInput = document.getElementById("custom-h-input");
-    const mInput = document.getElementById("custom-m-input");
-    const sInput = document.getElementById("custom-s-input");
-    const countInput = document.getElementById("custom-count-input");
+    const hInput = DOMCache.customHInput;
+    const mInput = DOMCache.customMInput;
+    const sInput = DOMCache.customSInput;
+    const countInput = DOMCache.customCountInput;
 
     const {
       hours: h,
@@ -16595,6 +25853,7 @@ function addStepToQueue(isPause = false) {
 
       renderCustomQueue();
       updateStartButtonState();
+      scheduleSyncRuntimeState("custom-queue-updated");
     } else {
       const inputsToFlash = [hInput, mInput, sInput];
 
@@ -16618,14 +25877,14 @@ function addStepToQueue(isPause = false) {
 }
 
 function renderCustomQueue() {
-  const container = document.getElementById("custom-steps-list");
+  const container =
+    DOMCache.customStepsList || document.getElementById("custom-steps-list");
   if (!container) return;
 
   if (state.customQueue.length === 0) {
     container.innerHTML = `<div class="empty-queue-msg">${i18next.t("modes.custom.emptyQueueMsg")}</div>`;
-    // On cache le total s'il n'y a rien
-    const existingTotal = document.getElementById("custom-total-wrapper");
-    if (existingTotal) existingTotal.style.display = "none";
+    updateTotalDisplay(0);
+    customQueueScroller = null;
     return;
   }
 
@@ -16644,46 +25903,32 @@ function renderCustomQueue() {
       const h = stepModel.hours;
       const m = stepModel.minutes;
       const s = stepModel.seconds;
-
-      const color = isPause ? "#ffa500" : "#667eea";
-      const bg = isPause
-        ? "rgba(255, 165, 0, 0.08)"
-        : "rgba(102, 126, 234, 0.08)";
+      const modifier = isPause ? "step-item--pause" : "step-item--pose";
 
       return `
-        <div class="step-item" 
-             ondragover="handleDragOver(event, this)" 
-             ondrop="dropStep(event, ${index})" 
-             ondragend="handleDragEnd()" 
-             style="display:flex; justify-content:space-between; align-items:center; background:${bg}; padding:8px 15px; border-radius:8px; margin-bottom:8px; border-left:4px solid ${color}; color: white; position: relative; height: 54px;">
-            
-            <div style="display:flex; align-items:center; gap:8px; font-size:13px;">
-                <div class="drag-handle" draggable="true" ondragstart="dragStep(event, ${index})" style="cursor: grab; opacity: 0.3; padding-right: 10px; font-size: 16px;">⋮⋮</div>
-
+        <div class="step-item ${modifier} step-item--virtual" data-step-index="${index}">
+            <div class="step-item-left">
+                <div class="drag-handle step-item-drag-handle" draggable="true" data-step-index="${index}">⋮⋮</div>
                 ${
                   isPause
-                    ? `<span style="color:${color}; font-weight:bold; min-width:65px;">☕ PAUSE</span>`
-                    : `<input type="number" value="${step.count}" min="1" 
-                            oninput="updateStep(${index}, 'count', this.value)" 
-                            style="width:30px; background:none; border:none; color:${color}; font-weight:bold; text-align:center;">
-                     <span style="opacity:0.8;">Poses de</span>`
+                    ? `<span class="step-item-pause-label">☕ PAUSE</span>`
+                    : `<input type="number" value="${step.count}" min="1"
+                            data-step-index="${index}" data-step-field="count"
+                            class="step-item-pose-count">
+                     <span class="step-item-poses-of">Poses de</span>`
                 }
-                
-                <div class="hms-group" style="display:flex; align-items:center; background:rgba(0,0,0,0.2); padding:2px 8px; border-radius:4px; gap:2px;">
-                    <input type="number" value="${h}" min="0" oninput="updateStepHMS(${index}, 'h', this.value)" style="width:22px; background:none; border:none; color:white; text-align:right;">
-                    <span style="font-size:10px; opacity:0.5;">h</span>
-                    <input type="number" value="${m}" min="0" max="59" oninput="updateStepHMS(${index}, 'm', this.value)" style="width:22px; background:none; border:none; color:white; text-align:right;">
-                    <span style="font-size:10px; opacity:0.5;">m</span>
-                    <input type="number" value="${s}" min="0" max="59" oninput="updateStepHMS(${index}, 's', this.value)" style="width:22px; background:none; border:none; color:white; text-align:right;">
-                    <span style="font-size:10px; opacity:0.5;">s</span>
+                <div class="hms-group step-item-hms">
+                    <input type="number" value="${h}" min="0" data-step-index="${index}" data-step-hms="h">
+                    <span class="step-item-hms-sep">h</span>
+                    <input type="number" value="${m}" min="0" max="59" data-step-index="${index}" data-step-hms="m">
+                    <span class="step-item-hms-sep">m</span>
+                    <input type="number" value="${s}" min="0" max="59" data-step-index="${index}" data-step-hms="s">
+                    <span class="step-item-hms-sep">s</span>
                 </div>
             </div>
-
-            <div style="display:flex; align-items:center; gap:15px;">
-                <span style="font-size:11px; color:rgba(255,255,255,0.3); font-weight:500;">
-                    TOTAL: ${formatTime(groupTotalSeconds)}
-                </span>
-                <button onclick="removeStepFromQueue(${index})" style="background:none; border:none; color:rgba(255,77,77,0.5); cursor:pointer; font-size:18px;">✕</button>
+            <div class="step-item-right">
+                <span class="step-item-total">TOTAL: ${formatTime(groupTotalSeconds)}</span>
+                <button data-remove-step="${index}" class="step-item-remove">✕</button>
             </div>
         </div>`;
     };
@@ -16727,46 +25972,32 @@ function renderCustomQueue() {
         const h = stepModel.hours;
         const m = stepModel.minutes;
         const s = stepModel.seconds;
-
-        const color = isPause ? "#ffa500" : "#667eea";
-        const bg = isPause
-          ? "rgba(255, 165, 0, 0.08)"
-          : "rgba(102, 126, 234, 0.08)";
+        const modifier = isPause ? "step-item--pause" : "step-item--pose";
 
         return `
-          <div class="step-item" 
-               ondragover="handleDragOver(event, this)" 
-               ondrop="dropStep(event, ${index})" 
-               ondragend="handleDragEnd()" 
-               style="display:flex; justify-content:space-between; align-items:center; background:${bg}; padding:8px 15px; border-radius:8px; margin-bottom:8px; border-left:4px solid ${color}; color: white; position: relative;">
-              
-              <div style="display:flex; align-items:center; gap:8px; font-size:13px;">
-                  <div class="drag-handle" draggable="true" ondragstart="dragStep(event, ${index})" style="cursor: grab; opacity: 0.3; padding-right: 10px; font-size: 16px;">⋮⋮</div>
-
+          <div class="step-item ${modifier}" data-step-index="${index}">
+              <div class="step-item-left">
+                  <div class="drag-handle step-item-drag-handle" draggable="true" data-step-index="${index}">⋮⋮</div>
                   ${
                     isPause
-                      ? `<span style="color:${color}; font-weight:bold; min-width:65px;">☕ PAUSE</span>`
-                      : `<input type="number" value="${step.count}" min="1" 
-                              oninput="updateStep(${index}, 'count', this.value)" 
-                              style="width:30px; background:none; border:none; color:${color}; font-weight:bold; text-align:center;">
-                       <span style="opacity:0.8;">Poses de</span>`
+                      ? `<span class="step-item-pause-label">☕ PAUSE</span>`
+                      : `<input type="number" value="${step.count}" min="1"
+                              data-step-index="${index}" data-step-field="count"
+                              class="step-item-pose-count">
+                       <span class="step-item-poses-of">Poses de</span>`
                   }
-                  
-                  <div class="hms-group" style="display:flex; align-items:center; background:rgba(0,0,0,0.2); padding:2px 8px; border-radius:4px; gap:2px;">
-                      <input type="number" value="${h}" min="0" oninput="updateStepHMS(${index}, 'h', this.value)" style="width:22px; background:none; border:none; color:white; text-align:right;">
-                      <span style="font-size:10px; opacity:0.5;">h</span>
-                      <input type="number" value="${m}" min="0" max="59" oninput="updateStepHMS(${index}, 'm', this.value)" style="width:22px; background:none; border:none; color:white; text-align:right;">
-                      <span style="font-size:10px; opacity:0.5;">m</span>
-                      <input type="number" value="${s}" min="0" max="59" oninput="updateStepHMS(${index}, 's', this.value)" style="width:22px; background:none; border:none; color:white; text-align:right;">
-                      <span style="font-size:10px; opacity:0.5;">s</span>
+                  <div class="hms-group step-item-hms">
+                      <input type="number" value="${h}" min="0" data-step-index="${index}" data-step-hms="h">
+                      <span class="step-item-hms-sep">h</span>
+                      <input type="number" value="${m}" min="0" max="59" data-step-index="${index}" data-step-hms="m">
+                      <span class="step-item-hms-sep">m</span>
+                      <input type="number" value="${s}" min="0" max="59" data-step-index="${index}" data-step-hms="s">
+                      <span class="step-item-hms-sep">s</span>
                   </div>
               </div>
-
-              <div style="display:flex; align-items:center; gap:15px;">
-                  <span style="font-size:11px; color:rgba(255,255,255,0.3); font-weight:500;">
-                      TOTAL: ${formatTime(groupTotalSeconds)}
-                  </span>
-                  <button onclick="removeStepFromQueue(${index})" style="background:none; border:none; color:rgba(255,77,77,0.5); cursor:pointer; font-size:18px;">✕</button>
+              <div class="step-item-right">
+                  <span class="step-item-total">TOTAL: ${formatTime(groupTotalSeconds)}</span>
+                  <button data-remove-step="${index}" class="step-item-remove">✕</button>
               </div>
           </div>`;
       })
@@ -16789,9 +26020,34 @@ function renderCustomQueue() {
 
   // Calculer et afficher le total de session
   if (USE_VIRTUAL_SCROLL) {
-    const totalSessionSeconds = calculateCustomQueueTotalSeconds(state.customQueue);
+    const totalSessionSeconds = calculateCustomQueueTotalSeconds(
+      state.customQueue,
+    );
     updateTotalDisplay(totalSessionSeconds);
   }
+}
+
+function updateCustomStepRowDisplay(index) {
+  const container =
+    DOMCache.customStepsList || document.getElementById("custom-steps-list");
+  if (!container) return;
+  const row = container.querySelector(`.step-item[data-step-index="${index}"]`);
+  if (!row) return;
+
+  const step = state.customQueue[index];
+  if (!step) return;
+
+  const stepModel = getCustomStepDisplayModel(step);
+  const totalEl = row.querySelector(".step-item-total");
+  if (totalEl) {
+    totalEl.textContent = `TOTAL: ${formatTime(stepModel.groupTotalSeconds)}`;
+  }
+}
+
+function refreshCustomQueueTotalsLive(index) {
+  updateCustomStepRowDisplay(index);
+  const totalSessionSeconds = calculateCustomQueueTotalSeconds(state.customQueue);
+  updateTotalDisplay(totalSessionSeconds);
 }
 
 /**
@@ -16915,11 +26171,8 @@ async function loadSessionImages(imageIds, options = {}) {
       folderInfo.innerHTML = `<span class="success-text">${i18next.t("settings.loadedFromSession", { count: countMessage })}</span>`;
     }
 
-    // Activer le bouton start
-    const startBtn = document.getElementById("start-btn");
-    if (startBtn) {
-      startBtn.disabled = false;
-    }
+    // Mettre à jour l'état du bouton start
+    updateStartButtonState();
 
     // Basculer vers l'écran settings si on est ailleurs
     const settingsScreen = document.getElementById("settings-screen");
@@ -16972,8 +26225,15 @@ window.updateStepHMS = function (index, type, value) {
     }
   }
 
+  if (isCustomStepInputScrubbing) {
+    hasCustomStepInputScrubChanges = true;
+    refreshCustomQueueTotalsLive(index);
+    return;
+  }
+
   // === Relancer le rendu pour actualiser tous les affichages (totaux, inputs, etc.) ===
   renderCustomQueue();
+  scheduleSyncRuntimeState("custom-queue-updated");
 
   if (typeof saveCustomQueue === "function") saveCustomQueue();
 };
@@ -16985,12 +26245,12 @@ function updateTotalDisplay(totalSeconds) {
   if (!totalDiv) {
     totalDiv = document.createElement("div");
     totalDiv.id = "custom-total-duration";
+    totalDiv.className = "custom-total-duration";
     container.parentNode.insertBefore(totalDiv, container.nextSibling);
   }
 
-  totalDiv.style.cssText =
-    "display:block; text-align:center; margin-top:15px; padding:10px; color:#e3e3e3; font-size:14px; border-top:1px dashed rgba(255,255,255,0.1);";
-  totalDiv.innerHTML = `${i18next.t("modes.custom.totalDuration")} : <b style="color:#667eea;">${formatTime(
+  totalDiv.style.display = "";
+  totalDiv.innerHTML = `${i18next.t("modes.custom.totalDuration")} : <b>${formatTime(
     totalSeconds,
   )}</b>`;
 }
@@ -16999,6 +26259,7 @@ window.removeStepFromQueue = function (index) {
   state.customQueue.splice(index, 1);
   renderCustomQueue();
   updateStartButtonState();
+  scheduleSyncRuntimeState("custom-queue-updated");
 };
 
 function updateStartButtonState() {
@@ -17010,6 +26271,7 @@ function updateStartButtonState() {
     sessionMode: state.sessionMode,
     customQueueLength: state.customQueue.length,
     selectedDuration: state.selectedDuration,
+    imagesCount: Array.isArray(state.images) ? state.images.length : 0,
   });
   startBtn.disabled = !!startState.disabled;
   startBtn.style.opacity = startState.opacity;
@@ -17089,7 +26351,9 @@ function hmsToTotalSeconds(hours, minutes, seconds) {
 
 function resolveProgressiveBlurControlState(disabled, keepActive = false) {
   if (!SESSION_MODE_UI_UTILS?.resolveProgressiveBlurControlState) {
-    logMissingShared("SESSION_MODE_UI_UTILS.resolveProgressiveBlurControlState");
+    logMissingShared(
+      "SESSION_MODE_UI_UTILS.resolveProgressiveBlurControlState",
+    );
     return {
       disabled: !!disabled,
       opacity: "1",
@@ -17122,7 +26386,9 @@ function getDurationFromButton(button, fallback = 0) {
 
 function clearDurationButtonsActive(buttons) {
   if (!SESSION_DURATION_BUTTONS_UTILS?.clearActiveDurationButtons) {
-    logMissingShared("SESSION_DURATION_BUTTONS_UTILS.clearActiveDurationButtons");
+    logMissingShared(
+      "SESSION_DURATION_BUTTONS_UTILS.clearActiveDurationButtons",
+    );
     return;
   }
   SESSION_DURATION_BUTTONS_UTILS.clearActiveDurationButtons(buttons);
@@ -17144,7 +26410,11 @@ function syncClassicDurationButtons(classicPanel) {
   toggleDurationButtonsForValue(classicBtns, state.selectedDuration);
 }
 
-function resolveMemoryDurationTarget(memoryType, memoryDuration, selectedDuration) {
+function resolveMemoryDurationTarget(
+  memoryType,
+  memoryDuration,
+  selectedDuration,
+) {
   if (!SESSION_MODE_UI_UTILS?.resolveMemoryDurationTarget) {
     logMissingShared("SESSION_MODE_UI_UTILS.resolveMemoryDurationTarget");
     return {
@@ -17165,7 +26435,8 @@ function syncMemoryDurationButtons() {
     state.memoryDuration,
     state.selectedDuration,
   );
-  const memoryFlashBtns = memoryFlashSettings?.querySelectorAll(".duration-btn");
+  const memoryFlashBtns =
+    memoryFlashSettings?.querySelectorAll(".duration-btn");
   const memoryProgressiveBtns =
     memoryProgressiveSettings?.querySelectorAll(".duration-btn");
   if (target.memoryType === "flash") {
@@ -17192,6 +26463,9 @@ function resolveModeTransitionPlan(mode, previousMode) {
 }
 
 function switchMode(mode) {
+  if (isSyncSessionParticipantActive() && !syncRuntimeApplyInProgress) {
+    return;
+  }
   const classicPanel = document.getElementById("mode-classique-settings");
   const customPanel = document.getElementById("mode-custom-settings");
   const memoryPanel = document.getElementById("mode-memory-settings");
@@ -17221,7 +26495,8 @@ function switchMode(mode) {
   memoryPanel.classList.remove("mode-frozen");
 
   if (transitionPlan.isRelax) {
-    const activePanel = panelByKey[transitionPlan.relaxFrozenPanelKey] || classicPanel;
+    const activePanel =
+      panelByKey[transitionPlan.relaxFrozenPanelKey] || classicPanel;
     activePanel.classList.add("mode-frozen");
     activePanel.style.display = "block";
     activePanel.classList.add("fade-in");
@@ -17262,6 +26537,7 @@ function switchMode(mode) {
       }
 
       if (container) container.style.minHeight = "";
+      applyScrubbableBehavior(document);
       updateStartButtonState();
       return;
     }
@@ -17300,6 +26576,7 @@ function switchMode(mode) {
   }
 
   updateStartButtonState();
+  applyScrubbableBehavior(document);
 
   if (transitionPlan.disableProgressiveBlur) {
     const disabledState = resolveProgressiveBlurControlState(true, false);
@@ -17315,6 +26592,8 @@ function switchMode(mode) {
       applyProgressiveBlurControlState(homeProgressiveBlurBtn, enabledState);
     }
   }
+
+  scheduleSyncRuntimeState("mode-changed", { force: true });
 }
 
 function setupCustomModeEvents() {
@@ -17369,6 +26648,7 @@ function handleCustomNext() {
 
   updateDisplay();
   startTimer();
+  scheduleSyncRuntimeState("custom-step-next", { force: true });
 }
 
 window.updateStep = function (index, field, value) {
@@ -17377,29 +26657,62 @@ window.updateStep = function (index, field, value) {
   const updated = updateCustomStepPositiveIntField(step, field, value, 1);
   if (!updated.updated) return;
 
+  if (isCustomStepInputScrubbing) {
+    hasCustomStepInputScrubChanges = true;
+    refreshCustomQueueTotalsLive(index);
+    return;
+  }
+
   renderCustomQueue();
+  scheduleSyncRuntimeState("custom-queue-updated");
 };
 
 function makeInputScrubbable(input) {
   if (!input || input.dataset.scrubbed) return;
   input.dataset.scrubbed = "true";
 
-  let startX, startVal;
+  let startX, startVal, currentVal;
+  const baseScrubSensitivity = Math.max(
+    1,
+    Number(UI_CONSTANTS?.SCRUB_SENSITIVITY) || 1,
+  );
+  const altSensitivityMultiplier = 6;
+  const shiftSnapStep = 5;
+  const isCustomStepInput =
+    input.hasAttribute("data-step-index") &&
+    (input.hasAttribute("data-step-hms") ||
+      input.hasAttribute("data-step-field"));
   input.style.cursor = "ew-resize";
 
   input.onmousedown = (e) => {
     startX = e.clientX;
     startVal = parseIntegerValue(input.value, 0);
+    currentVal = startVal;
+
+    if (isCustomStepInput) {
+      isCustomStepInputScrubbing = true;
+      hasCustomStepInputScrubChanges = false;
+    }
 
     const onMouseMove = (e) => {
-      const delta = Math.round(
-        (e.clientX - startX) / UI_CONSTANTS.SCRUB_SENSITIVITY,
-      );
-      const newVal = startVal + delta;
+      const effectiveSensitivity = e.altKey
+        ? baseScrubSensitivity * altSensitivityMultiplier
+        : baseScrubSensitivity;
+      let delta = Math.round((e.clientX - startX) / effectiveSensitivity);
+      let newVal = startVal + delta;
+
+      if (e.shiftKey && delta !== 0) {
+        newVal =
+          delta > 0
+            ? Math.ceil(newVal / shiftSnapStep) * shiftSnapStep
+            : Math.floor(newVal / shiftSnapStep) * shiftSnapStep;
+      }
       const min = readInputNumberBound(input, "min", 0);
       const max = readInputNumberBound(input, "max", 999);
       const clampedValue = clampIntegerValue(newVal, min, max, min);
 
+      if (clampedValue === currentVal) return;
+      currentVal = clampedValue;
       input.value = clampedValue;
 
       // Utilisation de la version debouncée pour éviter trop d'appels
@@ -17413,12 +26726,33 @@ function makeInputScrubbable(input) {
       document.removeEventListener("mousemove", onMouseMove);
       document.removeEventListener("mouseup", onMouseUp);
       document.body.style.cursor = "default";
+
+      if (isCustomStepInput) {
+        const shouldFlush = hasCustomStepInputScrubChanges;
+        isCustomStepInputScrubbing = false;
+        hasCustomStepInputScrubChanges = false;
+
+        if (shouldFlush) {
+          renderCustomQueue();
+          scheduleSyncRuntimeState("custom-queue-updated");
+          if (typeof saveCustomQueue === "function") saveCustomQueue();
+        }
+      }
     };
 
     document.addEventListener("mousemove", onMouseMove);
     document.addEventListener("mouseup", onMouseUp);
     document.body.style.cursor = "ew-resize";
   };
+}
+
+function applyScrubbableBehavior(root = document) {
+  if (!root || typeof root.querySelectorAll !== "function") return;
+  root.querySelectorAll('input[type="number"]').forEach((input) => {
+    if (!input || input.dataset.noScrub === "true") return;
+    if (input.closest(".drag-handle")) return;
+    makeInputScrubbable(input);
+  });
 }
 
 // DRAG
@@ -17463,7 +26797,7 @@ window.handleDragOver = function (e, element) {
   }
 };
 
-window.dropStep = function (e, targetIndex) {
+window.dropStep = function (e, targetIndex, targetElement = null) {
   e.preventDefault();
 
   let sIdx = dragSourceIndex;
@@ -17474,7 +26808,14 @@ window.dropStep = function (e, targetIndex) {
   const tIdx = parseIntegerValue(targetIndex, -1);
   if (sIdx < 0 || tIdx < 0) return;
 
-  const rect = e.currentTarget.getBoundingClientRect();
+  const dropTargetElement = targetElement || e.currentTarget;
+  if (
+    !dropTargetElement ||
+    typeof dropTargetElement.getBoundingClientRect !== "function"
+  ) {
+    return;
+  }
+  const rect = dropTargetElement.getBoundingClientRect();
   const isBelow = e.clientY - rect.top > rect.height / 2;
 
   const result = applyCustomQueueDropOperation(
@@ -17487,6 +26828,7 @@ window.dropStep = function (e, targetIndex) {
 
   if (result.changed) {
     renderCustomQueue();
+    scheduleSyncRuntimeState("custom-queue-updated");
   } else {
     handleDragEnd();
   }
@@ -17507,21 +26849,62 @@ document.addEventListener("DOMContentLoaded", () => {
   );
   document.body.classList.toggle("grid-enabled", !!isGridEnabled);
 
-  const topTimeInputs = document.querySelectorAll(
-    "#custom-h-input, #custom-m-input, #custom-s-input",
-  );
-  const topCountInput = document.querySelector("#custom-count-input");
+  applyScrubbableBehavior(document);
 
-  topTimeInputs.forEach((input) => makeInputScrubbable(input));
-  if (topCountInput) makeInputScrubbable(topCountInput);
+  const shouldReopenSync = localStorage.getItem('posechrono-reopen-sync-modal');
+  if (shouldReopenSync === 'true') {
+    localStorage.removeItem('posechrono-reopen-sync-modal');
+    const savedRole = localStorage.getItem('posechrono-reopen-sync-modal-role');
+    localStorage.removeItem('posechrono-reopen-sync-modal-role');
+    if (savedRole === 'join' || savedRole === 'host') {
+      syncSessionModalRole = savedRole;
+    }
+    setTimeout(() => {
+      if (typeof openSyncSessionModal === 'function' && isSyncFeatureEnabled()) {
+        openSyncSessionModal();
+      }
+    }, 400);
+  }
+
+  const shouldReopenSettings = localStorage.getItem('posechrono-reopen-global-settings-modal');
+  if (shouldReopenSettings === 'true') {
+    localStorage.removeItem('posechrono-reopen-global-settings-modal');
+    setTimeout(() => {
+      if (typeof openGlobalSettingsModal === 'function') {
+        openGlobalSettingsModal();
+      }
+    }, 400);
+  }
+
+  const shouldShowResetSettingsToast = localStorage.getItem(
+    "posechrono-show-reset-settings-toast",
+  );
+  if (shouldShowResetSettingsToast === "true") {
+    localStorage.removeItem("posechrono-show-reset-settings-toast");
+    setTimeout(() => {
+      if (typeof window.showPoseChronoToast === "function") {
+        window.showPoseChronoToast({
+          type: "success",
+          message: i18next.t("settings.global.resetSettingsDone", {
+            defaultValue: "All settings reset to defaults.",
+          }),
+          duration: 1800,
+        });
+      }
+    }, 500);
+  }
 });
 
 function updateButtonLabels() {
   const hk = CONFIG.HOTKEYS;
+  const soundTooltip = state.soundEnabled
+    ? i18next.t("controls.muteSound", { defaultValue: "Mute sound" })
+    : i18next.t("controls.unmuteSound", { defaultValue: "Unmute sound" });
 
   const labels = {
     "autoflip-btn": i18next.t("filters.autoFlipTooltip"),
     "home-progressive-blur-btn": i18next.t("filters.progressiveBlurHome"),
+    "sound-btn": soundTooltip,
     "flip-horizontal-btn":
       i18next.t("drawing.flipHorizontal") + ` (${hk.FLIP_H})`,
     "grayscale-btn": i18next.t("filters.grayscaleTooltip", {
@@ -17530,18 +26913,24 @@ function updateButtonLabels() {
     "blur-btn": i18next.t("filters.blurTooltip", {
       hotkey: hk.BLUR.toUpperCase(),
     }),
+    "progressive-blur-btn": i18next.t("filters.progressiveBlurTooltip"),
     "prev-btn": i18next.t("drawing.previousTooltip"),
     "next-btn": i18next.t("drawing.nextTooltip"),
     "play-pause-btn": i18next.t("controls.playPauseTooltip"),
-    "toggle-timer-btn": i18next.t("timer.toggleTimerTooltip"),
-    "flip-vertical-btn": i18next.t("drawing.flipVertical") + ` (${hk.FLIP_H})`,
+    "flip-vertical-btn": i18next.t("drawing.flipVertical"),
     "annotate-btn": i18next.t("drawing.annotateTooltip", {
       hotkey: hk.ANNOTATE.toUpperCase(),
+    }),
+    "grid-btn": i18next.t("filters.gridTooltip", {
+      hotkey: hk.GRID.toUpperCase(),
+    }),
+    "silhouette-btn": i18next.t("filters.silhouetteTooltip", {
+      hotkey: hk.SILHOUETTE.toUpperCase(),
     }),
     "reveal-btn": i18next.t(getRevealActionI18nKey()),
     "delete-btn": i18next.t("drawing.deleteImage"),
     "stop-btn": i18next.t("timer.endSession"),
-    "settings-btn": i18next.t("settings.title"),
+    "settings-btn": i18next.t("sidebar.config.settings"),
   };
 
   for (const [id, text] of Object.entries(labels)) {
@@ -17562,6 +26951,43 @@ tooltip.id = "custom-tooltip";
 document.body.appendChild(tooltip);
 
 let tooltipTimeout;
+let activeTooltipTarget = null;
+let activeTooltipFollowCursor = false;
+let tooltipPointerX = 0;
+let tooltipPointerY = 0;
+
+const positionTooltipForTarget = (target) => {
+  if (!target) return;
+  let left = 0;
+  let top = 0;
+  if (activeTooltipFollowCursor) {
+    left = tooltipPointerX + 14;
+    top = tooltipPointerY + 16;
+    if (left + tooltip.offsetWidth > window.innerWidth - 10) {
+      left = tooltipPointerX - tooltip.offsetWidth - 14;
+    }
+    if (top + tooltip.offsetHeight > window.innerHeight - 10) {
+      top = tooltipPointerY - tooltip.offsetHeight - 14;
+    }
+  } else {
+    const rect = target.getBoundingClientRect();
+    left = rect.left + rect.width / 2 - tooltip.offsetWidth / 2;
+    top = rect.top - tooltip.offsetHeight - 8;
+    if (top < 0) top = rect.bottom + 8;
+  }
+
+  if (left < 10) left = 10;
+  if (left + tooltip.offsetWidth > window.innerWidth - 10) {
+    left = window.innerWidth - tooltip.offsetWidth - 10;
+  }
+  if (top < 10) top = 10;
+  if (top + tooltip.offsetHeight > window.innerHeight - 10) {
+    top = window.innerHeight - tooltip.offsetHeight - 10;
+  }
+
+  tooltip.style.left = `${left}px`;
+  tooltip.style.top = `${top}px`;
+};
 
 document.addEventListener("mouseover", (e) => {
   const target = e.target.closest("[data-tooltip]");
@@ -17572,56 +26998,67 @@ document.addEventListener("mouseover", (e) => {
 
   const text = target.getAttribute("data-tooltip");
   if (!text) return;
+  clearTimeout(tooltipTimeout);
+  activeTooltipTarget = target;
+  activeTooltipFollowCursor = target.id === "sync-session-network-status";
+  tooltipPointerX = Number(e.clientX || 0);
+  tooltipPointerY = Number(e.clientY || 0);
+  target.removeAttribute("title");
 
   // On utilise CONFIG.tooltipDelay ici
   tooltipTimeout = setTimeout(() => {
+    if (!activeTooltipTarget || activeTooltipTarget !== target) return;
+    const liveText = target.getAttribute("data-tooltip");
+    if (!liveText) return;
     // Formater les raccourcis entre crochets ou parenthèses en gris
-    const formattedText = text
+    const safeText = escapeHtml(liveText);
+    const formattedText = safeText
       .replace(/\[([^\]]+)\]/g, '<span class="tooltip-shortcut">[$1]</span>')
-      .replace(
-        /\(([A-Z0-9+]+)\)/g,
-        '<span class="tooltip-shortcut">($1)</span>',
-      )
+      .replace(/\(([^)]+)\)/g, '<span class="tooltip-shortcut">($1)</span>')
       .replace(/( - .+)$/, '<span class="tooltip-shortcut">$1</span>');
     tooltip.innerHTML = formattedText;
 
     // Détecter si le texte contient un saut de ligne
-    if (text.includes("\n")) {
+    if (liveText.includes("\n")) {
       tooltip.classList.add("multiline");
     } else {
       tooltip.classList.remove("multiline");
     }
 
     tooltip.style.opacity = "1";
-
-    const rect = target.getBoundingClientRect();
-
-    // Calcul position
-    let left = rect.left + rect.width / 2 - tooltip.offsetWidth / 2;
-    let top = rect.top - tooltip.offsetHeight - 8;
-
-    // Anti-débordement
-    if (left < 10) left = 10;
-    if (left + tooltip.offsetWidth > window.innerWidth - 10) {
-      left = window.innerWidth - tooltip.offsetWidth - 10;
-    }
-    if (top < 0) top = rect.bottom + 8;
-
-    tooltip.style.left = `${left}px`;
-    tooltip.style.top = `${top}px`;
+    positionTooltipForTarget(target);
   }, CONFIG.tooltipDelay); // <--- Appel dynamique à la config
 });
 
+document.addEventListener("mousemove", (e) => {
+  if (!activeTooltipFollowCursor || !activeTooltipTarget) return;
+  const target = e.target.closest("[data-tooltip]");
+  if (!target || target !== activeTooltipTarget) return;
+  tooltipPointerX = Number(e.clientX || 0);
+  tooltipPointerY = Number(e.clientY || 0);
+  if (tooltip.style.opacity === "1") {
+    positionTooltipForTarget(activeTooltipTarget);
+  }
+});
+
 document.addEventListener("mouseout", (e) => {
-  if (e.target.closest("[data-tooltip]")) {
-    clearTimeout(tooltipTimeout);
-    tooltip.style.opacity = "0";
+  const target = e.target.closest("[data-tooltip]");
+  if (!target) return;
+  const relatedTarget = e.relatedTarget;
+  if (relatedTarget && target.contains(relatedTarget)) return;
+  clearTimeout(tooltipTimeout);
+  tooltip.style.opacity = "0";
+  if (activeTooltipTarget === target) {
+    activeTooltipTarget = null;
+    activeTooltipFollowCursor = false;
   }
 });
 
 document.addEventListener("mousedown", () => {
   clearTimeout(tooltipTimeout);
   tooltip.style.opacity = "0";
+  activeTooltipTarget = null;
+  activeTooltipFollowCursor = false;
 });
 // --- Fin infobulle ---
 
@@ -17745,4 +27182,3 @@ function initPauseBadgeDrag() {
     }
   });
 }
-

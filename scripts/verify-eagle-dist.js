@@ -18,7 +18,7 @@ const REQUIRED_ROOT_ENTRIES = new Set([
   "assets",
 ]);
 
-const OPTIONAL_ROOT_ENTRIES = new Set(["LICENSE", "README.md"]);
+const OPTIONAL_ROOT_ENTRIES = new Set(["LICENSE", "README.md", "GabContainer"]);
 
 const FORBIDDEN_PATH_SEGMENTS = new Set([
   ".git",
@@ -82,12 +82,13 @@ async function main() {
           (entry) =>
             entry.isDirectory() &&
             (entry.name === "eagle-plugin" ||
-              entry.name.startsWith("eagle-plugin-")),
+              entry.name.startsWith("eagle-plugin-") ||
+              /^PoseChrono_v[^_]+.*_eagle_T/i.test(entry.name)),
         )
         .map((entry) => entry.name);
 
       const timestamped = names
-        .filter((name) => name.startsWith("eagle-plugin-"))
+        .filter((name) => name.startsWith("eagle-plugin-") || /^PoseChrono_v/i.test(name))
         .sort((a, b) => b.localeCompare(a));
       if (timestamped.length > 0) {
         distDir = path.join(distRoot, timestamped[0]);

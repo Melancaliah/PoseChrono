@@ -23,6 +23,22 @@
     return `${m}:${String(s).padStart(2, "0")}`;
   }
 
+  function normalizeReviewImageSource(rawValue) {
+    const raw = String(rawValue || "").trim();
+    if (!raw) return "";
+    if (/^(https?:|file:|data:|blob:)/i.test(raw)) {
+      return raw;
+    }
+    const normalized = raw.replace(/\\/g, "/");
+    if (/^[a-zA-Z]:\//.test(normalized)) {
+      return `file:///${normalized}`;
+    }
+    if (normalized.startsWith("/")) {
+      return `file://${normalized}`;
+    }
+    return `file:///${normalized.replace(/^\/+/, "")}`;
+  }
+
   function buildReviewGridItems(imagesSeen, options = {}) {
     const images = Array.isArray(imagesSeen) ? imagesSeen : [];
     const isVideoFile =
@@ -46,7 +62,9 @@
     return images.map((image, index) => {
       const isVideo = !!isVideoFile(image);
       const thumbnailSrc = image?.thumbnailURL || image?.thumbnail || "";
-      const fallbackSrc = image?.filePath ? `file:///${image.filePath}` : "";
+      const fallbackSrc = normalizeReviewImageSource(
+        image?.filePath || image?.path || image?.file || "",
+      );
       const durationSeconds = includeDurations ? getDurationSeconds(image) : 0;
       const durationText = includeDurations
         ? formatDuration(durationSeconds)

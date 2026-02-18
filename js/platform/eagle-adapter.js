@@ -109,6 +109,11 @@
           await eagleApi.shell.showItemInFolder(filePath);
           return true;
         },
+        openPath: async (filePath) => {
+          if (eagleApi.shell?.openPath) return await eagleApi.shell.openPath(filePath);
+          if (eagleApi.shell?.openItem) return await eagleApi.shell.openItem(filePath);
+          return false;
+        },
         getPath: async (name) => {
           if (!eagleApi.app?.getPath) return null;
           return eagleApi.app.getPath(name);
@@ -116,6 +121,9 @@
       },
       folder: {
         getSelected: async () => eagleApi.folder?.getSelected?.(),
+        getAll: async () => eagleApi.folder?.getAll?.(),
+        browseAndAdd: async () => eagleApi.folder?.browseAndAdd?.(),
+        removeFolder: async (id) => eagleApi.folder?.removeFolder?.(id),
       },
       clipboard: {
         copyFiles: async (paths) => eagleApi.clipboard?.copyFiles?.(paths),

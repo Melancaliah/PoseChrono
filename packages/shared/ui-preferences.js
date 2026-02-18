@@ -62,6 +62,8 @@
     );
     const BASE_DEFAULT_REVIEW_DURATIONS_VISIBLE =
       defaultsInput.reviewDurationsVisible !== false;
+    const BASE_DEFAULT_SYNC_GUEST_ACTION_NOTIFICATIONS_ENABLED =
+      defaultsInput.syncGuestActionNotificationsEnabled !== false;
     const BASE_DEFAULT_HOTKEYS_COLLAPSED = normalizeStringArray(
       defaultsInput.hotkeysCollapsedCategories,
     );
@@ -82,6 +84,8 @@
       titlebarAlwaysVisible: BASE_DEFAULT_TITLEBAR_ALWAYS_VISIBLE,
       defaultSessionMode: BASE_DEFAULT_SESSION_MODE,
       reviewDurationsVisible: BASE_DEFAULT_REVIEW_DURATIONS_VISIBLE,
+      syncGuestActionNotificationsEnabled:
+        BASE_DEFAULT_SYNC_GUEST_ACTION_NOTIFICATIONS_ENABLED,
       hotkeysCollapsedCategories: BASE_DEFAULT_HOTKEYS_COLLAPSED,
       globalSettingsCollapsedCategories: BASE_DEFAULT_GLOBAL_SETTINGS_COLLAPSED,
       preferredLanguage: BASE_DEFAULT_PREFERRED_LANGUAGE,
@@ -126,6 +130,8 @@
       cache.backgroundGridEnabled = !!cache.backgroundGridEnabled;
       cache.titlebarAlwaysVisible = !!cache.titlebarAlwaysVisible;
       cache.reviewDurationsVisible = cache.reviewDurationsVisible !== false;
+      cache.syncGuestActionNotificationsEnabled =
+        cache.syncGuestActionNotificationsEnabled !== false;
       cache.defaultSessionMode = normalizeSessionModeValue(
         cache.defaultSessionMode,
         defaults.defaultSessionMode,
@@ -201,6 +207,7 @@
         case "backgroundGridEnabled":
         case "titlebarAlwaysVisible":
         case "reviewDurationsVisible":
+        case "syncGuestActionNotificationsEnabled":
           return !!value;
         case "defaultSessionMode":
           return normalizeSessionModeValue(value, BASE_DEFAULT_SESSION_MODE);
@@ -248,6 +255,8 @@
             BASE_DEFAULT_SESSION_MODE,
           ),
           reviewDurationsVisible: !!prefs.reviewDurationsVisible,
+          syncGuestActionNotificationsEnabled:
+            prefs.syncGuestActionNotificationsEnabled !== false,
           hotkeysCollapsedCategories: normalizeStringArray(
             prefs.hotkeysCollapsedCategories,
           ),
@@ -269,6 +278,7 @@
           "titlebarAlwaysVisible",
           "defaultSessionMode",
           "reviewDurationsVisible",
+          "syncGuestActionNotificationsEnabled",
           "hotkeysCollapsedCategories",
           "globalSettingsCollapsedCategories",
           "preferredLanguage",

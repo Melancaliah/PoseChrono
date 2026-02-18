@@ -4,6 +4,16 @@
   const globalObj = globalScope || (typeof window !== "undefined" ? window : {});
   const sharedRoot = globalObj.PoseChronoShared || {};
 
+  function esc(input) {
+    const str = String(input ?? "");
+    return str
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
   function createTimelineDisplayUtils(deps = {}) {
     const t = typeof deps.t === "function" ? deps.t : null;
     const formatTime =
@@ -67,7 +77,7 @@
       const title = `<div class="custom-structure-title">${translate("timeline.sessionPlan", {}, "Plan de la session")}</div>`;
 
       const steps = customQueue.map((step) => {
-        const timeStr = formatTime(step.duration);
+        const timeStr = esc(formatTime(step.duration));
         if (step.type === "pause") {
           return `<div class="custom-step pause">${translate("timeline.pauseStep", {}, "Pause")} ${timeStr}</div>`;
         }
@@ -75,7 +85,7 @@
           step.count > 1
             ? translate("timeline.poses", {}, "poses")
             : translate("timeline.pose", {}, "pose");
-        return `<div class="custom-step pose">${step.count} ${poseWord} ${translate("timeline.of", {}, "de")} ${timeStr}</div>`;
+        return `<div class="custom-step pose">${esc(step.count)} ${poseWord} ${translate("timeline.of", {}, "de")} ${timeStr}</div>`;
       });
 
       return title + steps.join("");

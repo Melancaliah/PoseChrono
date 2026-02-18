@@ -38,6 +38,26 @@
 
       <!-- Zone des controles (droite) -->
       <div class="titlebar-controls">
+        <button
+          id="titlebar-sync-btn"
+          class="titlebar-btn titlebar-btn-sync"
+          data-tooltip="Online sync"
+          data-i18n-tooltip="titlebar.syncTooltip"
+          data-i18n-aria-label="sync.title"
+          aria-label="Online sync"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 -960 960 960"
+            fill="currentColor"
+            aria-hidden="true"
+          >
+            <path
+              d="M640-80v-90q-56-18-94-64t-44-106h80q8 43 40.5 71.5T700-240h120q25 0 42.5 17.5T880-180v100H640Zm120-200q-33 0-56.5-23.5T680-360q0-33 23.5-56.5T760-440q33 0 56.5 23.5T840-360q0 33-23.5 56.5T760-280ZM360-400q0-150 105-255t255-105v80q-117 0-198.5 81.5T440-400h-80Zm160 0q0-83 58.5-141.5T720-600v80q-50 0-85 35t-35 85h-80ZM80-520v-100q0-25 17.5-42.5T140-680h120q45 0 77.5-28.5T378-780h80q-6 60-44 106t-94 64v90H80Zm120-200q-33 0-56.5-23.5T120-800q0-33 23.5-56.5T200-880q33 0 56.5 23.5T280-800q0 33-23.5 56.5T200-720Z"
+            />
+          </svg>
+        </button>
+
         <!-- Bouton Paramètres globaux -->
         <button
           id="titlebar-settings-btn"
@@ -148,8 +168,47 @@
               ><span style="color: white">Chrono!</span>
             </h1>
             <p class="subtitle">Session de modèles vivants</p>
+            <p
+              id="sync-settings-readonly-badge"
+              class="sync-settings-readonly-badge hidden"
+            >
+              Lecture seule: contrôlée par l'hôte
+            </p>
             <div class="setting-group">
-              <div class="folder-info-row">
+              <!-- Widget multi-dossiers (desktop uniquement) -->
+              <div class="desktop-sources-widget hidden" id="desktop-sources-widget">
+                <div class="desktop-sources-header">
+                  <button
+                    type="button"
+                    class="desktop-sources-summary-btn"
+                    id="desktop-sources-toggle"
+                    aria-expanded="false"
+                  >
+                    <svg class="desktop-sources-icon" xmlns="http://www.w3.org/2000/svg" height="15px" viewBox="0 -960 960 960" width="15px" fill="currentColor" aria-hidden="true"><path d="M160-160q-33 0-56.5-23.5T80-240v-480q0-33 23.5-56.5T160-800h240l80 80h320q33 0 56.5 23.5T880-640v400q0 33-23.5 56.5T800-160H160Z"/></svg>
+                    <span class="desktop-sources-summary-text" id="desktop-sources-summary"></span>
+                    <span class="desktop-sources-chevron" aria-hidden="true">
+                      <svg xmlns="http://www.w3.org/2000/svg" height="14px" viewBox="0 -960 960 960" width="14px" fill="currentColor"><path d="M480-344 240-584l56-56 184 184 184-184 56 56-240 240Z"/></svg>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    class="desktop-sources-add-btn"
+                    id="desktop-sources-add-btn"
+                    aria-label="Ajouter un dossier source"
+                    data-i18n-aria-label="settings.addSourceFolder"
+                    data-tooltip="Ajouter un dossier source"
+                    data-i18n-tooltip="settings.addSourceFolder"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" height="18px" viewBox="0 -960 960 960" width="18px" fill="currentColor" aria-hidden="true"><path d="M440-440H200v-80h240v-240h80v240h240v80H520v240h-80v-240Z"/></svg>
+                  </button>
+                </div>
+                <div class="desktop-sources-list" id="desktop-sources-list" hidden>
+                  <!-- Injecté dynamiquement par renderDesktopFolderSources() -->
+                </div>
+              </div>
+
+              <!-- Ligne classique (Eagle plugin + fallback desktop sans dossier) -->
+              <div class="folder-info-row" id="folder-info-row">
                 <p
                   id="folder-info"
                   class="info-text"
@@ -991,6 +1050,13 @@
                   ><span data-i18n="drawing.totalLabel">Total:</span>
                   <span id="drawing-total-distance-value">0px</span></span
                 >
+                <button
+                  type="button"
+                  id="drawing-clear-measures"
+                  data-i18n-title="draw.buttons.clearMeasurements"
+                >
+                  ×
+                </button>
               </div>
             </div>
 
@@ -1097,12 +1163,6 @@
                 1:00
               </div>
               <div id="image-counter" class="image-counter">1 / 0</div>
-              <button
-                type="button"
-                id="toggle-timer-btn"
-                class="control-btn-small"
-                data-tooltip="Afficher/Masquer timer"
-              ></button>
             </div>
             <!-- Bouton son -->
             <button
@@ -1220,6 +1280,12 @@
               ></button>
               <button
                 type="button"
+                id="progressive-blur-btn"
+                class="control-btn-small"
+                data-tooltip="Flou progressif"
+              ></button>
+              <button
+                type="button"
                 id="annotate-btn"
                 class="control-btn-small"
                 data-tooltip="Dessiner / Analyser (B)"
@@ -1236,9 +1302,20 @@
                   />
                 </svg>
               </button>
-              <!-- progressive-blur-btn retiré de la sidebar (accessible via menu contextuel) -->
+              <button
+                type="button"
+                id="grid-btn"
+                class="control-btn-small"
+                data-tooltip="Grille"
+              ></button>
+              <button
+                type="button"
+                id="silhouette-btn"
+                class="control-btn-small"
+                data-tooltip="Silhouette"
+              ></button>
 
-              <div class="sidebar-divider"></div>
+              <div class="sidebar-divider" id="transform-actions-divider"></div>
               <!-- Boutons d'action (Révéler / Supprimer) -->
               <button
                 type="button"
@@ -1331,10 +1408,20 @@
       <!-- MODAL GESTION DES TAGS                                      -->
       <!-- ============================================================ -->
       <div id="tags-modal" class="modal hidden">
-        <div class="modal-content" role="dialog" aria-modal="true" tabindex="-1">
+        <div
+          class="modal-content"
+          role="dialog"
+          aria-modal="true"
+          tabindex="-1"
+        >
           <div id="tags-modal-header" class="modal-header">
             <h2 data-i18n="tags.manage">Gérer les tags</h2>
-            <button type="button" id="close-tags-modal" class="modal-close-btn" data-modal-close="true">
+            <button
+              type="button"
+              id="close-tags-modal"
+              class="modal-close-btn"
+              data-modal-close="true"
+            >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
                 height="24px"
@@ -1366,7 +1453,12 @@
                     class="tag-autocomplete hidden"
                   ></div>
                 </div>
-                <button type="button" id="create-tag-btn" class="modal-btn" data-modal-primary="true">
+                <button
+                  type="button"
+                  id="create-tag-btn"
+                  class="modal-btn"
+                  data-modal-primary="true"
+                >
                   <svg
                     xmlns="http://www.w3.org/2000/svg"
                     height="18px"
@@ -1430,7 +1522,12 @@
       <div class="modal-content" role="dialog" aria-modal="true" tabindex="-1">
         <div class="modal-header">
           <h2 data-i18n="modes.custom.managePlans">Plans de Session</h2>
-          <button type="button" id="close-plans-modal" class="modal-close-btn" data-modal-close="true">
+          <button
+            type="button"
+            id="close-plans-modal"
+            class="modal-close-btn"
+            data-modal-close="true"
+          >
             &times;
           </button>
         </div>
@@ -1447,7 +1544,12 @@
                 data-i18n-placeholder="modes.custom.planName"
                 maxlength="50"
               />
-              <button type="button" id="save-plan-btn" class="plan-action-btn" data-modal-primary="true">
+              <button
+                type="button"
+                id="save-plan-btn"
+                class="plan-action-btn"
+                data-modal-primary="true"
+              >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
                   height="18px"
@@ -1483,17 +1585,47 @@
     <!-- MODAL PARAMÈTRES GLOBAUX                                    -->
     <!-- ============================================================ -->
     <div id="global-settings-modal" class="modal modal-overlay hidden">
-      <div class="modal-content modal-container global-settings-modal-content" role="dialog" aria-modal="true" aria-labelledby="global-settings-modal-title" tabindex="-1">
-        <div class="modal-header">
+      <div
+        class="modal-content modal-container global-settings-modal-content"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="global-settings-modal-title"
+        tabindex="-1"
+      >
+        <div id="global-settings-modal-header" class="modal-header">
           <h3 id="global-settings-modal-title" class="modal-title">
-            <svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="currentColor" aria-hidden="true">
-              <path d="m370-80-16-128q-13-5-24.5-12T307-235l-119 50L78-375l103-78q-1-7-1-13.5v-27q0-6.5 1-13.5L78-585l110-190 119 50q11-8 23-15t24-12l16-128h220l16 128q13 5 24.5 12t22.5 15l119-50 110 190-103 78q1 7 1 13.5v27q0 6.5-2 13.5l103 78-110 190-118-50q-11 8-23 15t-24 12L590-80H370Zm70-80h79l14-106q31-8 57.5-23.5T639-327l99 41 39-68-86-65q5-14 7-29.5t2-31.5q0-16-2-31.5t-7-29.5l86-65-39-68-99 42q-22-23-48.5-38.5T533-694l-13-106h-79l-14 106q-31 8-57.5 23.5T321-633l-99-41-39 68 86 64q-5 15-7 30t-2 32q0 16 2 31t7 30l-86 65 39 68 99-42q22 23 48.5 38.5T427-266l13 106Zm42-180q58 0 99-41t41-99q0-58-41-99t-99-41q-59 0-99.5 41T342-480q0 58 40.5 99t99.5 41Zm-2-140Z"/>
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              height="24px"
+              viewBox="0 -960 960 960"
+              width="24px"
+              fill="currentColor"
+              aria-hidden="true"
+            >
+              <path
+                d="m370-80-16-128q-13-5-24.5-12T307-235l-119 50L78-375l103-78q-1-7-1-13.5v-27q0-6.5 1-13.5L78-585l110-190 119 50q11-8 23-15t24-12l16-128h220l16 128q13 5 24.5 12t22.5 15l119-50 110 190-103 78q1 7 1 13.5v27q0 6.5-2 13.5l103 78-110 190-118-50q-11 8-23 15t-24 12L590-80H370Zm70-80h79l14-106q31-8 57.5-23.5T639-327l99 41 39-68-86-65q5-14 7-29.5t2-31.5q0-16-2-31.5t-7-29.5l86-65-39-68-99 42q-22-23-48.5-38.5T533-694l-13-106h-79l-14 106q-31 8-57.5 23.5T321-633l-99-41-39 68 86 64q-5 15-7 30t-2 32q0 16 2 31t7 30l-86 65 39 68 99-42q22 23 48.5 38.5T427-266l13 106Zm42-180q58 0 99-41t41-99q0-58-41-99t-99-41q-59 0-99.5 41T342-480q0 58 40.5 99t99.5 41Zm-2-140Z"
+              />
             </svg>
             <span data-i18n="settings.global.title">Global settings</span>
           </h3>
-          <button type="button" id="close-global-settings-modal" class="modal-close-btn" data-modal-close="true" data-i18n-aria-label="titlebar.close" aria-label="Close">
-            <svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="currentColor">
-              <path d="m256-200-56-56 224-224-224-224 56-56 224 224 224-224 56 56-224 224 224 224-56 56-224-224-224 224Z"/>
+          <button
+            type="button"
+            id="close-global-settings-modal"
+            class="modal-close-btn"
+            data-modal-close="true"
+            data-i18n-aria-label="titlebar.close"
+            aria-label="Close"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              height="24px"
+              viewBox="0 -960 960 960"
+              width="24px"
+              fill="currentColor"
+            >
+              <path
+                d="m256-200-56-56 224-224-224-224 56-56 224 224 224-224 56 56-224 224 224 224-56 56-224-224-224 224Z"
+              />
             </svg>
           </button>
         </div>
@@ -1501,11 +1633,527 @@
           <div id="global-settings-sections"></div>
         </div>
         <div class="modal-footer hotkeys-footer">
-          <button type="button" class="hotkeys-footer-btn hotkeys-reset-all-btn" id="global-reset-settings-btn">
-            <svg xmlns="http://www.w3.org/2000/svg" height="14px" viewBox="0 -960 960 960" width="14px" fill="currentColor" aria-hidden="true">
-              <path d="M480-160q-134 0-227-93t-93-227q0-134 93-227t227-93q69 0 132 28.5T720-690v-110h80v280H520v-80h168q-32-56-88.5-88T480-720q-100 0-170 70t-70 170q0 100 70 170t170 70q77 0 139-44t87-116h84q-28 106-114 173t-196 67Z"/>
+          <button
+            type="button"
+            class="hotkeys-footer-btn hotkeys-reset-all-btn"
+            id="global-reset-settings-btn"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              height="14px"
+              viewBox="0 -960 960 960"
+              width="14px"
+              fill="currentColor"
+              aria-hidden="true"
+            >
+              <path
+                d="M480-160q-134 0-227-93t-93-227q0-134 93-227t227-93q69 0 132 28.5T720-690v-110h80v280H520v-80h168q-32-56-88.5-88T480-720q-100 0-170 70t-70 170q0 100 70 170t170 70q77 0 139-44t87-116h84q-28 106-114 173t-196 67Z"
+              />
             </svg>
-            <span data-i18n="settings.global.resetSettings">Reset settings</span>
+            <span data-i18n="settings.global.resetSettings"
+              >Reset settings</span
+            >
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div id="sync-session-modal" class="modal modal-overlay hidden">
+      <div
+        class="modal-content modal-container sync-session-modal-content"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="sync-session-modal-title"
+        tabindex="-1"
+      >
+        <div class="modal-header sync-session-modal-header">
+          <div class="sync-session-modal-headline">
+            <svg
+              id="sync-session-modal-title-icon"
+              class="sync-session-modal-title-icon"
+              xmlns="http://www.w3.org/2000/svg"
+              height="24px"
+              viewBox="0 -960 960 960"
+              width="24px"
+              fill="currentColor"
+              aria-hidden="true"
+            >
+              <path
+                d="M640-80v-90q-56-18-94-64t-44-106h80q8 43 40.5 71.5T700-240h120q25 0 42.5 17.5T880-180v100H640Zm120-200q-33 0-56.5-23.5T680-360q0-33 23.5-56.5T760-440q33 0 56.5 23.5T840-360q0 33-23.5 56.5T760-280ZM360-400q0-150 105-255t255-105v80q-117 0-198.5 81.5T440-400h-80Zm160 0q0-83 58.5-141.5T720-600v80q-50 0-85 35t-35 85h-80ZM80-520v-100q0-25 17.5-42.5T140-680h120q45 0 77.5-28.5T378-780h80q-6 60-44 106t-94 64v90H80Zm120-200q-33 0-56.5-23.5T120-800q0-33 23.5-56.5T200-880q33 0 56.5 23.5T280-800q0 33-23.5 56.5T200-720Z"
+              />
+            </svg>
+            <div class="sync-session-modal-heading-text">
+              <h3 id="sync-session-modal-title" class="modal-title">
+                <span data-i18n="sync.title">Synchronisation en ligne</span>
+              </h3>
+              <p class="sync-session-subtitle" data-i18n="sync.subtitle">
+                Pour dessiner à plusieurs
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            id="close-sync-session-modal"
+            class="modal-close-btn"
+            data-modal-close="true"
+            data-i18n-aria-label="titlebar.close"
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
+        <div class="modal-body sync-session-modal-body">
+          <section class="sync-session-overview-card">
+            <div class="sync-session-status-stack">
+              <p
+                id="sync-session-status"
+                class="sync-session-status"
+                aria-live="polite"
+              >
+                <span class="sync-session-status-dot"></span>
+              </p>
+              <p
+                id="sync-session-network-status"
+                class="sync-session-network-status"
+                aria-live="polite"
+              ></p>
+            </div>
+          </section>
+
+          <div class="sync-session-connection-type-row">
+            <div class="sync-session-conn-toggle" role="group" aria-label="Connection type">
+              <button type="button" id="sync-conn-local-btn" class="sync-session-conn-btn active" data-sync-conn="local">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 -960 960 960" fill="currentColor" aria-hidden="true"><path d="M121-121q-41-41-41-99t41-99q41-41 99-41 18 0 35 4.5t32 12.5l153-153v-110q-44-13-72-49.5T340-740q0-58 41-99t99-41q58 0 99 41t41 99q0 48-28 84.5T520-606v110l154 153q15-8 31.5-12.5T740-360q58 0 99 41t41 99q0 58-41 99t-99 41q-58 0-99-41t-41-99q0-18 4.5-35t12.5-32L480-424 343-287q8 15 12.5 32t4.5 35q0 58-41 99t-99 41q-58 0-99-41Zm661.5-56.5Q800-195 800-220t-17.5-42.5Q765-280 740-280t-42.5 17.5Q680-245 680-220t17.5 42.5Q715-160 740-160t42.5-17.5Zm-260-520Q540-715 540-740t-17.5-42.5Q505-800 480-800t-42.5 17.5Q420-765 420-740t17.5 42.5Q455-680 480-680t42.5-17.5Zm-260 520Q280-195 280-220t-17.5-42.5Q245-280 220-280t-42.5 17.5Q160-245 160-220t17.5 42.5Q195-160 220-160t42.5-17.5Z"/></svg>
+                <span data-i18n="sync.connLocal">Local</span>
+              </button>
+              <button type="button" id="sync-conn-internet-btn" class="sync-session-conn-btn" data-sync-conn="internet">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 -960 960 960" fill="currentColor" aria-hidden="true"><path d="M480-80q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Zm-40-82v-78q-33 0-56.5-23.5T360-320v-40L168-552q-3 18-5.5 36t-2.5 36q0 121 79.5 212T440-162Zm276-102q20-22 36-47.5t26.5-53q10.5-27.5 16-56.5t5.5-59q0-98-54.5-179T600-776v16q0 33-23.5 56.5T520-680h-80v80q0 17-11.5 28.5T400-560h-80v80h240q17 0 28.5 11.5T600-440v120h40q26 0 47 15.5t29 40.5Z"/></svg>
+                <span data-i18n="sync.connInternet">Public</span>
+              </button>
+            </div>
+            <p id="sync-conn-type-hint" class="sync-session-conn-hint" data-i18n="sync.connLocalHint">Dessiner avec des artistes sur le même réseau</p>
+          </div>
+
+          <section id="sync-session-invite-panel" class="sync-session-invite-panel hidden">
+            <button
+              type="button"
+              id="sync-session-copy-server-address-connected-btn"
+              class="sync-session-copy-server-address-btn hidden"
+              title="Copier l'adresse du serveur local"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 -960 960 960"
+                fill="currentColor"
+                aria-hidden="true"
+              >
+                <path
+                  d="M360-240q-33 0-56.5-23.5T280-320v-520q0-33 23.5-56.5T360-920h400q33 0 56.5 23.5T840-840v520q0 33-23.5 56.5T760-240H360Zm0-80h400v-520H360v520Zm-160 240q-33 0-56.5-23.5T120-160v-560h80v560h440v80H200Zm160-240v-520 520Z"
+                />
+              </svg>
+              <span>Copier l'adresse serveur</span>
+            </button>
+
+            <button
+              type="button"
+              id="sync-session-code-row"
+              class="sync-session-code-row hidden"
+              aria-label="Copy session code"
+              title="Copy session code"
+            >
+              <span
+                id="sync-session-code-value"
+                class="sync-session-code-value"
+              ></span>
+              <span
+                id="sync-session-copy-code-btn"
+                class="sync-session-copy-code-btn"
+                aria-hidden="true"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 -960 960 960"
+                  fill="currentColor"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M360-240q-33 0-56.5-23.5T280-320v-520q0-33 23.5-56.5T360-920h400q33 0 56.5 23.5T840-840v520q0 33-23.5 56.5T760-240H360Zm0-80h400v-520H360v520Zm-160 240q-33 0-56.5-23.5T120-160v-560h80v560h440v80H200Zm160-240v-520 520Z"
+                  />
+                </svg>
+              </span>
+            </button>
+          </section>
+
+
+
+          <div
+            class="sync-session-role-toggle"
+            role="group"
+            aria-label="Session role"
+          >
+            <button
+              type="button"
+              class="sync-session-role-btn active"
+              data-sync-role="host"
+              data-i18n="sync.hostRole"
+            >
+              Hôte
+            </button>
+            <button
+              type="button"
+              class="sync-session-role-btn"
+              data-sync-role="join"
+              data-i18n="sync.joinRole"
+            >
+              Rejoindre
+            </button>
+          </div>
+
+          <div id="sync-session-host-panel" class="sync-session-panel">
+            <div class="sync-session-host-local-section hidden">
+              <button
+                 type="button"
+                 id="sync-session-start-local-server-btn"
+                 class="sync-session-local-server-btn"
+                 data-i18n="sync.startLocalServer"
+              >
+                 Démarrer mon serveur local
+              </button>
+              <button
+                type="button"
+                id="sync-session-copy-server-address-host-btn"
+                class="sync-session-copy-server-address-btn hidden"
+                title="Copier l'adresse du serveur local"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 -960 960 960"
+                  fill="currentColor"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M360-240q-33 0-56.5-23.5T280-320v-520q0-33 23.5-56.5T360-920h400q33 0 56.5 23.5T840-840v520q0 33-23.5 56.5T760-240H360Zm0-80h400v-520H360v520Zm-160 240q-33 0-56.5-23.5T120-160v-560h80v560h440v80H200Zm160-240v-520 520Z"
+                  />
+                </svg>
+                <span>Copier l'adresse serveur</span>
+              </button>
+            </div>
+            <label
+              for="sync-session-control-mode-trigger"
+              data-i18n="sync.controlModeLabel"
+            >
+              Contrôle du timer
+            </label>
+            <div
+              id="sync-session-control-mode-select"
+              class="global-settings-language-select sync-session-control-mode-select"
+              data-value="host-only"
+            >
+              <button
+                type="button"
+                id="sync-session-control-mode-trigger"
+                class="global-settings-language-trigger sync-session-control-mode-trigger"
+                aria-haspopup="listbox"
+                aria-expanded="false"
+              >
+                <span
+                  class="global-settings-language-value sync-session-control-mode-value"
+                  data-i18n="sync.controlModeHostOnly"
+                >
+                  Hôte uniquement
+                </span>
+                <span
+                  class="global-settings-language-chevron"
+                  aria-hidden="true"
+                  >▾</span
+                >
+              </button>
+              <div
+                id="sync-session-control-mode-menu"
+                class="global-settings-language-menu sync-session-control-mode-menu"
+                role="listbox"
+                hidden
+              >
+                <button
+                  type="button"
+                  class="global-settings-language-option sync-session-control-mode-option active"
+                  data-sync-control-mode="host-only"
+                  data-i18n="sync.controlModeHostOnly"
+                  aria-selected="true"
+                >
+                  Hôte uniquement
+                </button>
+                <button
+                  type="button"
+                  class="global-settings-language-option sync-session-control-mode-option"
+                  data-sync-control-mode="shared-pause"
+                  data-i18n="sync.controlModeSharedPause"
+                  aria-selected="false"
+                >
+                  Pause partagée
+                </button>
+              </div>
+            </div>
+
+            <label
+              for="sync-session-host-password"
+              data-i18n="sync.sessionPasswordLabel"
+            >
+              Mot de passe (optionnel)
+            </label>
+            <input
+              id="sync-session-host-password"
+              class="modal-input"
+              type="password"
+              maxlength="64"
+              data-i18n-placeholder="sync.sessionPasswordPlaceholder"
+              placeholder="••••••••"
+            />
+
+            <button
+              type="button"
+              id="sync-session-create-btn"
+              class="modal-important-btn sync-session-cta-btn"
+              data-modal-primary="true"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 -960 960 960" fill="currentColor" aria-hidden="true"><path d="m226-559 78 33q14-28 29-54t33-52l-56-11-84 84Zm142 83 114 113q42-16 90-49t90-75q70-70 109.5-155.5T806-800q-72-5-158 34.5T492-656q-42 42-75 90t-49 90Zm155-121.5q0-33.5 23-56.5t57-23q34 0 57 23t23 56.5q0 33.5-23 56.5t-57 23q-34 0-57-23t-23-56.5ZM565-220l84-84-11-56q-26 18-52 32.5T532-299l33 79Zm313-653q19 121-23.5 235.5T708-419l20 99q4 20-2 39t-20 33L538-80l-84-197-171-171-197-84 167-168q14-14 33.5-20t39.5-2l99 20q104-104 218-147t235-24ZM157-321q35-35 85.5-35.5T328-322q35 35 34.5 85.5T327-151q-25 25-83.5 43T82-76q14-103 32-161.5t43-83.5Zm57 56q-10 10-20 36.5T180-175q27-4 53.5-13.5T270-208q12-12 13-29t-11-29q-12-12-29-11.5T214-265Z"/></svg>
+              <span data-i18n="sync.createSession">Créer la session</span>
+            </button>
+          </div>
+
+          <div id="sync-session-join-panel" class="sync-session-panel hidden">
+            <div class="sync-session-join-local-section hidden">
+              <label
+                for="sync-session-relay-url"
+                class="sync-session-relay-url-label"
+                data-i18n="sync.relayUrlLabel"
+              >
+                Adresse du serveur
+              </label>
+              <div class="sync-session-relay-url-input-row" style="margin-bottom: 12px;">
+                <input
+                  id="sync-session-relay-url"
+                  class="modal-input sync-session-relay-url-input"
+                  type="text"
+                  maxlength="200"
+                  data-i18n-placeholder="sync.relayUrlPlaceholder"
+                  placeholder="ws://host-ip:8787"
+                  spellcheck="false"
+                  autocomplete="off"
+                />
+                <button
+                  type="button"
+                  id="sync-session-relay-url-save-btn"
+                  class="sync-session-relay-url-save-btn"
+                  data-i18n-title="sync.relayUrlSave"
+                  title="Appliquer"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" height="18" viewBox="0 -960 960 960" width="18" fill="currentColor">
+                    <path d="M382-240 154-468l57-57 171 171 367-367 57 57-424 424Z"/>
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <label for="sync-session-code" data-i18n="sync.sessionCodeLabel">
+              Code de session
+            </label>
+            <input
+              id="sync-session-code"
+              class="modal-input"
+              type="text"
+              maxlength="24"
+              data-i18n-placeholder="sync.sessionCodePlaceholder"
+              placeholder="ABCD-1234"
+            />
+
+            <label for="sync-session-guest-pseudo" data-i18n="sync.pseudoLabel"
+              >Pseudo (optionnel)</label
+            >
+            <input
+              id="sync-session-guest-pseudo"
+              class="modal-input"
+              type="text"
+              maxlength="32"
+              placeholder="ex: Samuel"
+            />
+
+            <label
+              for="sync-session-password"
+              data-i18n="sync.sessionPasswordLabel"
+            >
+              Mot de passe (optionnel)
+            </label>
+            <input
+              id="sync-session-password"
+              class="modal-input"
+              type="password"
+              maxlength="64"
+              data-i18n-placeholder="sync.sessionPasswordPlaceholder"
+              placeholder="••••••••"
+            />
+
+            <button
+              type="button"
+              id="sync-session-join-btn"
+              class="modal-important-btn sync-session-cta-btn"
+              data-modal-primary="true"
+              data-i18n="sync.joinSession"
+            >
+              Rejoindre la session
+            </button>
+          </div>
+
+          <div
+            id="sync-session-pack-panel"
+            class="sync-session-panel sync-session-pack-panel"
+          >
+            <div class="sync-session-pack-actions">
+              <button
+                type="button"
+                id="sync-session-publish-online-pack-btn"
+                class="modal-important-btn sync-session-cta-btn"
+                data-tooltip="Upload poses and session settings"
+                data-i18n-tooltip="sync.uploadOnlinePackTooltip"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  height="24px"
+                  viewBox="0 -960 960 960"
+                  width="24px"
+                  fill="currentColor"
+                >
+                  <path
+                    d="M260-160q-91 0-155.5-63T40-377q0-78 47-139t123-78q25-92 100-149t170-57q117 0 198.5 81.5T760-520q69 8 114.5 59.5T920-340q0 75-52.5 127.5T740-160H520q-33 0-56.5-23.5T440-240v-206l-64 62-56-56 160-160 160 160-56 56-64-62v206h220q42 0 71-29t29-71q0-42-29-71t-71-29h-60v-80q0-83-58.5-141.5T480-720q-83 0-141.5 58.5T280-520h-20q-58 0-99 41t-41 99q0 58 41 99t99 41h100v80H260Zm220-280Z"
+                  />
+                </svg>
+                <span data-i18n="sync.publishOnlineSessionPack">
+                  Téléverser les poses
+                </span>
+              </button>
+              <button
+                type="button"
+                id="sync-session-download-online-pack-btn"
+                class="modal-important-btn sync-session-cta-btn"
+                data-tooltip="Download host poses and session settings"
+                data-i18n-tooltip="sync.downloadOnlinePackTooltip"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  height="24px"
+                  viewBox="0 -960 960 960"
+                  width="24px"
+                  fill="#e3e3e3"
+                >
+                  <path
+                    d="M260-160q-91 0-155.5-63T40-377q0-78 47-139t123-78q17-72 85-137t145-65q33 0 56.5 23.5T520-716v242l64-62 56 56-160 160-160-160 56-56 64 62v-242q-76 14-118 73.5T280-520h-20q-58 0-99 41t-41 99q0 58 41 99t99 41h480q42 0 71-29t29-71q0-42-29-71t-71-29h-60v-80q0-48-22-89.5T600-680v-93q74 35 117 103.5T760-520q69 8 114.5 59.5T920-340q0 75-52.5 127.5T740-160H260Zm220-358Z"
+                  />
+                </svg>
+
+                <span data-i18n="sync.downloadOnlineSessionPack">
+                  Télécharger les poses
+                </span>
+              </button>
+            </div>
+          </div>
+
+          <div
+            id="sync-session-connected-panel"
+            class="sync-session-panel hidden"
+          >
+            <label class="sync-session-inline-toggle">
+              <div class="sync-session-inline-toggle-content">
+                <span
+                  class="sync-session-inline-toggle-title"
+                  id="sync-session-guest-action-notifications-label"
+                  data-i18n="sync.showHostActionsNotifications"
+                  >Notify host actions</span
+                >
+                <span
+                  class="sync-session-inline-toggle-hint"
+                  id="sync-session-guest-action-notifications-hint"
+                  data-i18n="sync.showHostActionsNotificationsHint"
+                  >Pause, resume and pose/image changes.</span
+                >
+              </div>
+              <input
+                type="checkbox"
+                id="sync-session-guest-action-notifications-btn"
+                checked
+              />
+            </label>
+
+            <button
+              type="button"
+              id="sync-session-leave-btn"
+              class="modal-important-btn sync-session-cta-btn sync-session-leave-btn"
+              data-tooltip="Leave current online session"
+              data-i18n-tooltip="sync.leaveOnlineSessionTooltip"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                height="24px"
+                viewBox="0 -960 960 960"
+                width="24px"
+                fill="currentColor"
+                aria-hidden="true"
+              >
+                <path
+                  d="M200-120q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h280v80H200v560h280v80H200Zm440-160-55-58 102-102H360v-80h327L585-622l55-58 200 200-200 200Z"
+                />
+              </svg>
+              <span class="sync-session-leave-label"
+                >Quitter la session en cours</span
+              >
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="sync-transfer-modal" class="modal modal-overlay hidden">
+      <div
+        class="modal-content modal-container sync-transfer-modal-content"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="sync-transfer-modal-title"
+      >
+        <div class="modal-header">
+          <h3 id="sync-transfer-modal-title" class="modal-title">
+            Online transfer
+          </h3>
+        </div>
+        <div class="modal-body sync-transfer-modal-body">
+          <p id="sync-transfer-modal-status" class="sync-transfer-modal-status">
+            Preparing transfer...
+          </p>
+          <div
+            id="sync-transfer-modal-progress-track"
+            class="sync-transfer-modal-progress-track"
+            role="progressbar"
+            aria-label="Sync transfer progress"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow="0"
+          >
+            <div
+              id="sync-transfer-modal-progress-fill"
+              class="sync-transfer-modal-progress-fill"
+            ></div>
+          </div>
+          <p
+            id="sync-transfer-modal-progress-text"
+            class="sync-transfer-modal-progress-text"
+          >
+            0%
+          </p>
+          <p id="sync-transfer-modal-meta" class="sync-transfer-modal-meta"></p>
+          <button
+            type="button"
+            id="sync-transfer-modal-cancel-btn"
+            class="modal-important-btn sync-transfer-modal-cancel-btn"
+            data-i18n="sync.cancelTransfer"
+          >
+            Cancel
           </button>
         </div>
       </div>
@@ -1516,6 +2164,7 @@
     <script src="packages/shared/shared.bundle.js"></script>
     <script src="js/platform/platform-api.js"></script>
     <script src="js/platform/eagle-adapter.js"></script>
+    <script src="js/syncroModule/syncro.module.js"></script>
     <script src="js/plugin.js"></script>
   </body>
 </html>

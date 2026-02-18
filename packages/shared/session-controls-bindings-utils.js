@@ -4,6 +4,23 @@
   const globalObj = globalScope || (typeof window !== "undefined" ? window : {});
   const sharedRoot = globalObj.PoseChronoShared || {};
 
+  function toElementArray(value) {
+    if (!value) return [];
+    if (Array.isArray(value)) return value.filter(Boolean);
+    if (
+      typeof value !== "string" &&
+      typeof value !== "function" &&
+      typeof value.length === "number"
+    ) {
+      try {
+        return Array.from(value).filter(Boolean);
+      } catch (_) {
+        return [];
+      }
+    }
+    return [];
+  }
+
   function bindMemoryOverlayButtons(input = {}) {
     const memoryOverlay = input.memoryOverlay || null;
     const memoryPeekBtn = input.memoryPeekBtn || null;
@@ -168,6 +185,7 @@
 
     if (progressBar && typeof progressBar.addEventListener === "function") {
       progressBar.addEventListener("click", (event) => {
+        if (event.button !== 0) return;
         if (!state.isPlaying && state.selectedDuration > 0) return;
         const rect = progressBar.getBoundingClientRect();
         const percent = (event.clientX - rect.left) / rect.width;
@@ -177,7 +195,16 @@
         }
       });
 
+      if (onShowProgressBarContextMenu) {
+        progressBar.addEventListener("contextmenu", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          onShowProgressBarContextMenu(event.clientX, event.clientY, event);
+        });
+      }
+
       progressBar.addEventListener("mousedown", (event) => {
+        if (event.button !== 0) return;
         if (state.selectedDuration <= 0) return;
         isDraggingProgress = true;
         const rect = progressBar.getBoundingClientRect();
@@ -737,7 +764,7 @@
     const closeReviewBtn = input.closeReviewBtn || null;
     const customAddBtn = input.customAddBtn || null;
     const addPauseBtn = input.addPauseBtn || null;
-    const customInputs = Array.isArray(input.customInputs) ? input.customInputs : [];
+    const customInputs = toElementArray(input.customInputs);
 
     const onStartSession =
       typeof input.onStartSession === "function" ? input.onStartSession : null;
@@ -1091,13 +1118,11 @@
   }
 
   function bindClassicDurationButtons(input = {}) {
-    const durationBtns = Array.isArray(input.durationBtns) ? input.durationBtns : [];
+    const durationBtns = toElementArray(input.durationBtns);
     const hoursInput = input.hoursInput || null;
     const minutesInput = input.minutesInput || null;
     const secondsInput = input.secondsInput || null;
-    const domInputGroups = Array.isArray(input.domInputGroups)
-      ? input.domInputGroups
-      : [];
+    const domInputGroups = toElementArray(input.domInputGroups);
     const state = input.state || {};
     const getDurationFromButton =
       typeof input.getDurationFromButton === "function"
@@ -1137,9 +1162,7 @@
   }
 
   function bindMemoryTypeSwitchButtons(input = {}) {
-    const memoryTypeBtns = Array.isArray(input.memoryTypeBtns)
-      ? input.memoryTypeBtns
-      : [];
+    const memoryTypeBtns = toElementArray(input.memoryTypeBtns);
     const memoryFlashSettings = input.memoryFlashSettings || null;
     const memoryProgressiveSettings = input.memoryProgressiveSettings || null;
     const state = input.state || {};
@@ -1170,12 +1193,8 @@
   }
 
   function bindMemoryDurationControls(input = {}) {
-    const memoryFlashBtns = Array.isArray(input.memoryFlashBtns)
-      ? input.memoryFlashBtns
-      : [];
-    const memoryProgressiveBtns = Array.isArray(input.memoryProgressiveBtns)
-      ? input.memoryProgressiveBtns
-      : [];
+    const memoryFlashBtns = toElementArray(input.memoryFlashBtns);
+    const memoryProgressiveBtns = toElementArray(input.memoryProgressiveBtns);
     const memoryProgressiveMinutes = input.memoryProgressiveMinutes || null;
     const memoryProgressiveSeconds = input.memoryProgressiveSeconds || null;
     const memoryProgressiveCustomTime = input.memoryProgressiveCustomTime || null;
@@ -1576,14 +1595,10 @@
   }
 
   function bindCustomHmsTimerInputs(input = {}) {
-    const inputs = Array.isArray(input.inputs) ? input.inputs : [];
+    const inputs = toElementArray(input.inputs);
     const state = input.state || {};
-    const domDurationButtons = Array.isArray(input.domDurationButtons)
-      ? input.domDurationButtons
-      : [];
-    const domInputGroups = Array.isArray(input.domInputGroups)
-      ? input.domInputGroups
-      : [];
+    const domDurationButtons = toElementArray(input.domDurationButtons);
+    const domInputGroups = toElementArray(input.domInputGroups);
 
     const onReadHmsInputValues =
       typeof input.onReadHmsInputValues === "function"

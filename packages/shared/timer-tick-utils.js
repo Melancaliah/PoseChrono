@@ -41,7 +41,13 @@
     const timeRemaining = toNumber(state.timeRemaining, 0);
     const selectedDuration = Math.max(0, toNumber(state.selectedDuration, 0));
     const isCustomPause = !!state.isCustomPause;
-    const threshold = selectedDuration * 0.2;
+    const thresholdOverride = state.thresholdOverride != null
+      ? Number(state.thresholdOverride)
+      : null;
+    const threshold =
+      thresholdOverride != null && Number.isFinite(thresholdOverride) && thresholdOverride >= 0
+        ? thresholdOverride
+        : Math.min(selectedDuration * 0.2, 15);
     if (
       !isCustomPause &&
       threshold > 0 &&

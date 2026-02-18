@@ -12,6 +12,12 @@ Legacy root-level doc files are kept as compatibility pointers and redirect to t
 ## Development
 
 - `docs/development/developer-guide.md`: build/release commands, verification gates, and local workflows.
+- `docs/development/online-sync-functional-contract.md`: functional contract for host/participant sync behavior.
+- `docs/development/relay-deployment.md`: compatibility path to relay deployment notes.
+
+## Deployment
+
+- `docs/deployment/relay-deployment.md`: production relay deployment (env vars, nginx `wss://`, limits, health checks).
 
 ## Release
 

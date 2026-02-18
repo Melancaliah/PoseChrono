@@ -28,7 +28,8 @@ async function readJson(filePath) {
 function isSetupFileName(name) {
   return (
     /^PoseChrono-Setup-.*\.exe$/i.test(name) ||
-    /^posechrono-desktop-[0-9A-Za-z._-]+-setup\.exe$/i.test(name)
+    /^posechrono-desktop-[0-9A-Za-z._-]+-setup\.exe$/i.test(name) ||
+    /^PoseChrono_v[0-9A-Za-z._-]+_[0-9]{4}-[0-9]{2}-[0-9]{2}_windows_T[0-9]{2}-[0-9]{2}_[0-9]{2}\.exe$/i.test(name)
   );
 }
 
@@ -53,12 +54,14 @@ async function main() {
         .filter(
           (entry) =>
             entry.isDirectory() &&
-            (entry.name === "windows" || entry.name.startsWith("windows-")),
+            (entry.name === "windows" ||
+              entry.name.startsWith("windows-") ||
+              /^PoseChrono_v[^_]+.*_windows_T/i.test(entry.name)),
         )
         .map((entry) => entry.name);
 
       const dated = candidates
-        .filter((name) => name.startsWith("windows-"))
+        .filter((name) => name.startsWith("windows-") || /^PoseChrono_v/i.test(name))
         .sort((a, b) => b.localeCompare(a));
       if (dated.length > 0) {
         distDir = path.join(DIST_ROOT, dated[0]);

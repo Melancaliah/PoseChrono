@@ -1,6 +1,6 @@
 {
   "name": "posechrono-desktop",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "private": true,
   "author": "PoseChrono",
   "description": "PoseChrono standalone desktop app (Electron)",
@@ -12,6 +12,8 @@
     "dev": "npm run sync:web && electron .",
     "build:win": "npm run build:win:unsigned",
     "build:win:unsigned": "npm run sync:web && electron-builder --win nsis --config.win.signAndEditExecutable=false",
+    "build:linux": "npm run sync:web && electron-builder --linux AppImage",
+    "build:mac": "npm run sync:web && electron-builder --mac dmg",
     "build:dir": "npm run sync:web && electron-builder --dir"
   },
   "build": {
@@ -46,6 +48,38 @@
         }
       ],
       "artifactName": "PoseChrono-Setup-${version}.${ext}"
+    },
+    "linux": {
+      "category": "Graphics",
+      "icon": "build/icon.png",
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "PoseChrono-${version}.${ext}"
+    },
+    "mac": {
+      "icon": "build/icon.png",
+      "identity": null,
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "artifactName": "PoseChrono-${version}-${arch}.${ext}"
     },
     "nsis": {
       "oneClick": false,
