@@ -1,11 +1,18 @@
 {
   "id": "b459df53-4b7c-4116-a996-647c1ef63dc9",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "platform": "all",
   "arch": "all",
   "name": "{{manifest.app.name}}",
   "logo": "/logo.png",
-  "keywords": ["drawing", "gesture", "pose", "chrono", "timer", "figure"],
+  "keywords": [
+    "drawing",
+    "gesture",
+    "pose",
+    "chrono",
+    "timer",
+    "figure"
+  ],
   "devTools": false,
   "fallbackLanguage": "en",
   "languages": [

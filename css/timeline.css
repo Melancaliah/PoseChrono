@@ -22,6 +22,40 @@
   padding-bottom: 30px;
 }
 
+#settings-screen.sync-participant-readonly > .screen {
+  filter: grayscale(1);
+}
+
+#sync-settings-readonly-badge {
+  margin: 6px auto 16px;
+  width: fit-content;
+  max-width: 100%;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(158, 200, 255, 0.45);
+  background: rgba(66, 100, 170, 0.16);
+  color: #c5dcff;
+  font-size: 12px;
+  line-height: 1.2;
+  text-align: center;
+}
+
+#settings-screen.sync-participant-readonly .settings-container
+  :is(button, input, select, textarea):not(#autoflip-btn):not(
+    #home-progressive-blur-btn
+  ) {
+  pointer-events: none;
+  cursor: not-allowed !important;
+  opacity: 0.55;
+}
+
+#settings-screen.sync-participant-readonly #autoflip-btn,
+#settings-screen.sync-participant-readonly #home-progressive-blur-btn {
+  pointer-events: auto;
+  cursor: pointer;
+  opacity: 1;
+}
+
 /* ================================================================
    BOUTON TOGGLE HISTORIQUE
    ================================================================ */

@@ -619,6 +619,32 @@ function registerIpcHandlers() {
     return ensureMediaFolders(win);
   });
 
+  ipcMain.handle("posechrono:folders:browseAndAdd", async (event) => {
+    const win = getBrowserWindowFromEvent(event);
+    const result = await dialog.showOpenDialog(win, {
+      title: "Add media folders",
+      properties: ["openDirectory", "multiSelections"],
+    });
+    if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
+      return null;
+    }
+    const existing = await getConfiguredMediaFolders();
+    const existingPaths = existing.map((f) => f.path);
+    const merged = [...existingPaths, ...result.filePaths];
+    const folders = await setConfiguredMediaFolders(merged);
+    hasPromptedForMediaFolder = true;
+    scanCache = { key: "", byId: new Map(), items: [] };
+    return folders;
+  });
+
+  ipcMain.handle("posechrono:folders:removeFolder", async (event, folderId) => {
+    const existing = await getConfiguredMediaFolders();
+    const filtered = existing.filter((f) => f.id !== folderId).map((f) => f.path);
+    const folders = await setConfiguredMediaFolders(filtered);
+    scanCache = { key: "", byId: new Map(), items: [] };
+    return folders;
+  });
+
   ipcMain.handle("posechrono:items:get", async (event, query) => {
     const win = getBrowserWindowFromEvent(event);
     const folders = await ensureMediaFolders(win);

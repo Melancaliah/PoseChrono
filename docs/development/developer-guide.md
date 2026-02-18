@@ -68,6 +68,7 @@ npm run release:all
 - `generation/build-eagle.bat`
 - `generation/build-all.bat`
 - `generation/verify.bat`
+- `generation/start-sync-relay.bat`
 
 ## Shared package workflow
 
@@ -118,4 +119,52 @@ Clear env var:
 
 ```powershell
 Remove-Item Env:POSECHRONO_BOOT_TRACE
+```
+
+## Online Sync transport switch (Phase 7)
+
+Default mode uses local mock transport (no network).
+
+Start shared relay server (required for Eagle <-> Desktop):
+
+```bash
+npm install
+npm run sync:relay
+# or generation\start-sync-relay.bat
+```
+
+Desktop WebSocket mode:
+
+```powershell
+$env:POSECHRONO_SYNC_TRANSPORT="ws"
+$env:POSECHRONO_SYNC_WS_URL="ws://127.0.0.1:8787"
+npm run desktop:start
+```
+
+Eagle WebSocket mode:
+
+- Query params: `?syncTransport=ws&syncWsUrl=ws://127.0.0.1:8787`
+- or in Eagle devtools console (persistent):
+
+```js
+localStorage.setItem("posechrono-sync-transport", "ws");
+localStorage.setItem("posechrono-sync-ws-url", "ws://127.0.0.1:8787");
+location.reload();
+```
+
+Force back to local mock mode:
+
+```js
+localStorage.setItem("posechrono-sync-transport", "mock");
+localStorage.removeItem("posechrono-sync-ws-url");
+location.reload();
+```
+
+## Reset cache to test translation (console in inspector mode f12)
+
+```js
+Object.keys(localStorage)
+  .filter((k) => k.startsWith("posechrono-i18n-cache"))
+  .forEach((k) => localStorage.removeItem(k));
+location.reload();
 ```

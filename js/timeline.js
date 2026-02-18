@@ -5,6 +5,20 @@
 
 
 // ================================================================
+// UTILITAIRES DOM
+// ================================================================
+
+function escapeTimelineHtml(input) {
+  const str = String(input ?? "");
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+// ================================================================
 // CONSTANTES
 // ================================================================
 
@@ -2206,7 +2220,7 @@ const TimelineTemplates = {
           </div>
           <div class="session-header">
             <span class="session-number">#${dayData.sessions.length - index}</span>
-            <span class="session-mode">${getModeLabel(session.mode, session.memoryType)}</span>
+            <span class="session-mode">${escapeTimelineHtml(getModeLabel(session.mode, session.memoryType))}</span>
           </div>
           <div class="session-stats">
             <span class="session-poses ${session.mode === "custom" && session.customQueue ? "has-custom-structure" : ""}" 
@@ -2239,8 +2253,8 @@ const TimelineTemplates = {
                     ? `<div class="video-thumb-indicator">${ICONS.VIDEO_PLAY || "▶"}</div>`
                     : "";
                   return `
-                <div class="session-image-wrapper ${videoClass}" data-img-index="${idx}" data-img-id="${imgId}">
-                  <img src="${imgSrc}" alt="" loading="lazy" onerror="this.style.display='none'" class="session-image-thumb">
+                <div class="session-image-wrapper ${videoClass}" data-img-index="${idx}" data-img-id="${escapeTimelineHtml(imgId)}">
+                  <img src="${escapeTimelineHtml(imgSrc)}" alt="" loading="lazy" onerror="this.style.display='none'" class="session-image-thumb">
                   ${videoIndicator}
                 </div>
               `;
@@ -3728,7 +3742,7 @@ class TimelineRenderer {
     cells.forEach((cell) => {
       const enterHandler = (e) => {
         const text = e.target.dataset.tooltip;
-        tooltip.innerHTML = text.replace(/\n/g, "<br>");
+        tooltip.innerHTML = escapeTimelineHtml(text).replace(/\n/g, "<br>");
         tooltip.classList.add("visible");
 
         const rect = e.target.getBoundingClientRect();

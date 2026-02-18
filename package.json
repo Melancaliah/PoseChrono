@@ -1,6 +1,6 @@
 {
   "name": "posechrono-tooling",
-  "version": "0.0.1",
+  "version": "1.0.6",
   "private": true,
   "description": "Tooling scripts for PoseChrono release and verification",
   "scripts": {
@@ -13,12 +13,17 @@
     "desktop:install": "npm --prefix apps/desktop install",
     "desktop:start": "npm --prefix apps/desktop run start",
     "desktop:build:win:unsigned": "npm --prefix apps/desktop run build:win:unsigned",
+    "desktop:build:linux": "npm --prefix apps/desktop run build:linux",
+    "desktop:build:mac": "npm --prefix apps/desktop run build:mac",
     "desktop:build:win": "npm --prefix apps/desktop run build:win",
+    "sync:relay": "node scripts/sync-relay-server.js",
     "shared:sync": "node scripts/sync-shared-packages.js",
     "shared:clean:legacy": "node scripts/clean-legacy-shared.js",
     "release:clean": "node scripts/clean-releases.js",
     "release:clean:dry": "node scripts/clean-releases.js --dry-run",
     "release:windows": "node scripts/release-windows.js",
+    "release:linux": "node scripts/release-linux.js",
+    "release:mac": "node scripts/release-mac.js",
     "release:all": "node scripts/release-all.js",
     "release:eagle": "node scripts/release-eagle.js && node scripts/verify-eagle-dist.js",
     "release:eagle:latest": "node scripts/release-eagle.js --update-latest && node scripts/verify-eagle-dist.js dist/eagle-plugin",
@@ -26,10 +31,17 @@
     "verify:eagle-dist": "node scripts/verify-eagle-dist.js",
     "verify:desktop-dist": "node scripts/verify-desktop-dist.js",
     "verify:windows-dist": "node scripts/verify-windows-dist.js",
+    "verify:linux-dist": "node scripts/verify-linux-dist.js",
+    "verify:mac-dist": "node scripts/verify-mac-dist.js",
     "verify:platform-decoupling": "node scripts/verify-platform-decoupling.js",
     "verify:shared-sync": "node scripts/verify-shared-sync.js",
     "verify:locales": "node scripts/verify-locales.js",
     "verify:smoke": "node scripts/verify-smoke.js",
-    "verify:builds": "node scripts/verify-builds.js"
+    "verify:builds": "node scripts/verify-builds.js",
+    "verify:sync-security": "node scripts/verify-sync-security.js",
+    "verify:sync-integration": "node scripts/verify-sync-integration.js"
+  },
+  "devDependencies": {
+    "ws": "^8.18.3"
   }
 }

@@ -133,6 +133,31 @@
   box-shadow: 0 0 0 2px rgba(80, 142, 230, 0.25) !important;
 }
 
+.modal-important-btn {
+  background: var(--color-primary-elegant);
+  margin: 20px auto 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 9px 12px;
+  border: solid 1px var(--color-primary);
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  gap: 8px;
+  color: var(--text-primary);
+  transition: all 0.18s ease;
+  cursor: pointer;
+  text-align: center;
+}
+
+.modal-important-btn:hover {
+  border-color: var(--color-primary-light);
+  background-color: var(--color-primary-elegant-hover);
+  color: #ffffff;
+}
+
 /* ============================================
    TOASTS (UNDO / FEEDBACK)
    ============================================ */
@@ -144,7 +169,7 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
-  z-index: 4100;
+  z-index: 250000;
   pointer-events: none;
 }
 
@@ -715,13 +740,13 @@
 }
 
 .global-settings-btn-primary {
-  border-color: rgba(102, 126, 234, 0.42);
-  background: rgba(102, 126, 234, 0.13);
+  background: var(--color-primary-elegant);
+  border-color: var(--color-primary);
 }
 
 .global-settings-btn-primary:hover {
-  border-color: rgba(102, 126, 234, 0.62);
-  background: rgba(102, 126, 234, 0.2);
+  background: var(--bg-primary-hover);
+  border-color: var(--color-primary-light);
 }
 
 .global-settings-btn-nav {
@@ -836,6 +861,723 @@
   outline: none !important;
   outline-offset: 0 !important;
   box-shadow: none !important;
+}
+
+/* ============================================
+   MODAL SYNC SESSION (PHASE 7)
+   ============================================ */
+
+#sync-session-modal .sync-session-modal-content {
+  max-width: 560px;
+}
+
+.sync-session-modal-header {
+  align-items: flex-start;
+}
+
+.sync-session-modal-headline {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.sync-session-modal-heading-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  margin-left: 6px;
+}
+
+#sync-session-modal-title {
+  margin: 0;
+  line-height: 1.2;
+}
+
+.sync-session-subtitle {
+  margin: 0 0 -5px 0;
+  color: #919191c2;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.sync-session-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-left: 58px;
+}
+
+.sync-session-overview-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.sync-session-status-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.sync-session-status {
+  margin: 0;
+  min-height: 18px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.sync-session-status.is-success {
+  color: #8fd6a8;
+}
+
+.sync-session-status.is-warning {
+  color: #f1c085;
+}
+
+.sync-session-status.is-error {
+  color: #f48d8d;
+}
+
+.sync-session-fallback-note {
+  color: #f1c085;
+  font-size: 11px;
+}
+
+.sync-session-status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.3);
+  margin-right: 6px;
+  vertical-align: middle;
+  transition: background 0.25s ease, box-shadow 0.25s ease;
+}
+
+.sync-session-status.is-success .sync-session-status-dot {
+  background: #8fd6a8;
+  box-shadow: 0 0 6px rgba(143, 214, 168, 0.5);
+}
+
+.sync-session-status.is-warning .sync-session-status-dot {
+  background: #f1c085;
+  box-shadow: 0 0 6px rgba(241, 192, 133, 0.5);
+}
+
+.sync-session-status.is-error .sync-session-status-dot {
+  background: #f48d8d;
+  box-shadow: 0 0 6px rgba(244, 141, 141, 0.5);
+}
+
+.sync-session-network-status {
+  margin: 0;
+  min-height: 16px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.sync-session-network-status.is-success {
+  color: #8fd6a8;
+}
+
+.sync-session-network-status.is-warning {
+  color: #f1c085;
+}
+
+.sync-session-network-status.is-error {
+  color: #f48d8d;
+}
+
+.sync-session-participants-trigger {
+  display: inline-block;
+  cursor: help;
+  border-bottom: 1px dashed rgba(159, 191, 255, 0.7);
+  padding-bottom: 1px;
+}
+
+.sync-session-participants-trigger:hover,
+.sync-session-participants-trigger:focus-visible {
+  color: #9ec8ff;
+}
+
+.sync-session-participants-tooltip {
+  z-index: 12000;
+  min-width: 180px;
+  max-width: 320px;
+}
+
+.sync-session-participant-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sync-session-participant-icon {
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 16px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.sync-session-participant-icon svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.sync-session-participant-icon.is-syncing {
+  color: #f1c085;
+}
+
+.sync-session-participant-icon.is-ready {
+  color: #8fd6a8;
+}
+
+.sync-session-participant-icon.is-missing {
+  color: #f48d8d;
+}
+
+.sync-session-participant-label {
+  display: inline-block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sync-session-modal-title-icon {
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
+  margin-top: 2px;
+  color: rgba(255, 255, 255, 0.4);
+  transition: color 0.18s ease;
+}
+
+.sync-session-modal-title-icon.is-connecting {
+  color: #f1c085;
+}
+
+.sync-session-modal-title-icon.is-hosting {
+  color: #8fd6a8;
+}
+
+.sync-session-modal-title-icon.is-joined {
+  color: #9ec8ff;
+}
+
+@media (max-width: 620px) {
+  .sync-session-modal-body {
+    padding-left: 24px;
+  }
+}
+
+.sync-session-code-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  max-width: 100%;
+  margin: 15px auto;
+  padding: 6px 10px 6px 14px;
+  border-radius: 10px;
+  border: 1px solid rgb(144 144 144 / 40%);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.sync-session-relay-url-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+}
+
+.sync-session-relay-url-label {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.45);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.sync-session-relay-url-input-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.sync-session-relay-url-input {
+  flex: 1;
+  font-family: monospace;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+}
+
+.sync-session-relay-url-save-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.6);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  flex-shrink: 0;
+}
+
+.sync-session-relay-url-save-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.sync-session-relay-url-save-btn.saved {
+  color: #4ade80;
+  border-color: rgba(74, 222, 128, 0.4);
+}
+
+.sync-session-actions-divider {
+  height: 1px;
+  width: 100%;
+  margin: -2px 0 2px 0;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.12) 12%,
+    rgba(255, 255, 255, 0.12) 88%,
+    rgba(255, 255, 255, 0) 100%
+  );
+}
+
+.sync-session-code-value {
+  font-size: 32px;
+  letter-spacing: 0.1em;
+  color: #e0e0e0;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.sync-session-cta-btn {
+  width: min(100%, 360px);
+  margin-left: auto;
+  margin-right: auto;
+  min-height: 42px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 14px;
+  transition:
+    transform 0.16s ease,
+    box-shadow 0.22s ease,
+    border-color 0.16s ease,
+    background-color 0.16s ease,
+    color 0.16s ease;
+}
+
+.modal-important-btn .sync-session-cta-btn {
+  margin-top: 15px;
+}
+
+.sync-session-copy-code-btn {
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: rgba(255, 255, 255, 0.82);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition:
+    background-color 0.18s ease,
+    color 0.18s ease;
+}
+
+.sync-session-copy-code-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.sync-session-copy-code-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: #ffffff;
+}
+
+.sync-session-copy-code-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.sync-session-role-toggle {
+  display: flex;
+  align-items: stretch;
+  width: 100%;
+  max-width: 360px;
+  margin: 4px auto 8px auto;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #2e2e2e;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  isolation: isolate;
+}
+
+.sync-btn-download {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #e3e3e3;
+  padding: 10px 20px;
+  border-radius: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  transition: all var(--transition-normal);
+}
+
+.sync-btn-download:hover {
+  background: var(--color-primary-elegant);
+  border-color: var(--color-primary);
+  color: white;
+  transform: scale(0.95);
+  box-shadow: 0 0 15px var(--color-primary-elegant);
+}
+
+.sync-session-inline-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  user-select: none;
+  width: 100%;
+  cursor: pointer;
+}
+
+.sync-session-inline-toggle-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.sync-session-inline-toggle-title {
+  font-size: 14px;
+  line-height: 1.25;
+  color: rgba(255, 255, 255, 0.92);
+  font-weight: 550;
+}
+
+.sync-session-inline-toggle-hint {
+  font-size: 12px;
+  line-height: 1.35;
+  color: rgba(255, 255, 255, 0.58);
+}
+
+.sync-session-inline-toggle input[type="checkbox"] {
+  appearance: none;
+  width: 38px;
+  height: 22px;
+  margin: 0;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.08);
+  display: inline-block;
+  position: relative;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: all 0.16s ease;
+  order: 2;
+}
+
+.sync-session-inline-toggle input[type="checkbox"]:checked {
+  border-color: rgba(102, 126, 234, 0.65);
+  background: rgba(102, 126, 234, 0.48);
+}
+
+.sync-session-inline-toggle input[type="checkbox"]::after {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 50%;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.88);
+  transform: translateY(-50%);
+  transition: left 0.16s ease;
+}
+
+.sync-session-inline-toggle input[type="checkbox"]:checked::after {
+  left: 18px;
+}
+
+#sync-session-modal
+  .sync-session-inline-toggle
+  input[type="checkbox"]:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+.sync-session-role-btn {
+  flex: 1 1 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: rgb(255 255 255 / 55%);
+  min-height: 42px;
+  padding: 11px 14px;
+  font-size: 15px;
+  font-weight: 600;
+  text-align: center;
+  cursor: pointer;
+  transition:
+    background-color 0.16s ease,
+    color 0.16s ease,
+    transform 0.14s ease;
+}
+
+.sync-session-role-btn:not(:last-child) {
+  border-right: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.sync-session-role-btn:first-child {
+  border-radius: 10px 0 0 10px;
+}
+
+.sync-session-role-btn:last-child {
+  border-radius: 0 10px 10px 0;
+}
+
+.sync-session-role-btn:hover:not(.active) {
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.78);
+  transform: translateY(-1px);
+}
+
+.sync-session-role-btn.active {
+  background: var(--color-primary-elegant);
+  color: #ffffff;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.sync-session-role-btn:active {
+  transform: translateY(0);
+}
+
+#sync-session-modal .sync-session-role-btn:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+.sync-session-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sync-session-panel label {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+/* Eviter la double bordure focus (modal-input + focus-visible global) */
+#sync-session-modal .sync-session-panel .modal-input:focus-visible {
+  outline: none !important;
+  outline-offset: 0 !important;
+  box-shadow: none !important;
+}
+
+#sync-session-modal .sync-session-control-mode-trigger:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+  border-color: rgba(255, 255, 255, 0.18) !important;
+}
+
+/* Conserver le feedback erreur rouge même quand le champ a le focus clavier */
+#sync-session-modal
+  .sync-session-panel
+  .modal-input.input-border-error:focus-visible {
+  box-shadow: 0 0 4px rgba(255, 77, 77, 0.5) !important;
+}
+
+.sync-session-control-mode-select {
+  width: 100%;
+}
+
+.sync-session-control-mode-menu {
+  z-index: 30;
+}
+
+.sync-session-panel .modal-btn {
+  margin-top: 4px;
+}
+
+.sync-session-pack-panel {
+  margin-top: 2px;
+  padding-top: 4px;
+}
+
+.sync-session-pack-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+}
+
+.sync-session-pack-actions .modal-important-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.sync-session-pack-actions .modal-important-btn svg {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+.sync-session-leave-btn {
+  background: rgba(255, 90, 90, 0.2);
+  border: 1px solid rgba(255, 120, 120, 0.45);
+}
+
+.sync-session-leave-btn svg {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.sync-session-leave-btn:hover {
+  background: rgba(255, 90, 90, 0.3);
+  border: 1px solid rgba(255, 120, 120, 0.45);
+}
+
+#sync-session-connected-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 2px auto 0 auto;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+#sync-session-connected-panel .sync-session-inline-toggle {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* ============================================
+   MODAL TRANSFERT SYNC
+   ============================================ */
+
+#sync-transfer-modal {
+  z-index: 260100;
+}
+
+#sync-transfer-modal .sync-transfer-modal-content {
+  max-width: 460px;
+  position: relative;
+  z-index: 260101;
+}
+
+.sync-transfer-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.sync-transfer-modal-status {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.sync-transfer-modal-status.is-success {
+  color: #8fd6a8;
+}
+
+.sync-transfer-modal-status.is-warning {
+  color: #f1c085;
+}
+
+.sync-transfer-modal-status.is-error {
+  color: #f48d8d;
+}
+
+.sync-transfer-modal-progress-track {
+  position: relative;
+  width: 100%;
+  height: 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(8, 12, 20, 0.6);
+  overflow: hidden;
+}
+
+.sync-transfer-modal-progress-fill {
+  width: 0%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #6e8af6 0%, #57c1ff 100%);
+  transition: width 0.16s ease;
+}
+
+.sync-transfer-modal-progress-track.is-success
+  .sync-transfer-modal-progress-fill {
+  background: linear-gradient(90deg, #2fad7d 0%, #6fd89a 100%);
+}
+
+.sync-transfer-modal-progress-track.is-error
+  .sync-transfer-modal-progress-fill {
+  background: linear-gradient(90deg, #d66578 0%, #f48d8d 100%);
+}
+
+.sync-transfer-modal-progress-text {
+  margin: 0;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.sync-transfer-modal-meta {
+  margin: -4px 0 0 0;
+  min-height: 17px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.58);
+}
+
+.sync-transfer-modal-cancel-btn {
+  margin-top: 4px;
+  min-height: 36px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: rgba(255, 255, 255, 0.82);
+  cursor: pointer;
+  transition: background 0.16s ease, border-color 0.16s ease;
+}
+
+.sync-transfer-modal-cancel-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.25);
 }
 
 /* ============================================

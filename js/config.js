@@ -30,6 +30,31 @@ const CONFIG = {
   enableZoomScrollbars: false, // Afficher les scrollbars en mode zoom (default : false)
   zoomAnimated: true, // Animation fluide du zoom (default : true)
 
+  SYNC: {
+    enabled: false, // Activer/désactiver toute la fonctionnalité de synchronisation en ligne
+    transport: "ws", // Transport mode: "webrtc" (P2P via signaling), "ws" (WebSocket relay) or "mock" (local only, for dev)
+    wsUrl: "ws://127.0.0.1:8787", // Default WebSocket relay URL
+    webrtcSignalingUrl: "ws://127.0.0.1:8787", // Default signaling relay URL used by WebRTC mode
+    webrtcIceServers: [
+      { urls: "stun:stun.l.google.com:19302" },
+      { urls: "stun:stun.cloudflare.com:3478" },
+    ],
+    maxMeshPeers: 4, // Nombre max de peers WebRTC directs depuis l'hôte (au-delà: fallback relay)
+    p2pRequestTimeoutMs: 12000, // Timeout des requêtes P2P manifest/fichiers
+    mediaChunkBase64Size: 12000, // Taille d'un chunk média P2P (base64 chars)
+    maxBufferedAmountBeforeYield: 512 * 1024, // Backpressure DataChannel
+    sendYieldDelayMs: 12, // Pause ms pendant l'envoi chunké sous charge
+    enableLatencyLogs: false, // Log debug p50/p95 latence contrôle WebRTC
+    latencyLogEvery: 20, // Fréquence des logs de latence (1 log toutes N mesures)
+    latencyWindowSize: 120, // Fenêtre de mesures pour p50/p95
+    mirrorMediaToRelay: true, // Maintenir aussi le miroir relay pour fallback robuste
+    allowMediaTransfer: true, // Kill-switch client pour désactiver upload/download médias sync
+    requireTls: false, // Enforce wss:// in production (default: false)
+    maxReconnectAttempts: 10, // Max auto-reconnect attempts before giving up
+    reconnectBaseDelayMs: 1000, // Initial reconnect delay in ms
+    reconnectMaxDelayMs: 30000, // Max reconnect delay in ms
+  },
+
   HOTKEYS: {
     FLIP_H: "F1", // Flip horizontal (default : F1)
     GRAYSCALE: "y", // Noir & blanc (default : y)

@@ -116,6 +116,8 @@
       },
       folder: {
         getSelected: async () => eagleApi.folder?.getSelected?.(),
+        browseAndAdd: async () => eagleApi.folder?.browseAndAdd?.(),
+        removeFolder: async (id) => eagleApi.folder?.removeFolder?.(id),
       },
       clipboard: {
         copyFiles: async (paths) => eagleApi.clipboard?.copyFiles?.(paths),

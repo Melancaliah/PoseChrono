@@ -20,12 +20,17 @@
   function handleSettingsScreenKeyboardShortcuts(input = {}) {
     const event = input.event;
     const settingsScreen = input.settingsScreen;
+    const reviewScreen = input.reviewScreen;
     const startBtn = input.startBtn;
     const getTopOpenModal =
       typeof input.getTopOpenModal === "function" ? input.getTopOpenModal : null;
     const onStart = typeof input.onStart === "function" ? input.onStart : null;
+    const onReturnHome =
+      typeof input.onReturnHome === "function" ? input.onReturnHome : null;
+    const documentRef =
+      input.documentRef || (typeof document !== "undefined" ? document : null);
 
-    if (!event || !settingsScreen || settingsScreen.classList.contains("hidden")) {
+    if (!event) {
       return false;
     }
 
@@ -33,7 +38,31 @@
       return false;
     }
 
+    const isSettingsVisible =
+      !!settingsScreen && !settingsScreen.classList.contains("hidden");
+    const isReviewVisible =
+      !!reviewScreen && !reviewScreen.classList.contains("hidden");
+
+    if (!isSettingsVisible && !isReviewVisible) {
+      return false;
+    }
+
     if (getTopOpenModal && getTopOpenModal()) return false;
+
+    if (isReviewVisible) {
+      const zoomOverlay =
+        documentRef && typeof documentRef.getElementById === "function"
+          ? documentRef.getElementById("zoom-overlay")
+          : null;
+      if (zoomOverlay) return false;
+
+      event.preventDefault();
+      if (onReturnHome) {
+        onReturnHome();
+      }
+      return true;
+    }
+
     if (!startBtn || startBtn.disabled) return false;
 
     event.preventDefault();
