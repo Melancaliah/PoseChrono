@@ -55,7 +55,8 @@
       return true;
     }
 
-    const endpointLabel = transportUrl || "WebSocket";
+    const endpointLabel = transportUrl || "";
+    const endpointSuffix = endpointLabel ? ` (${endpointLabel})` : "";
     const errorCode = String(state?.lastError || "").toLowerCase();
     const hasNetworkError =
       errorCode.includes("websocket") ||
@@ -69,8 +70,8 @@
       setStatus(
         getText(
           "sync.networkReconnecting",
-          "Network: reconnecting ({{endpoint}})",
-        ).replace("{{endpoint}}", endpointLabel),
+          "Network: reconnecting",
+        ) + endpointSuffix,
         "warning",
       );
       return true;
@@ -80,8 +81,8 @@
       setStatus(
         getText(
           "sync.networkConnected",
-          "Network: connected ({{endpoint}})",
-        ).replace("{{endpoint}}", endpointLabel),
+          "Network: connected",
+        ) + endpointSuffix,
         "success",
       );
       return true;
@@ -90,8 +91,8 @@
     setStatus(
       getText(
         "sync.networkReady",
-        "Network: ready ({{endpoint}})",
-      ).replace("{{endpoint}}", endpointLabel),
+        "Network: ready",
+      ) + endpointSuffix,
       "warning",
     );
     return true;

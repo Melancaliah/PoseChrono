@@ -185,6 +185,7 @@
 
     if (progressBar && typeof progressBar.addEventListener === "function") {
       progressBar.addEventListener("click", (event) => {
+        if (event.button !== 0) return;
         if (!state.isPlaying && state.selectedDuration > 0) return;
         const rect = progressBar.getBoundingClientRect();
         const percent = (event.clientX - rect.left) / rect.width;
@@ -194,7 +195,16 @@
         }
       });
 
+      if (onShowProgressBarContextMenu) {
+        progressBar.addEventListener("contextmenu", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          onShowProgressBarContextMenu(event.clientX, event.clientY, event);
+        });
+      }
+
       progressBar.addEventListener("mousedown", (event) => {
+        if (event.button !== 0) return;
         if (state.selectedDuration <= 0) return;
         isDraggingProgress = true;
         const rect = progressBar.getBoundingClientRect();

@@ -5717,19 +5717,52 @@
       typeof options.warnMissingCapability === "function"
         ? options.warnMissingCapability
         : () => {};
+    let fallbackMaximizedState = false;
 
     async function toggleMaximize() {
       const platform = getPlatform();
       try {
         if (platform?.window) {
-          const isMaximized = await (platform.window.isMaximized?.() || false);
-          if (isMaximized && platform.window.unmaximize) {
-            await platform.window.unmaximize();
-            return;
+          const canMaximize = typeof platform.window.maximize === "function";
+          const canUnmaximize = typeof platform.window.unmaximize === "function";
+          const canReadMaximized = typeof platform.window.isMaximized === "function";
+
+          if (canReadMaximized) {
+            try {
+              const isMaximized = !!(await platform.window.isMaximized());
+              fallbackMaximizedState = isMaximized;
+              if (isMaximized && canUnmaximize) {
+                await platform.window.unmaximize();
+                fallbackMaximizedState = false;
+                return null;
+              }
+              if (!isMaximized && canMaximize) {
+                await platform.window.maximize();
+                fallbackMaximizedState = true;
+                return null;
+              }
+            } catch (_) {}
           }
-          if (!isMaximized && platform.window.maximize) {
+
+          if (canMaximize && canUnmaximize) {
+            if (fallbackMaximizedState) {
+              await platform.window.unmaximize();
+              fallbackMaximizedState = false;
+            } else {
+              await platform.window.maximize();
+              fallbackMaximizedState = true;
+            }
+            return null;
+          }
+          if (canMaximize) {
             await platform.window.maximize();
-            return;
+            fallbackMaximizedState = true;
+            return null;
+          }
+          if (canUnmaximize) {
+            await platform.window.unmaximize();
+            fallbackMaximizedState = false;
+            return null;
           }
         }
       } catch (_) {}
@@ -6315,6 +6348,7 @@
 
     if (progressBar && typeof progressBar.addEventListener === "function") {
       progressBar.addEventListener("click", (event) => {
+        if (event.button !== 0) return;
         if (!state.isPlaying && state.selectedDuration > 0) return;
         const rect = progressBar.getBoundingClientRect();
         const percent = (event.clientX - rect.left) / rect.width;
@@ -6324,7 +6358,16 @@
         }
       });
 
+      if (onShowProgressBarContextMenu) {
+        progressBar.addEventListener("contextmenu", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          onShowProgressBarContextMenu(event.clientX, event.clientY, event);
+        });
+      }
+
       progressBar.addEventListener("mousedown", (event) => {
+        if (event.button !== 0) return;
         if (state.selectedDuration <= 0) return;
         isDraggingProgress = true;
         const rect = progressBar.getBoundingClientRect();
@@ -8550,7 +8593,13 @@
     const timeRemaining = toNumber(state.timeRemaining, 0);
     const selectedDuration = Math.max(0, toNumber(state.selectedDuration, 0));
     const isCustomPause = !!state.isCustomPause;
-    const threshold = selectedDuration * 0.2;
+    const thresholdOverride = state.thresholdOverride != null
+      ? Number(state.thresholdOverride)
+      : null;
+    const threshold =
+      thresholdOverride != null && Number.isFinite(thresholdOverride) && thresholdOverride >= 0
+        ? thresholdOverride
+        : Math.min(selectedDuration * 0.2, 15);
     if (
       !isCustomPause &&
       threshold > 0 &&
@@ -9269,6 +9318,8 @@
   }
 
   function resolveStartButtonDisabled(input = {}) {
+    const imagesCount = Math.max(0, Number(input.imagesCount) || 0);
+    if (imagesCount === 0) return true;
     const mode = normalizeMode(input.sessionMode, MODE_CLASSIQUE);
     if (mode === MODE_CUSTOM) {
       const customQueueLength = Math.max(0, Number(input.customQueueLength) || 0);
@@ -10588,6 +10639,8 @@
             .slice(0, 1000)
         : [];
 
+      const isOnline = session.isOnline === true;
+
       return {
         timestamp,
         hour,
@@ -10598,6 +10651,7 @@
         memoryType,
         customQueue,
         images,
+        ...(isOnline ? { isOnline: true } : {}),
       };
     }
 

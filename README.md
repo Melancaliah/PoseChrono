@@ -19,7 +19,7 @@ This tool was originally conceived as a plugin for **Eagle.cool**. However, to m
 - **Training Modes** - Multiple modes tailored to your needs, including random or manual sorting.
 - **Artist Toolset** - Silhouette view, B&W, Blurs, and custom grids/guides to check plumb lines.
 - **Drawing Module** - Integrated light table feature to scribble directly over your references.
-- **Precision** - Built-in measuring tools (set units, compare lengths, and report measurements).
+- **Proportion mesurement** - Built-in measuring tools (set units, compare lengths, and report measurements).
 - **Timeline** - Comprehensive history to visualize your evolution and find practiced poses.
 
 #

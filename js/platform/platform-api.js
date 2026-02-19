@@ -85,6 +85,7 @@
   function createNoopFoldersApi() {
     return {
       getSelected: async () => [],
+      getAll: async () => [],
     };
   }
 

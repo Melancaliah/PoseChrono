@@ -28,7 +28,7 @@
 
   /* Backgrounds boutons */
   --bg-primary-subtle: rgba(102, 126, 234, 0.15);
-  --bg-primary-hover: rgba(102, 126, 234, 0.25);
+  --bg-primary-hover: #667eea40;
   --bg-primary-active: rgba(102, 126, 234, 0.3);
   --bg-memory-active: #2a3154;
   --border-primary: rgba(102, 126, 234, 0.3);
@@ -42,7 +42,15 @@
 
   /* module dessin  */
   --color-drawing-badge: #6c5819;
-  --color-pause-badge: #;
+  --color-pause-badge: ;
+
+  /* Legende Timeline */
+
+  --color-legend-cell-level-1: #667eea40;
+  --color-legend-cell-level-2: #4d5c9d;
+  --color-legend-cell-level-3: #667eea;
+  --color-legend-cell-level-4: #e5c069;
+  
 }
 
 /* ============================================
@@ -80,6 +88,14 @@
   --color-start-btn-bg: linear-gradient(to right, #39409f, #5bb1e5);
   --color-start-btn-shadow: none;
   --color-start-btn-shadow-active: none;
+
+  /* Legende Timeline */
+
+  --color-legend-cell-level-1: #667eea40;
+  --color-legend-cell-level-2: #4d5c9d;
+  --color-legend-cell-level-3: #667eea;
+  --color-legend-cell-level-4: #e5c069;
+  
 }
 
 /* ============================================
@@ -88,7 +104,7 @@
 
 :root[data-theme="cyan"] {
   --color-primary: #3ca5b5;
-  --color-primary-lessintense: #06b6d4;
+  --color-primary-lessintense: #4896a3;
   --color-primary-dark: #0e7490;
   --color-primary-light: #67e8f9;
   --color-primary-elegant-light: #a5f3fc;
@@ -103,7 +119,7 @@
 
   /* Backgrounds boutons */
   --bg-primary-subtle: rgba(34, 211, 238, 0.15);
-  --bg-primary-hover: rgba(34, 211, 238, 0.25);
+  --bg-primary-hover: #22d3ee40;
   --bg-primary-active: rgba(34, 211, 238, 0.3);
   --bg-memory-active: #1e3a47;
   --border-primary: rgba(34, 211, 238, 0.3);
@@ -115,6 +131,14 @@
   --color-start-btn-active: #0891b2;
   --color-start-btn-shadow: rgba(34, 211, 238, 0.327);
   --color-start-btn-shadow-active: rgba(8, 145, 178, 0.4);
+
+  /* Legende Timeline */
+
+  --color-legend-cell-level-1: #22d3ee40;
+  --color-legend-cell-level-2: #378996;
+  --color-legend-cell-level-3: #3ca5b5;
+  --color-legend-cell-level-4: #e5c069;
+
 }
 
 /* ============================================
@@ -140,7 +164,7 @@
 
   /* Backgrounds boutons */
   --bg-primary-subtle: rgba(16, 185, 129, 0.15);
-  --bg-primary-hover: rgba(16, 185, 129, 0.25);
+  --bg-primary-hover: #10b98140;
   --bg-primary-active: rgba(16, 185, 129, 0.3);
   --bg-memory-active: #1e3d2f;
   --border-primary: rgba(16, 185, 129, 0.3);
@@ -151,6 +175,12 @@
   --color-start-btn-active: linear-gradient(to right, #00684e, #10b981);
   --color-start-btn-shadow: none;
   --color-start-btn-shadow-active: none;
+
+   /* Legende Timeline */
+  --color-legend-cell-level-1: #10b98140;
+  --color-legend-cell-level-2: #218162;
+  --color-legend-cell-level-3: #29bc8b;
+  --color-legend-cell-level-4: #e5c069;
 }
 
 /* ============================================

@@ -1,0 +1,15 @@
+{
+  "name": "posechrono-sync-server",
+  "version": "1.0.0",
+  "description": "PoseChrono Relais WebSocket (Mode En Ligne)",
+  "main": "server.js",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

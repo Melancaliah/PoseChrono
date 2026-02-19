@@ -3069,26 +3069,12 @@ function setupDrawingModeTools() {
     populateDrawingToolbar();
   }
 
-  // Mise à jour des tooltips avec les hotkeys configurées
-  const hk = typeof CONFIG !== "undefined" ? CONFIG.HOTKEYS : {};
-
-  const exportBtn = document.getElementById("drawing-export");
-  if (exportBtn && hk.DRAWING_EXPORT) {
-    exportBtn.setAttribute(
-      "data-tooltip",
-      i18next.t("draw.buttons.export", { hotkey: `Ctrl+${hk.DRAWING_EXPORT.toUpperCase()}` }),
-    );
-  }
+  // Rafraîchir tous les tooltips (langue, hotkeys)
+  refreshDrawingToolbarTooltips();
 
   const lightboxBtn = document.getElementById("drawing-lightbox-btn");
   if (lightboxBtn) {
     updateDrawingLightboxIcon();
-    if (hk.DRAWING_LIGHTBOX) {
-      lightboxBtn.setAttribute(
-        "data-tooltip",
-        i18next.t("draw.buttons.lightboxWithKey", { hotkey: hk.DRAWING_LIGHTBOX }),
-      );
-    }
   }
 
   // Stabilisateur (bouton optionnel, peut ne pas exister)
@@ -3126,6 +3112,25 @@ function setupDrawingModeTools() {
     };
   }
 
+  // Bouton clear mesures (× sur le panneau total distance)
+  // Supprime uniquement les lignes de type "measure" sans toucher à l'unité de calibration
+  const clearMeasuresBtn = document.getElementById("drawing-clear-measures");
+  if (clearMeasuresBtn) {
+    clearMeasuresBtn.onclick = (e) => {
+      e.stopPropagation();
+      if (!drawingMeasuresCtx || !drawingMeasures) return;
+      hideDrawingEditHud();
+      measurementLines = measurementLines.filter((line) => line.type !== "measure");
+      redrawDrawingMeasurements();
+      updateDrawingTotalDistance();
+      // Fermer aussi le panneau unité (visuellement, la calibration est conservée)
+      const unitInfo = drawingDOM.unitInfo || document.getElementById("drawing-unit-info");
+      if (unitInfo) unitInfo.classList.add("hidden");
+      updateDrawingButtonStates("main");
+      updateDrawingButtonStates("zoom");
+    };
+  }
+
   // Rendre le container des infos de mesure déplaçable
   setupDrawingInfosContainerDrag();
 
@@ -3150,6 +3155,87 @@ function setupDrawingModeTools() {
 
   // Curseur personnalisé pour prévisualiser la taille du pinceau
   createDrawingCursor();
+}
+
+/**
+ * Rafraîchit les tooltips de toutes les toolbars de dessin (principale et zoom).
+ * À appeler après un changement de langue ou de raccourcis.
+ */
+function refreshDrawingToolbarTooltips() {
+  if (typeof i18next === "undefined" || typeof i18next.t !== "function") return;
+  const hk = typeof CONFIG !== "undefined" ? CONFIG.HOTKEYS : {};
+
+  // Sélecteurs couvrant la toolbar principale ET la toolbar zoom
+  const toolbarSelectors = ["#drawing-toolbar", "#zoom-drawing-toolbar"];
+
+  toolbarSelectors.forEach((selector) => {
+    const toolbar = document.querySelector(selector);
+    if (!toolbar) return;
+
+    // Boutons d'outils
+    if (typeof TOOL_DEFINITIONS === "object" && TOOL_DEFINITIONS) {
+      Object.entries(TOOL_DEFINITIONS).forEach(([toolId, def]) => {
+        const btn = toolbar.querySelector(`[data-tool="${toolId}"]`);
+        if (btn && typeof def.tooltip === "function") {
+          btn.setAttribute("data-tooltip", def.tooltip());
+        }
+      });
+    }
+
+    // Boutons d'action
+    const clearBtn = toolbar.querySelector('[data-tool="clear"]');
+    if (clearBtn) {
+      clearBtn.setAttribute("data-tooltip", i18next.t("draw.buttons.clearDrawing"));
+    }
+    const clearMeasBtn = toolbar.querySelector('[data-tool="clear-measurements"]');
+    if (clearMeasBtn) {
+      clearMeasBtn.setAttribute("data-tooltip", i18next.t("draw.buttons.clearMeasurements"));
+    }
+  });
+
+  // Export button (ID unique)
+  const exportBtn = document.getElementById("drawing-export");
+  if (exportBtn && hk.DRAWING_EXPORT) {
+    exportBtn.setAttribute("data-tooltip", i18next.t("draw.buttons.export", { hotkey: `Ctrl+${hk.DRAWING_EXPORT.toUpperCase()}` }));
+  }
+  const zoomExportBtn = document.getElementById("zoom-export-btn");
+  if (zoomExportBtn && hk.DRAWING_EXPORT) {
+    zoomExportBtn.setAttribute("data-tooltip", i18next.t("draw.buttons.export", { hotkey: `Ctrl+${hk.DRAWING_EXPORT.toUpperCase()}` }));
+  }
+
+  // Lightbox buttons
+  const lightboxBtn = document.getElementById("drawing-lightbox-btn");
+  if (lightboxBtn) {
+    const key = hk.DRAWING_LIGHTBOX
+      ? "draw.buttons.lightboxWithKey"
+      : "draw.buttons.lightbox";
+    lightboxBtn.setAttribute("data-tooltip", i18next.t(key, { hotkey: hk.DRAWING_LIGHTBOX }));
+  }
+  const zoomLightboxBtn = document.getElementById("zoom-lightbox-btn");
+  if (zoomLightboxBtn) {
+    const key = hk.DRAWING_LIGHTBOX
+      ? "draw.buttons.lightboxWithKey"
+      : "draw.buttons.lightbox";
+    zoomLightboxBtn.setAttribute("data-tooltip", i18next.t(key, { hotkey: hk.DRAWING_LIGHTBOX }));
+  }
+
+  // Close button
+  const closeBtn = document.getElementById("drawing-close");
+  if (closeBtn) {
+    closeBtn.setAttribute("data-tooltip", i18next.t("draw.buttons.closeWithKey", { hotkey: hk.DRAWING_CLOSE }));
+  }
+
+  // Size slider title
+  const sizeSlider = document.getElementById("drawing-size");
+  if (sizeSlider) {
+    sizeSlider.title = i18next.t("draw.sliders.size");
+  }
+
+  // Bouton clear-measures (panneau total distance)
+  const clearMeasures = document.getElementById("drawing-clear-measures");
+  if (clearMeasures) {
+    clearMeasures.title = i18next.t("draw.buttons.clearMeasurements");
+  }
 }
 
 /**

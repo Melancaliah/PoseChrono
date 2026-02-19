@@ -182,7 +182,7 @@
 
 .desktop-sources-list {
   margin-top: 5px;
-  border: 1px solid var(--border-light);
+  border: 1px dashed var(--border-light);
   border-radius: 8px;
   overflow: hidden;
   background: var(--bg-surface);
@@ -267,7 +267,10 @@
   align-items: center;
   justify-content: center;
   opacity: 0;
-  transition: opacity 0.15s, color 0.15s, background 0.15s;
+  transition:
+    opacity 0.15s,
+    color 0.15s,
+    background 0.15s;
 }
 
 .desktop-source-item:hover .desktop-source-remove-btn {
@@ -448,12 +451,12 @@
   width: 95px;
   min-width: 95px;
   height: 100vh;
-  margin-top: -36px;
+  margin-top: calc(-1 * var(--titlebar-height));
   padding-top: 62px;
   padding: 30px 0;
   background: var(--bg-dark);
   right: 0;
-  top: 36px;
+  top: var(--titlebar-height);
   overflow-y: auto;
   overflow-x: hidden;
   flex-direction: column;
@@ -499,6 +502,11 @@
 
 .sidebar-btn.active svg {
   fill: white !important;
+}
+
+.sidebar-btn.disabled {
+  opacity: 0.45;
+  pointer-events: none;
 }
 
 .timer-display {
@@ -575,9 +583,7 @@
 }
 
 .controls-section {
-  flex: 1;
   justify-content: center;
-  margin: 15px;
   gap: 10px;
 }
 
@@ -587,13 +593,11 @@
 }
 
 .secondary-controls {
-  margin-top: 30px;
   gap: 8px;
 }
 
 #sound-btn {
-  margin-top: 10px;
-  margin-bottom: 15px;
+  margin: 0;
 }
 
 #sound-btn.muted {
@@ -693,7 +697,7 @@ video {
 .toolbar-dock-zone.visible {
   opacity: 1;
   border-color: rgba(255, 255, 255, 0.3);
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.219);
 }
 
 .toolbar-dock-zone.active {
@@ -1081,8 +1085,9 @@ video {
   font-size: 13px;
   cursor: pointer;
   opacity: 0.9;
-    transition: color 0.1s ease-in-out, opacity 0.5s ease-in-out;
-
+  transition:
+    color 0.1s ease-in-out,
+    opacity 0.5s ease-in-out;
 }
 
 .review-duration-toggle:hover {
@@ -1113,7 +1118,9 @@ video {
 
 .drawing-hud-stack {
   position: fixed;
-  right: calc(var(--drawing-hud-right-offset, 18px) + env(safe-area-inset-right));
+  right: calc(
+    var(--drawing-hud-right-offset, 18px) + env(safe-area-inset-right)
+  );
   bottom: calc(14px + env(safe-area-inset-bottom));
   z-index: 11060;
   display: flex;

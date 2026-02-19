@@ -2,9 +2,47 @@
    BARRE DE TITRE PERSONNALISÉE - PoseChrono
    ============================================ */
 
+/* Hauteur de la titlebar, accessible globalement */
+:root {
+  --titlebar-height: 36px;
+}
+
 /* Masquer la barre de titre personnalisée si frame: true dans manifest.json */
 body:not(.frameless) .custom-titlebar {
   display: none !important;
+}
+
+/* ============================================
+   COMPENSATION DE LAYOUT — titlebar active
+   La classe frameless est ajoutée sur body par frame-mode-detection.js
+   quand manifest.json indique frame:false (mode desktop).
+   La titlebar est position:fixed, top:0, height:36px — le layout doit
+   décaler son contenu vers le bas pour ne pas se faire mordre.
+   ============================================ */
+
+/* Écran de dessin : conteneur principal */
+body.frameless #drawing-screen {
+  padding-top: var(--titlebar-height);
+}
+
+/* Zone image : réduire la hauteur pour compenser le décalage */
+body.frameless .image-container {
+  height: calc(100vh - var(--titlebar-height));
+}
+
+/* Ajustement max-height des médias : la propriété doit correspondre à la
+   hauteur réellement disponible pour éviter un décalage de l'inline-flex
+   (le wrapper se dimensionne sur max-height déclaré, pas sur la contrainte
+   du conteneur, ce qui causerait un écart entre l'image et la barre de
+   progression / les bordures dessin). */
+body.frameless #current-image,
+body.frameless #current-video {
+  max-height: calc(100vh - 40px - 6px - var(--titlebar-height));
+}
+
+/* Écran paramètres / home (et tout écran .screen autre que drawing) */
+body.frameless .screen:not(#drawing-screen) {
+  padding-top: calc(7vh + var(--titlebar-height));
 }
 
 header,
@@ -13,8 +51,6 @@ main {
 }
 
 .custom-titlebar {
-  --titlebar-height: 36px;
-
   -webkit-app-region: drag;
   user-select: none;
   display: flex;

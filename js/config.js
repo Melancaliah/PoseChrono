@@ -31,7 +31,8 @@ const CONFIG = {
   zoomAnimated: true, // Animation fluide du zoom (default : true)
 
   SYNC: {
-    enabled: false, // Activer/désactiver toute la fonctionnalité de synchronisation en ligne
+    enabled: true, // Activer/désactiver toute la fonctionnalité de synchronisation en ligne
+    allowPublicSync: false, // Activer le mode "Public" (internet) du sync. Si false : seul le mode local est disponible et le bouton Public est masqué.
     transport: "ws", // Transport mode: "webrtc" (P2P via signaling), "ws" (WebSocket relay) or "mock" (local only, for dev)
     wsUrl: "ws://127.0.0.1:8787", // Default WebSocket relay URL
     webrtcSignalingUrl: "ws://127.0.0.1:8787", // Default signaling relay URL used by WebRTC mode
@@ -104,43 +105,7 @@ const CONFIG = {
 // VALEURS PAR DÉFAUT DES RACCOURCIS (pour reset)
 // ================================================================
 
-const DEFAULT_HOTKEYS = {
-  FLIP_H: "F1",
-  GRAYSCALE: "y",
-  BLUR: "f",
-  MUTE: "m",
-  GRID: "h",
-  GRID_MODAL: "H",
-  SIDEBAR: "Tab",
-  INFO: "i",
-  SILHOUETTE: "s",
-  SILHOUETTE_MODAL: "S",
-  THEME: "F6",
-  ANNOTATE: "b",
-  TAGS: "t",
-  VIDEO_SLOWER: "-",
-  VIDEO_FASTER: "+",
-  VIDEO_PREV_FRAME: "'",
-  VIDEO_NEXT_FRAME: "(",
-  VIDEO_LOOP: "l",
-  VIDEO_CONFIG: "V",
-  DRAWING_EXPORT: "s",
-  DRAWING_LIGHTBOX: ")",
-  DRAWING_CLOSE: "Escape",
-  DRAWING_TOOL_PENCIL: "b",
-  DRAWING_TOOL_ERASER: "e",
-  DRAWING_TOOL_RECTANGLE: "r",
-  DRAWING_TOOL_CIRCLE: "c",
-  DRAWING_TOOL_LINE: "l",
-  DRAWING_TOOL_ARROW: "a",
-  DRAWING_TOOL_MEASURE: "m",
-  DRAWING_TOOL_CALIBRATE: "u",
-  DRAWING_TOOL_LASER: "B",
-  DRAWING_TOOL_PROTRACTOR: "U",
-  DRAWING_ROTATE_SHAPE: "q",
-  DRAWING_SIZE_DECREASE: "é",
-  DRAWING_SIZE_INCREASE: '"',
-};
+const DEFAULT_HOTKEYS = { ...CONFIG.HOTKEYS };
 
 // Clé localStorage pour les raccourcis personnalisés
 const HOTKEYS_STORAGE_KEY = "posechrono_hotkeys";

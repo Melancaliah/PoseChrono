@@ -97,6 +97,8 @@
   }
 
   function resolveStartButtonDisabled(input = {}) {
+    const imagesCount = Math.max(0, Number(input.imagesCount) || 0);
+    if (imagesCount === 0) return true;
     const mode = normalizeMode(input.sessionMode, MODE_CLASSIQUE);
     if (mode === MODE_CUSTOM) {
       const customQueueLength = Math.max(0, Number(input.customQueueLength) || 0);

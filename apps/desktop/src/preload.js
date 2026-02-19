@@ -66,15 +66,6 @@ window.addEventListener("DOMContentLoaded", () => {
   } catch (_) {}
 });
 
-window.addEventListener("load", () => {
-  setTimeout(() => {
-    try {
-      const body = window.document && window.document.body;
-      if (!body) return;
-      body.style.opacity = "1";
-    } catch (_) {}
-  }, 80);
-});
 
 window.addEventListener("beforeunload", () => {
   for (const handler of hideHandlers) {
@@ -138,6 +129,8 @@ const eagleShim = {
   shell: {
     showItemInFolder: (filePath) =>
       invoke("posechrono:shell:showItemInFolder", filePath),
+    openPath: (filePath) => invoke("posechrono:shell:openPath", filePath),
+    openItem: (filePath) => invoke("posechrono:shell:openPath", filePath),
   },
   tag: {
     get: () => invoke("posechrono:tag:get"),

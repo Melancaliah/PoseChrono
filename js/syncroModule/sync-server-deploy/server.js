@@ -24,7 +24,7 @@ if (!WebSocketServer) {
 
 const DEFAULT_HOST = process.env.POSECHRONO_SYNC_RELAY_HOST || "0.0.0.0";
 const DEFAULT_PORT = Number(process.env.POSECHRONO_SYNC_RELAY_PORT || 8787);
-const MAX_PAYLOAD_BYTES = Number(process.env.POSECHRONO_SYNC_MAX_PAYLOAD || 20 * 1024 * 1024);
+const MAX_PAYLOAD_BYTES = Number(process.env.POSECHRONO_SYNC_MAX_PAYLOAD || 4 * 1024 * 1024);
 const MAX_PARTICIPANTS_PER_ROOM = Math.max(
   2,
   Number(process.env.POSECHRONO_SYNC_MAX_PARTICIPANTS || 32) || 32,
@@ -252,6 +252,33 @@ function normalizePassword(input) {
     throw new Error("invalid-password");
   }
   return value;
+}
+
+function hashPassword(password) {
+  if (!password) return "";
+  const salt = crypto.randomBytes(16).toString("hex");
+  const hash = crypto.scryptSync(password, salt, 64).toString("hex");
+  return `${salt}:${hash}`;
+}
+
+function verifyPassword(provided, storedHash) {
+  if (!storedHash) return true; // session has no password
+  if (!provided) return false;
+  const colonIdx = storedHash.indexOf(":");
+  if (colonIdx === -1) return false;
+  const salt = storedHash.slice(0, colonIdx);
+  const hash = storedHash.slice(colonIdx + 1);
+  if (!salt || !hash) return false;
+  try {
+    const computedHash = crypto.scryptSync(provided, salt, 64).toString("hex");
+    return crypto.timingSafeEqual(
+      Buffer.from(computedHash, "hex"),
+      Buffer.from(hash, "hex"),
+    );
+  } catch (_) {
+    return false;
+  }
+}
 }
 
 function toBoundedInt(value, min, max, errorCode) {
@@ -1203,7 +1230,7 @@ function createRoom(state, payload) {
     sessionName: normalizeSessionName(payload?.sessionName),
     controlMode: normalizeControlMode(payload?.controlMode),
     hostClientId,
-    password: normalizePassword(payload?.password),
+    passwordHash: hashPassword(normalizePassword(payload?.password)),
     participantIds: new Set([hostClientId]),
     participantProfiles: new Map([
       [hostClientId, normalizeParticipantName(payload?.hostDisplayName, "Hôte")],
@@ -1239,7 +1266,7 @@ function createRoom(state, payload) {
 function assertRoomAccess(room, password) {
   if (!room) throw new Error("session-not-found");
   const normalizedPassword = normalizePassword(password);
-  if (room.password && room.password !== normalizedPassword) {
+  if (!verifyPassword(normalizedPassword, room.passwordHash)) {
     throw new Error("invalid-password");
   }
 }
@@ -1796,9 +1823,44 @@ async function main() {
     res.end(JSON.stringify({ ok: false, error: "not-found" }));
   });
 
+  const ALLOWED_ORIGINS = (process.env.POSECHRONO_SYNC_ALLOWED_ORIGINS || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
   const wss = new WebSocketServer({
     server,
     maxPayload: MAX_PAYLOAD_BYTES,
+    verifyClient: (info) => {
+      const origin = String(info.req.headers["origin"] || "").trim();
+      // No origin header = non-browser client (desktop app, CLI) → allow
+      if (!origin) return true;
+      // Local origins always allowed
+      try {
+        const parsed = new URL(origin);
+        const h = parsed.hostname;
+        if (
+          h === "localhost" ||
+          h === "127.0.0.1" ||
+          h.startsWith("192.168.") ||
+          h.startsWith("10.") ||
+          h.startsWith("172.")
+        ) {
+          return true;
+        }
+      } catch (_) {}
+      // Env-configured allowed origins
+      if (ALLOWED_ORIGINS.length > 0 && ALLOWED_ORIGINS.includes(origin)) {
+        return true;
+      }
+      // Eagle app file:// origin or null origin (packaged apps)
+      if (origin === "null" || origin.startsWith("file://")) return true;
+      // If no explicit allowlist is configured, allow all internet origins
+      // (open relay mode — operator can restrict via env var)
+      if (ALLOWED_ORIGINS.length === 0) return true;
+      console.warn(`[sync-relay] blocked WebSocket from origin: ${origin}`);
+      return false;
+    },
   });
 
   const cleanupIntervalId = setInterval(() => {
