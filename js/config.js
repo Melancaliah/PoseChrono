@@ -32,7 +32,7 @@ const CONFIG = {
 
   SYNC: {
     enabled: true, // Activer/désactiver toute la fonctionnalité de synchronisation en ligne
-    allowPublicSync: false, // Activer le mode "Public" (internet) du sync. Si false : seul le mode local est disponible et le bouton Public est masqué.
+    allowPublicSync: true, // Activer le mode "Public" (internet) du sync. Si false : seul le mode local est disponible et le bouton Public est masqué.
     transport: "ws", // Transport mode: "webrtc" (P2P via signaling), "ws" (WebSocket relay) or "mock" (local only, for dev)
     wsUrl: "ws://127.0.0.1:8787", // Default WebSocket relay URL
     webrtcSignalingUrl: "ws://127.0.0.1:8787", // Default signaling relay URL used by WebRTC mode
