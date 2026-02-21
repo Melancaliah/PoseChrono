@@ -16,7 +16,7 @@ const CONFIG = {
   defaultAutoFlip: false, // AutoFlip activé par défaut (default : true)
 
   animationDuration: 350, // Durée des transitions en ms (default : 350)
-  tooltipDelay: 500, // délai d'apparition de l'infobulle en ms (default : 500)
+  tooltipDelay: 420, // délai d'apparition de l'infobulle en ms (default : 500)
   smoothProgress: false, // La barre de progression diminue par accoup ou progressivement ? (default : false)
   smoothPauseCircle: true, // La barre de progression de l'écran de pause diminue par accoup ou progressivement ? (default : true)
   reverseProgressiveBlur: false, // Progressive blur inversé : net → flou (false) ou flou → net (true) - (default : false)

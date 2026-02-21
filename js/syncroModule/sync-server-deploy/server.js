@@ -2,6 +2,7 @@
 /* eslint-disable no-console */
 const http = require("http");
 const crypto = require("crypto");
+const os = require("os");
 
 function resolveWebSocketServerCtor() {
   try {
@@ -27,7 +28,7 @@ const DEFAULT_PORT = Number(process.env.POSECHRONO_SYNC_RELAY_PORT || 8787);
 const MAX_PAYLOAD_BYTES = Number(process.env.POSECHRONO_SYNC_MAX_PAYLOAD || 4 * 1024 * 1024);
 const MAX_PARTICIPANTS_PER_ROOM = Math.max(
   2,
-  Number(process.env.POSECHRONO_SYNC_MAX_PARTICIPANTS || 32) || 32,
+  Number(process.env.POSECHRONO_SYNC_MAX_PARTICIPANTS || 12) || 12,
 );
 const RATE_LIMIT_WINDOW_MS = Math.max(
   250,
@@ -195,6 +196,46 @@ function parseArgs(argv) {
   return out;
 }
 
+function isShareableHost(hostname) {
+  const host = String(hostname || "").trim().toLowerCase();
+  if (!host) return false;
+  return !(
+    host === "localhost" ||
+    host === "127.0.0.1" ||
+    host === "::1" ||
+    host === "0.0.0.0" ||
+    host === "::"
+  );
+}
+
+function listLanIpv4Hosts() {
+  const out = [];
+  try {
+    const interfaces = os.networkInterfaces() || {};
+    Object.values(interfaces).forEach((entries) => {
+      if (!Array.isArray(entries)) return;
+      entries.forEach((item) => {
+        if (!item || item.internal) return;
+        if (String(item.family || "") !== "IPv4") return;
+        const ip = String(item.address || "").trim();
+        if (!ip) return;
+        out.push(ip);
+      });
+    });
+  } catch (_) {}
+  return Array.from(new Set(out));
+}
+
+function computeRelayUrls(args) {
+  const host = String(args?.host || "").trim();
+  const port = Number(args?.port || 0) || 0;
+  if (!port) return [];
+  if (isShareableHost(host)) {
+    return [`ws://${host}:${port}`];
+  }
+  return listLanIpv4Hosts().map((ip) => `ws://${ip}:${port}`);
+}
+
 function nowMs() {
   return Date.now();
 }
@@ -278,7 +319,6 @@ function verifyPassword(provided, storedHash) {
   } catch (_) {
     return false;
   }
-}
 }
 
 function toBoundedInt(value, min, max, errorCode) {
@@ -1803,23 +1843,44 @@ function detachClientFromRooms(state, ws) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const state = createRelayState();
+  const relayUrls = computeRelayUrls(args);
+  const suggestedRelayUrl = relayUrls[0] || "";
 
   const server = http.createServer((req, res) => {
     if (req.url === "/health") {
-      res.writeHead(200, { "content-type": "application/json" });
+      res.writeHead(200, {
+        "content-type": "application/json",
+        "access-control-allow-origin": "*",
+        "access-control-allow-methods": "GET, OPTIONS",
+      });
       res.end(
         JSON.stringify({
           ok: true,
           service: "posechrono-sync-relay",
           rooms: state.rooms.size,
           mediaTransferEnabled: !MEDIA_TRANSFER_DISABLED,
+          relayUrls,
+          suggestedRelayUrl,
           ts: nowMs(),
         }),
       );
       return;
     }
 
-    res.writeHead(404, { "content-type": "application/json" });
+    if (req.method === "OPTIONS") {
+      res.writeHead(204, {
+        "access-control-allow-origin": "*",
+        "access-control-allow-methods": "GET, OPTIONS",
+      });
+      res.end();
+      return;
+    }
+
+    res.writeHead(404, {
+      "content-type": "application/json",
+      "access-control-allow-origin": "*",
+      "access-control-allow-methods": "GET, OPTIONS",
+    });
     res.end(JSON.stringify({ ok: false, error: "not-found" }));
   });
 

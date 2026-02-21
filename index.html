@@ -1729,17 +1729,12 @@
             <p id="sync-conn-type-hint" class="sync-session-conn-hint" data-i18n="sync.connLocalHint">Dessiner avec des artistes sur le même réseau</p>
           </div>
 
-          <div id="sync-session-code-row" class="sync-session-code-row hidden">
-            <span
-              id="sync-session-code-value"
-              class="sync-session-code-value"
-            ></span>
+          <section id="sync-session-invite-panel" class="sync-session-invite-panel hidden">
             <button
               type="button"
-              id="sync-session-copy-code-btn"
-              class="sync-session-copy-code-btn"
-              aria-label="Copy session code"
-              title="Copy session code"
+              id="sync-session-copy-server-address-connected-btn"
+              class="sync-session-copy-server-address-btn hidden"
+              title="Copier l'adresse du serveur local"
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
@@ -1751,8 +1746,38 @@
                   d="M360-240q-33 0-56.5-23.5T280-320v-520q0-33 23.5-56.5T360-920h400q33 0 56.5 23.5T840-840v520q0 33-23.5 56.5T760-240H360Zm0-80h400v-520H360v520Zm-160 240q-33 0-56.5-23.5T120-160v-560h80v560h440v80H200Zm160-240v-520 520Z"
                 />
               </svg>
+              <span>Copier l'adresse serveur</span>
             </button>
-          </div>
+
+            <button
+              type="button"
+              id="sync-session-code-row"
+              class="sync-session-code-row hidden"
+              aria-label="Copy session code"
+              title="Copy session code"
+            >
+              <span
+                id="sync-session-code-value"
+                class="sync-session-code-value"
+              ></span>
+              <span
+                id="sync-session-copy-code-btn"
+                class="sync-session-copy-code-btn"
+                aria-hidden="true"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 -960 960 960"
+                  fill="currentColor"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M360-240q-33 0-56.5-23.5T280-320v-520q0-33 23.5-56.5T360-920h400q33 0 56.5 23.5T840-840v520q0 33-23.5 56.5T760-240H360Zm0-80h400v-520H360v520Zm-160 240q-33 0-56.5-23.5T120-160v-560h80v560h440v80H200Zm160-240v-520 520Z"
+                  />
+                </svg>
+              </span>
+            </button>
+          </section>
 
 
 
@@ -1788,6 +1813,24 @@
                  data-i18n="sync.startLocalServer"
               >
                  Démarrer mon serveur local
+              </button>
+              <button
+                type="button"
+                id="sync-session-copy-server-address-host-btn"
+                class="sync-session-copy-server-address-btn hidden"
+                title="Copier l'adresse du serveur local"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 -960 960 960"
+                  fill="currentColor"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M360-240q-33 0-56.5-23.5T280-320v-520q0-33 23.5-56.5T360-920h400q33 0 56.5 23.5T840-840v520q0 33-23.5 56.5T760-240H360Zm0-80h400v-520H360v520Zm-160 240q-33 0-56.5-23.5T120-160v-560h80v560h440v80H200Zm160-240v-520 520Z"
+                  />
+                </svg>
+                <span>Copier l'adresse serveur</span>
               </button>
             </div>
             <label

@@ -290,7 +290,7 @@
     return modal.querySelector("#sync-session-network-status");
   }
 
-  function setNetworkStatus(modal, message = "", tone = "") {
+  function setNetworkStatus(modal, message = "", tone = "", tooltip = "") {
     const networkEl = getNetworkStatusElement(modal);
     if (!networkEl) return;
     networkEl.classList.remove("is-success", "is-warning", "is-error");
@@ -298,6 +298,29 @@
     if (tone === "warning") networkEl.classList.add("is-warning");
     if (tone === "error") networkEl.classList.add("is-error");
     networkEl.textContent = String(message || "");
+    const tooltipText = String(tooltip || "").trim();
+    if (tooltipText) {
+      networkEl.setAttribute("data-tooltip", tooltipText);
+    } else {
+      networkEl.removeAttribute("data-tooltip");
+    }
+    networkEl.removeAttribute("title");
+  }
+
+  function isLoopbackOrUnshareableWsUrl(value) {
+    try {
+      const parsed = new URL(String(value || "").trim());
+      const host = String(parsed.hostname || "").trim().toLowerCase();
+      return (
+        host === "localhost" ||
+        host === "127.0.0.1" ||
+        host === "::1" ||
+        host === "0.0.0.0" ||
+        host === "::"
+      );
+    } catch (_) {
+      return false;
+    }
   }
 
   function updateNetworkStatus(input = {}) {
@@ -305,6 +328,7 @@
     if (!modal) return false;
     const transportMode = String(input.transportMode || "none").trim().toLowerCase();
     const transportUrl = String(input.transportUrl || "").trim();
+    const preferredEndpoint = String(input.preferredEndpoint || "").trim();
     const state = input.state || null;
     const getText =
       typeof input.getText === "function"
@@ -313,7 +337,8 @@
     const setStatus =
       typeof input.setNetworkStatus === "function"
         ? input.setNetworkStatus
-        : (message, tone) => setNetworkStatus(modal, message, tone);
+        : (message, tone, tooltip = "") =>
+            setNetworkStatus(modal, message, tone, tooltip);
 
     if (transportMode === "none") {
       setStatus(
@@ -397,8 +422,18 @@
       return true;
     }
 
-    const endpointLabel = transportUrl || "";
-    const endpointSuffix = endpointLabel ? ` (${endpointLabel})` : "";
+    let endpointLabel = transportUrl || "";
+    if (isLoopbackOrUnshareableWsUrl(endpointLabel)) {
+      if (
+        preferredEndpoint &&
+        !isLoopbackOrUnshareableWsUrl(preferredEndpoint)
+      ) {
+        endpointLabel = preferredEndpoint;
+      } else {
+        endpointLabel = "";
+      }
+    }
+    const tooltip = endpointLabel || "";
     const errorCode = String(state?.lastError || "").toLowerCase();
     const hasNetworkError =
       errorCode.includes("websocket") ||
@@ -413,8 +448,9 @@
         getText(
           "sync.networkReconnecting",
           "Network: reconnecting",
-        ) + endpointSuffix,
+        ),
         "warning",
+        tooltip,
       );
       return true;
     }
@@ -424,8 +460,9 @@
         getText(
           "sync.networkConnected",
           "Network: connected",
-        ) + endpointSuffix,
+        ),
         "success",
+        tooltip,
       );
       return true;
     }
@@ -434,8 +471,9 @@
       getText(
         "sync.networkReady",
         "Network: ready",
-      ) + endpointSuffix,
+      ),
       "warning",
+      tooltip,
     );
     return true;
   }
@@ -451,36 +489,75 @@
 
     const rowEl = modal.querySelector("#sync-session-code-row");
     const valueEl = modal.querySelector("#sync-session-code-value");
-    const copyBtn = modal.querySelector("#sync-session-copy-code-btn");
-    if (!rowEl || !valueEl || !copyBtn) return false;
+    const copyBtn =
+      modal.querySelector("#sync-session-code-row") ||
+      modal.querySelector("#sync-session-copy-code-btn");
+    if (!rowEl || !valueEl) return false;
 
     const normalizedCode = normalizeCode(sessionCode);
     if (!normalizedCode) {
       rowEl.classList.add("hidden");
       valueEl.textContent = "";
-      copyBtn.disabled = true;
+      if (copyBtn && "disabled" in copyBtn) copyBtn.disabled = true;
+      if (copyBtn) copyBtn.classList.add("is-disabled");
       return true;
     }
 
     valueEl.textContent = normalizedCode;
     rowEl.classList.remove("hidden");
-    copyBtn.disabled = false;
+    if (copyBtn && "disabled" in copyBtn) copyBtn.disabled = false;
+    if (copyBtn) copyBtn.classList.remove("is-disabled");
     return true;
   }
 
-  function setStatus(modal, message = "", tone = "") {
+  function setStatus(modal, message = "", tone = "", options = {}) {
+    const withLoadingDots = !!options?.loadingDots;
     const statusEl = getStatusElement(modal);
     if (!statusEl) return;
-    statusEl.classList.remove("is-success", "is-warning", "is-error");
+    statusEl.classList.remove(
+      "is-success",
+      "is-warning",
+      "is-error",
+      "is-loading-dots",
+    );
     if (tone === "success") statusEl.classList.add("is-success");
     if (tone === "warning") statusEl.classList.add("is-warning");
     if (tone === "error") statusEl.classList.add("is-error");
+    if (withLoadingDots) statusEl.classList.add("is-loading-dots");
+    const normalizedMessage = withLoadingDots
+      ? String(message || "").replace(/\s*(?:\.\.\.|…)\s*$/, "")
+      : String(message || "");
     const dotEl = statusEl.querySelector(".sync-session-status-dot");
     if (dotEl) {
       while (dotEl.nextSibling) dotEl.nextSibling.remove();
-      dotEl.after(document.createTextNode(String(message || "")));
+      const messageNode = document.createTextNode(normalizedMessage);
+      dotEl.after(messageNode);
+      if (withLoadingDots) {
+        const loadingDotsEl = document.createElement("span");
+        loadingDotsEl.className = "sync-session-status-loading-dots";
+        loadingDotsEl.setAttribute("aria-hidden", "true");
+        for (let i = 0; i < 3; i += 1) {
+          const dotElNode = document.createElement("span");
+          dotElNode.className = "sync-session-status-loading-dot";
+          dotElNode.textContent = ".";
+          loadingDotsEl.appendChild(dotElNode);
+        }
+        messageNode.after(loadingDotsEl);
+      }
     } else {
-      statusEl.textContent = String(message || "");
+      statusEl.textContent = normalizedMessage;
+      if (withLoadingDots) {
+        const loadingDotsEl = document.createElement("span");
+        loadingDotsEl.className = "sync-session-status-loading-dots";
+        loadingDotsEl.setAttribute("aria-hidden", "true");
+        for (let i = 0; i < 3; i += 1) {
+          const dotElNode = document.createElement("span");
+          dotElNode.className = "sync-session-status-loading-dot";
+          dotElNode.textContent = ".";
+          loadingDotsEl.appendChild(dotElNode);
+        }
+        statusEl.appendChild(loadingDotsEl);
+      }
     }
   }
 
@@ -659,7 +736,12 @@
     const statusEl = getStatusElement(modal);
     if (!statusEl) return false;
 
-    statusEl.classList.remove("is-success", "is-warning", "is-error");
+    statusEl.classList.remove(
+      "is-success",
+      "is-warning",
+      "is-error",
+      "is-loading-dots",
+    );
     statusEl.classList.add("is-success");
     const dotEl = statusEl.querySelector(".sync-session-status-dot");
     if (dotEl) {
@@ -752,7 +834,12 @@
     const statusEl = getStatusElement(modal);
     if (!statusEl) return false;
 
-    statusEl.classList.remove("is-success", "is-warning", "is-error");
+    statusEl.classList.remove(
+      "is-success",
+      "is-warning",
+      "is-error",
+      "is-loading-dots",
+    );
     statusEl.classList.add("is-success");
     const dotEl2 = statusEl.querySelector(".sync-session-status-dot");
     if (dotEl2) {
@@ -974,7 +1061,11 @@
     const createBtn = input.createBtn || null;
     const joinBtn = input.joinBtn || null;
     const leaveBtn = input.leaveBtn || null;
-    const copyCodeBtn = input.copyCodeBtn || null;
+    const copyCodeBtn =
+      input.copyCodeBtn ||
+      modal.querySelector("#sync-session-code-row") ||
+      modal.querySelector("#sync-session-copy-code-btn") ||
+      null;
     const statusEl = input.statusEl || null;
     const controlModeSelect = input.controlModeSelect || null;
     const controlModeTrigger = input.controlModeTrigger || null;

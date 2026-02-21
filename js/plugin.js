@@ -4365,6 +4365,14 @@ function getGlobalSettingsText(key, fallback, vars = undefined) {
   return getI18nText(key, fallback, vars);
 }
 
+function decodeHtmlEntities(input) {
+  const text = String(input ?? "");
+  if (!text || typeof document === "undefined") return text;
+  const textarea = document.createElement("textarea");
+  textarea.innerHTML = text;
+  return textarea.value;
+}
+
 const GLOBAL_SETTINGS_SECTION_ICONS = {
   appearance:
     '<svg xmlns="http://www.w3.org/2000/svg" height="14" viewBox="0 -960 960 960" width="14" fill="currentColor"><path d="M480-80q-84 0-158-32T193-193Q112-267 80-341T48-500q0-84 32-158t113-129q74-74 148-106t158-32q84 0 158 32t148 106q81 55 113 129t32 158q0 85-32 159T767-193q-74 74-148 106T480-80Zm0-80q117 0 198.5-81.5T760-440q0-117-81.5-198.5T480-720q-117 0-198.5 81.5T200-440q0 117 81.5 198.5T480-160Zm0-280Zm0 200q17 0 28.5-11.5T520-280q0-17-11.5-28.5T480-320q-17 0-28.5 11.5T440-280q0 17 11.5 28.5T480-240Zm40-360h-80v240h80v-240Z"/></svg>',
@@ -6135,6 +6143,7 @@ let syncSessionServiceState = null;
 let syncSessionServiceUnsubscribe = null;
 let syncSessionTransportMode = "mock";
 let syncSessionTransportUrl = "";
+let syncSessionSuggestedLocalRelayUrl = "";
 let syncSessionMediaTransferEnabled = true;
 let syncRuntimeApplyInProgress = false;
 let syncRuntimeLastSentFingerprint = "";
@@ -6659,12 +6668,17 @@ function getSyncSessionNetworkStatusElement(modal) {
   return modal.querySelector("#sync-session-network-status");
 }
 
-function setSyncSessionNetworkStatus(modal, message = "", tone = "") {
+function setSyncSessionNetworkStatus(
+  modal,
+  message = "",
+  tone = "",
+  tooltip = "",
+) {
   if (
     SYNC_SESSION_STATUS_UI &&
     typeof SYNC_SESSION_STATUS_UI.setNetworkStatus === "function"
   ) {
-    SYNC_SESSION_STATUS_UI.setNetworkStatus(modal, message, tone);
+    SYNC_SESSION_STATUS_UI.setNetworkStatus(modal, message, tone, tooltip);
     return;
   }
   const networkEl = getSyncSessionNetworkStatusElement(modal);
@@ -6674,6 +6688,32 @@ function setSyncSessionNetworkStatus(modal, message = "", tone = "") {
   if (tone === "warning") networkEl.classList.add("is-warning");
   if (tone === "error") networkEl.classList.add("is-error");
   networkEl.textContent = String(message || "");
+  const tooltipText = String(tooltip || "").trim();
+  if (tooltipText) {
+    networkEl.setAttribute("data-tooltip", tooltipText);
+  } else {
+    networkEl.removeAttribute("data-tooltip");
+  }
+  networkEl.removeAttribute("title");
+}
+
+function isLoopbackSyncEndpoint(endpointUrl) {
+  try {
+    const parsed = new URL(String(endpointUrl || "").trim());
+    const host = String(parsed.hostname || "").trim().toLowerCase();
+    return host === "localhost" || host === "127.0.0.1" || host === "::1";
+  } catch (_) {
+    return false;
+  }
+}
+
+function stripEndpointSuffixFromStatus(message) {
+  const text = String(message || "").trim();
+  if (!text) return "";
+  return text
+    .replace(/\s*\([^)]*\)\s*$/, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
 }
 
 function updateSyncSessionNetworkStatus(modal, snapshot = null) {
@@ -6688,11 +6728,12 @@ function updateSyncSessionNetworkStatus(modal, snapshot = null) {
       modal,
       transportMode: syncSessionTransportMode,
       transportUrl: effectiveTransportUrl,
+      preferredEndpoint: syncSessionSuggestedLocalRelayUrl || "",
       state: snapshot || syncSessionServiceState,
       getText: (key, fallback, vars = undefined) =>
         getI18nText(key, fallback, vars),
-      setNetworkStatus: (message, tone) =>
-        setSyncSessionNetworkStatus(modal, message, tone),
+      setNetworkStatus: (message, tone, tooltip = "") =>
+        setSyncSessionNetworkStatus(modal, message, tone, tooltip),
     });
     if (handled) return;
   }
@@ -6762,7 +6803,19 @@ function updateSyncSessionNetworkStatus(modal, snapshot = null) {
 
   const state = snapshot || syncSessionServiceState;
   const endpoint = String(effectiveTransportUrl || "").trim();
-  const endpointLabel = endpoint || "";
+  let endpointLabel = endpoint || "";
+  if (endpointLabel && isLoopbackSyncEndpoint(endpointLabel)) {
+    const suggested = String(syncSessionSuggestedLocalRelayUrl || "").trim();
+    endpointLabel =
+      suggested && !isLoopbackSyncEndpoint(suggested) ? suggested : "";
+  }
+  const getWsStatusText = (key, fallback) => {
+    const text = getI18nText(key, fallback, { endpoint: "" });
+    const stripped = stripEndpointSuffixFromStatus(text);
+    if (stripped) return stripped;
+    return stripEndpointSuffixFromStatus(String(fallback || ""));
+  };
+  const networkTooltip = endpointLabel || "";
   const errorCode = String(state?.lastError || "").toLowerCase();
   const hasNetworkError =
     errorCode.includes("websocket") ||
@@ -6774,8 +6827,12 @@ function updateSyncSessionNetworkStatus(modal, snapshot = null) {
   if ((state && state.status === "connecting") || hasNetworkError) {
     setSyncSessionNetworkStatus(
       modal,
-      getI18nText("sync.networkReconnecting", "Network: reconnecting ({{endpoint}})", { endpoint: endpointLabel }),
+      getWsStatusText(
+        "sync.networkReconnecting",
+        "Network: reconnecting",
+      ),
       "warning",
+      networkTooltip,
     );
     return;
   }
@@ -6783,16 +6840,21 @@ function updateSyncSessionNetworkStatus(modal, snapshot = null) {
   if (state && (state.status === "hosting" || state.status === "joined")) {
     setSyncSessionNetworkStatus(
       modal,
-      getI18nText("sync.networkConnected", "Network: connected ({{endpoint}})", { endpoint: endpointLabel }),
+      getWsStatusText(
+        "sync.networkConnected",
+        "Network: connected",
+      ),
       "success",
+      networkTooltip,
     );
     return;
   }
 
   setSyncSessionNetworkStatus(
     modal,
-    getI18nText("sync.networkReady", "Network: ready ({{endpoint}})", { endpoint: endpointLabel }),
+    getWsStatusText("sync.networkReady", "Network: ready"),
     "warning",
+    networkTooltip,
   );
 }
 
@@ -6806,48 +6868,110 @@ function updateSyncSessionCodeUi(modal, sessionCode = "") {
       sessionCode,
       normalizeCode: (value) => normalizeSyncSessionCode(value),
     });
-    if (handled) return;
+    if (handled) {
+      updateSyncSessionInvitePanelVisibility(modal);
+      return;
+    }
   }
   if (!modal) return;
   const rowEl = modal.querySelector("#sync-session-code-row");
   const valueEl = modal.querySelector("#sync-session-code-value");
-  const copyBtn = modal.querySelector("#sync-session-copy-code-btn");
-  if (!rowEl || !valueEl || !copyBtn) return;
+  const copyBtn =
+    modal.querySelector("#sync-session-code-row") ||
+    modal.querySelector("#sync-session-copy-code-btn");
+  if (!rowEl || !valueEl) return;
 
   const normalizedCode = normalizeSyncSessionCode(sessionCode);
   if (!normalizedCode) {
     rowEl.classList.add("hidden");
     valueEl.textContent = "";
-    copyBtn.disabled = true;
+    if (copyBtn && "disabled" in copyBtn) copyBtn.disabled = true;
+    if (copyBtn) copyBtn.classList.add("is-disabled");
+    updateSyncSessionInvitePanelVisibility(modal);
     return;
   }
 
   valueEl.textContent = normalizedCode;
   rowEl.classList.remove("hidden");
-  copyBtn.disabled = false;
+  if (copyBtn && "disabled" in copyBtn) copyBtn.disabled = false;
+  if (copyBtn) copyBtn.classList.remove("is-disabled");
+  updateSyncSessionInvitePanelVisibility(modal);
 }
 
-function setSyncSessionStatus(modal, message = "", tone = "") {
+function updateSyncSessionInvitePanelVisibility(modal, snapshot = null) {
+  if (!modal) return;
+  const invitePanel = modal.querySelector("#sync-session-invite-panel");
+  if (!invitePanel) return;
+  const state = snapshot || syncSessionServiceState;
+  const hasSessionCode = !!normalizeSyncSessionCode(state?.sessionCode || "");
+  const shouldShow = isSyncSessionActive(state) && hasSessionCode;
+  const isLocalConnectionType =
+    UIPreferences.get("syncConnectionType", "local") === "local";
+  invitePanel.classList.toggle("hidden", !shouldShow);
+  invitePanel.classList.toggle(
+    "sync-session-invite-panel--plain",
+    !isLocalConnectionType,
+  );
+}
+
+function setSyncSessionStatus(modal, message = "", tone = "", options = {}) {
+  const withLoadingDots = !!options?.loadingDots;
   if (
     SYNC_SESSION_STATUS_UI &&
     typeof SYNC_SESSION_STATUS_UI.setStatus === "function"
   ) {
-    SYNC_SESSION_STATUS_UI.setStatus(modal, message, tone);
+    SYNC_SESSION_STATUS_UI.setStatus(modal, message, tone, {
+      loadingDots: withLoadingDots,
+    });
     return;
   }
   const statusEl = getSyncSessionStatusElement(modal);
   if (!statusEl) return;
-  statusEl.classList.remove("is-success", "is-warning", "is-error");
+  statusEl.classList.remove(
+    "is-success",
+    "is-warning",
+    "is-error",
+    "is-loading-dots",
+  );
   if (tone === "success") statusEl.classList.add("is-success");
   if (tone === "warning") statusEl.classList.add("is-warning");
   if (tone === "error") statusEl.classList.add("is-error");
+  if (withLoadingDots) statusEl.classList.add("is-loading-dots");
+  const normalizedMessage = withLoadingDots
+    ? String(message || "").replace(/\s*(?:\.\.\.|…)\s*$/, "")
+    : String(message || "");
   const dotEl = statusEl.querySelector(".sync-session-status-dot");
   if (dotEl) {
     // Preserve the dot span, set text after it
     while (dotEl.nextSibling) dotEl.nextSibling.remove();
-    dotEl.after(document.createTextNode(String(message || "")));
+    const messageNode = document.createTextNode(normalizedMessage);
+    dotEl.after(messageNode);
+    if (withLoadingDots) {
+      const loadingDotsEl = document.createElement("span");
+      loadingDotsEl.className = "sync-session-status-loading-dots";
+      loadingDotsEl.setAttribute("aria-hidden", "true");
+      for (let i = 0; i < 3; i += 1) {
+        const dotElNode = document.createElement("span");
+        dotElNode.className = "sync-session-status-loading-dot";
+        dotElNode.textContent = ".";
+        loadingDotsEl.appendChild(dotElNode);
+      }
+      messageNode.after(loadingDotsEl);
+    }
   } else {
-    statusEl.textContent = String(message || "");
+    statusEl.textContent = normalizedMessage;
+    if (withLoadingDots) {
+      const loadingDotsEl = document.createElement("span");
+      loadingDotsEl.className = "sync-session-status-loading-dots";
+      loadingDotsEl.setAttribute("aria-hidden", "true");
+      for (let i = 0; i < 3; i += 1) {
+        const dotElNode = document.createElement("span");
+        dotElNode.className = "sync-session-status-loading-dot";
+        dotElNode.textContent = ".";
+        loadingDotsEl.appendChild(dotElNode);
+      }
+      statusEl.appendChild(loadingDotsEl);
+    }
   }
 }
 
@@ -7069,7 +7193,12 @@ function setSyncSessionHostingStatus(modal, state) {
   }
   const statusEl = getSyncSessionStatusElement(modal);
   if (!statusEl) return;
-  statusEl.classList.remove("is-success", "is-warning", "is-error");
+  statusEl.classList.remove(
+    "is-success",
+    "is-warning",
+    "is-error",
+    "is-loading-dots",
+  );
   statusEl.classList.add("is-success");
   const dotElH = statusEl.querySelector(".sync-session-status-dot");
   if (dotElH) {
@@ -7117,7 +7246,12 @@ function setSyncSessionJoinedStatus(modal, state) {
   }
   const statusEl = getSyncSessionStatusElement(modal);
   if (!statusEl) return;
-  statusEl.classList.remove("is-success", "is-warning", "is-error");
+  statusEl.classList.remove(
+    "is-success",
+    "is-warning",
+    "is-error",
+    "is-loading-dots",
+  );
   statusEl.classList.add("is-success");
   const dotElJ = statusEl.querySelector(".sync-session-status-dot");
   if (dotElJ) {
@@ -7357,9 +7491,15 @@ function renderSyncSessionStatus(modal, snapshot = null) {
         modal,
         getI18nText("sync.statusServerWaking", "The server is waking up, please wait up to 30 seconds..."),
         "warning",
+        { loadingDots: true },
       );
     } else {
-      setSyncSessionStatus(modal, getI18nText("sync.statusConnecting", "Connecting..."), "warning");
+      setSyncSessionStatus(
+        modal,
+        getI18nText("sync.statusConnecting", "Connecting..."),
+        "warning",
+        { loadingDots: true },
+      );
     }
     return;
   }
@@ -7464,6 +7604,17 @@ function updateSyncSessionModalPanelsVisibility(modal, snapshot = null) {
   const showParticipantOnlineDownload = connectedAsParticipant;
   const leaveBtn = modal.querySelector("#sync-session-leave-btn");
   const leaveBtnLabel = leaveBtn?.querySelector(".sync-session-leave-label");
+  const copyServerAddressHostBtn = modal.querySelector(
+    "#sync-session-copy-server-address-host-btn",
+  );
+  const copyServerAddressConnectedBtn = modal.querySelector(
+    "#sync-session-copy-server-address-connected-btn",
+  );
+  const isLocalConnectionType =
+    UIPreferences.get("syncConnectionType", "local") === "local";
+  const hasActiveSessionCode = !!String(state?.sessionCode || "").trim();
+  const shouldShowCopyServerAddressButton =
+    isActive && connectedAsHost && hasActiveSessionCode && isLocalConnectionType;
 
   // Connection type section toggle
   const connTypeRow = modal.querySelector(".sync-session-connection-type-row");
@@ -7472,6 +7623,18 @@ function updateSyncSessionModalPanelsVisibility(modal, snapshot = null) {
   if (noteEl) noteEl.classList.toggle("hidden", isActive);
   if (connTypeRow) connTypeRow.classList.toggle("hidden", isActive);
   if (connectedPanel) connectedPanel.classList.toggle("hidden", !isActive);
+  if (copyServerAddressHostBtn) {
+    copyServerAddressHostBtn.classList.toggle(
+      "hidden",
+      !shouldShowCopyServerAddressButton,
+    );
+  }
+  if (copyServerAddressConnectedBtn) {
+    copyServerAddressConnectedBtn.classList.toggle(
+      "hidden",
+      !shouldShowCopyServerAddressButton,
+    );
+  }
 
   if (isActive) {
     if (hostPanel) hostPanel.classList.add("hidden");
@@ -7663,6 +7826,8 @@ function updateSyncSessionModalPanelsVisibility(modal, snapshot = null) {
       !showParticipantOnlineDownload || !syncSessionMediaTransferEnabled,
     );
   }
+
+  updateSyncSessionInvitePanelVisibility(modal, state);
 }
 
 function ensureSyncRuntimeStatusBadge() {
@@ -11058,7 +11223,16 @@ function setupSyncSessionModalBindings() {
   const guestActionNotificationsInput = modal.querySelector(
     "#sync-session-guest-action-notifications-btn",
   );
-  const copyCodeBtn = modal.querySelector("#sync-session-copy-code-btn");
+  const invitePanel = modal.querySelector("#sync-session-invite-panel");
+  const copyCodeBtn =
+    modal.querySelector("#sync-session-code-row") ||
+    modal.querySelector("#sync-session-copy-code-btn");
+  const copyServerAddressHostBtn = modal.querySelector(
+    "#sync-session-copy-server-address-host-btn",
+  );
+  const copyServerAddressConnectedBtn = modal.querySelector(
+    "#sync-session-copy-server-address-connected-btn",
+  );
   const exportPackBtn = modal.querySelector("#sync-session-export-pack-btn");
   const importPackBtn = modal.querySelector("#sync-session-import-pack-btn");
   const publishOnlinePackBtn = modal.querySelector(
@@ -11084,6 +11258,197 @@ function setupSyncSessionModalBindings() {
     "#sync-session-relay-url-save-btn",
   );
   const relayUrlRow = relayUrlInput ? relayUrlInput.closest(".sync-session-relay-url-row") || relayUrlInput.parentElement : null;
+  const isLoopbackRelayUrl = (url) => {
+    try {
+      const parsed = new URL(String(url || "").trim());
+      const host = String(parsed.hostname || "").trim().toLowerCase();
+      return host === "localhost" || host === "127.0.0.1" || host === "::1";
+    } catch (_) {
+      return false;
+    }
+  };
+  const isUnshareableRelayUrl = (url) => {
+    try {
+      const parsed = new URL(String(url || "").trim());
+      const host = String(parsed.hostname || "").trim().toLowerCase();
+      return (
+        host === "0.0.0.0" ||
+        host === "::" ||
+        isLoopbackRelayUrl(url)
+      );
+    } catch (_) {
+      return true;
+    }
+  };
+  const extractRelayUrlFromText = (text) => {
+    const raw = String(text || "").trim();
+    if (!raw) return "";
+    const match = raw.match(/wss?:\/\/[^\s"'<>]+/i);
+    if (!match) return "";
+    let candidate = String(match[0] || "").trim();
+    candidate = candidate.replace(/[),.;]+$/, "");
+    try {
+      const parsed = new URL(candidate);
+      if (parsed.protocol !== "ws:" && parsed.protocol !== "wss:") return "";
+      return parsed.toString().replace(/\/$/, "");
+    } catch (_) {
+      return "";
+    }
+  };
+  const rememberSuggestedLocalRelayUrl = (candidateUrl) => {
+    const normalized = extractRelayUrlFromText(candidateUrl);
+    if (!normalized) return;
+    if (isUnshareableRelayUrl(normalized)) return;
+    syncSessionSuggestedLocalRelayUrl = normalized;
+  };
+  const resolveShareableRelayUrl = async () => {
+    const current = String(relayUrlInput?.value || "").trim();
+    if (current && !isUnshareableRelayUrl(current)) return current;
+    if (syncSessionSuggestedLocalRelayUrl) return syncSessionSuggestedLocalRelayUrl;
+    try {
+      if (
+        typeof navigator !== "undefined" &&
+        navigator.clipboard &&
+        typeof navigator.clipboard.readText === "function"
+      ) {
+        const clipboardText = await navigator.clipboard.readText();
+        const clipUrl = extractRelayUrlFromText(clipboardText);
+        if (clipUrl && !isUnshareableRelayUrl(clipUrl)) {
+          rememberSuggestedLocalRelayUrl(clipUrl);
+          return clipUrl;
+        }
+      }
+    } catch (_) {}
+    return current;
+  };
+  const copyActionFeedbackTimers = new WeakMap();
+  const pulseCopyButton = (buttonEl) => {
+    if (!buttonEl) return;
+    const previousTimer = copyActionFeedbackTimers.get(buttonEl);
+    if (previousTimer) clearTimeout(previousTimer);
+    buttonEl.classList.add("is-copied");
+    const timer = setTimeout(() => {
+      buttonEl.classList.remove("is-copied");
+      copyActionFeedbackTimers.delete(buttonEl);
+    }, 1400);
+    copyActionFeedbackTimers.set(buttonEl, timer);
+  };
+  const handleCopyServerAddressClick = async (event) => {
+    const sourceButton = event?.currentTarget || null;
+    const address = await resolveShareableRelayUrl();
+    if (!address) {
+      showSyncSessionToast({
+        type: "error",
+        message: getI18nText(
+          "sync.copyServerAddressEmpty",
+          "Aucune adresse serveur à copier.",
+        ),
+        duration: 2600,
+      });
+      return;
+    }
+    const copied = await copySyncSessionCodeToClipboard(address);
+    if (!copied) {
+      showSyncSessionToast({
+        type: "error",
+        message: getI18nText(
+          "sync.errorCopyFailed",
+          "Impossible de copier l'adresse serveur.",
+        ),
+        duration: 2600,
+      });
+      return;
+    }
+    if (relayUrlInput && String(relayUrlInput.value || "").trim() !== address) {
+      relayUrlInput.value = address;
+      rememberSuggestedLocalRelayUrl(address);
+    }
+    pulseCopyButton(sourceButton);
+    if (isUnshareableRelayUrl(address)) {
+      const loopbackMessage = decodeHtmlEntities(
+        getI18nText(
+          "sync.copyServerAddressLoopback",
+          "Adresse locale copiée : {{address}} (même appareil uniquement).",
+          { address },
+        ),
+      );
+      showSyncSessionToast({
+        type: "warning",
+        message: loopbackMessage,
+        duration: 3600,
+      });
+      return;
+    }
+    const copiedMessage = decodeHtmlEntities(
+      getI18nText(
+        "sync.copyServerAddressDone",
+        "Adresse serveur copiée : {{address}}",
+        { address },
+      ),
+    );
+    showSyncSessionToast({
+      type: "success",
+      message: copiedMessage,
+      duration: 3200,
+    });
+  };
+  const buildInviteClipboardPayload = async () => {
+    const address = String(await resolveShareableRelayUrl()).trim();
+    const sessionCode = normalizeSyncSessionCode(
+      syncSessionServiceState?.sessionCode || joinCodeInput?.value || "",
+    );
+    if (!address || !sessionCode) {
+      return { ok: false, address, sessionCode, text: "" };
+    }
+    const text = decodeHtmlEntities(
+      getI18nText(
+        "sync.copyInvitePayloadTemplate",
+        "Adresse du serveur :\n{{address}}\n\nCode de session :\n{{code}}",
+        { address, code: sessionCode },
+      ),
+    );
+    return { ok: true, address, sessionCode, text };
+  };
+  const handleInvitePanelBackgroundCopyClick = async (event) => {
+    if (!invitePanel) return;
+    // Only trigger when clicking empty panel area, not interactive children.
+    if (event.target !== invitePanel) return;
+    const payload = await buildInviteClipboardPayload();
+    if (!payload.ok) {
+      showSyncSessionToast({
+        type: "error",
+        message: getI18nText(
+          "sync.copyInvitePayloadFailed",
+          "Impossible de copier l'invitation complète.",
+        ),
+        duration: 2600,
+      });
+      return;
+    }
+    const copied = await copySyncSessionCodeToClipboard(payload.text);
+    if (!copied) {
+      showSyncSessionToast({
+        type: "error",
+        message: getI18nText(
+          "sync.copyInvitePayloadFailed",
+          "Impossible de copier l'invitation complète.",
+        ),
+        duration: 2600,
+      });
+      return;
+    }
+    pulseCopyButton(copyCodeBtn);
+    if (copyServerAddressConnectedBtn) pulseCopyButton(copyServerAddressConnectedBtn);
+    pulseCopyButton(invitePanel);
+    showSyncSessionToast({
+      type: "success",
+      message: getI18nText(
+        "sync.copyInvitePayloadDone",
+        "Invitation complète copiée (adresse + code).",
+      ),
+      duration: 2600,
+    });
+  };
   if (relayUrlInput) {
     const RELAY_URL_STORAGE_KEY = "posechrono-sync-ws-url";
     const savedUrl = (() => {
@@ -11101,6 +11466,7 @@ function setupSyncSessionModalBindings() {
       }
     })();
     relayUrlInput.value = savedUrl || configUrl || "";
+    rememberSuggestedLocalRelayUrl(relayUrlInput.value);
 
     const isLocalRelayUrl = (url) => {
       try {
@@ -11157,6 +11523,7 @@ function setupSyncSessionModalBindings() {
           localStorage.setItem("posechrono-sync-transport", "ws");
         }
       } catch (_) {}
+      rememberSuggestedLocalRelayUrl(value);
       if (urlChanged) {
         // Transport is created at startup — reload immediately to apply the new URL.
         localStorage.setItem('posechrono-reopen-sync-modal', 'true');
@@ -11179,6 +11546,22 @@ function setupSyncSessionModalBindings() {
         saveRelayUrl();
       }
     });
+  }
+
+  if (copyServerAddressHostBtn) {
+    copyServerAddressHostBtn.addEventListener(
+      "click",
+      handleCopyServerAddressClick,
+    );
+  }
+  if (copyServerAddressConnectedBtn) {
+    copyServerAddressConnectedBtn.addEventListener(
+      "click",
+      handleCopyServerAddressClick,
+    );
+  }
+  if (invitePanel) {
+    invitePanel.addEventListener("click", handleInvitePanelBackgroundCopyClick);
   }
 
   // --- Connection type (Internet / Local) ---
@@ -11254,10 +11637,29 @@ function setupSyncSessionModalBindings() {
     const markServerReady = () => {
       startLocalServerBtn.classList.add("is-ready");
       startLocalServerBtn.textContent = getI18nText("sync.localServerReady", "✓ Serveur local prêt");
+      updateSyncSessionNetworkStatus(modal);
     };
     const markServerPending = () => {
       startLocalServerBtn.classList.remove("is-ready");
       startLocalServerBtn.textContent = getI18nText("sync.startLocalServer", "Démarrer mon serveur local");
+      updateSyncSessionNetworkStatus(modal);
+    };
+
+    const readSuggestedRelayUrlFromHealth = (payload) => {
+      if (!payload || typeof payload !== "object") return "";
+      const directCandidate = extractRelayUrlFromText(
+        String(payload.suggestedRelayUrl || ""),
+      );
+      if (directCandidate && !isUnshareableRelayUrl(directCandidate)) {
+        return directCandidate;
+      }
+      const relayUrls = Array.isArray(payload.relayUrls) ? payload.relayUrls : [];
+      for (const candidate of relayUrls) {
+        const normalized = extractRelayUrlFromText(String(candidate || ""));
+        if (!normalized || isUnshareableRelayUrl(normalized)) continue;
+        return normalized;
+      }
+      return "";
     };
 
     const pingLocalServer = async (wsUrl) => {
@@ -11266,11 +11668,23 @@ function setupSyncSessionModalBindings() {
         const httpUrl = wsUrl.replace(/^ws:\/\//, "http://").replace(/^wss:\/\//, "https://") + "/health";
         const ctrl = new AbortController();
         const timer = setTimeout(() => ctrl.abort(), 2500);
-        const res = await fetch(httpUrl, { signal: ctrl.signal });
-        clearTimeout(timer);
-        return res.ok;
+        let response = null;
+        try {
+          response = await fetch(httpUrl, { signal: ctrl.signal });
+        } finally {
+          clearTimeout(timer);
+        }
+        const ok = !!response && response.ok;
+        let payload = null;
+        if (response) {
+          try {
+            payload = await response.json();
+          } catch (_) {}
+        }
+        const suggestedUrl = readSuggestedRelayUrlFromHealth(payload);
+        return { ok, suggestedUrl };
       } catch (_) {
-        return false;
+        return { ok: false, suggestedUrl: "" };
       }
     };
 
@@ -11281,8 +11695,11 @@ function setupSyncSessionModalBindings() {
     const runHealthCheck = async () => {
       const url = getLocalUrl();
       if (!url.startsWith("ws://")) return;
-      const ok = await pingLocalServer(url);
-      if (ok) markServerReady(); else markServerPending();
+      const health = await pingLocalServer(url);
+      if (health.suggestedUrl) {
+        rememberSuggestedLocalRelayUrl(health.suggestedUrl);
+      }
+      if (health.ok) markServerReady(); else markServerPending();
     };
 
     if (connType === "local") {
@@ -11338,13 +11755,23 @@ function setupSyncSessionModalBindings() {
       const pollTimer = setInterval(async () => {
         pollAttempts++;
         if (pollAttempts > 15) { clearInterval(pollTimer); markServerPending(); return; }
-        const ok = await pingLocalServer(pollUrl);
-        if (ok) {
+        const health = await pingLocalServer(pollUrl);
+        if (health.suggestedUrl) {
+          rememberSuggestedLocalRelayUrl(health.suggestedUrl);
+        }
+        if (health.ok) {
           clearInterval(pollTimer);
           markServerReady();
+          const startedAddress =
+            health.suggestedUrl || (await resolveShareableRelayUrl());
+          const startedAddressLabel = String(startedAddress || pollUrl).trim();
           showSyncSessionToast({
             type: "success",
-            message: getI18nText("sync.localServerStarted", "Serveur local démarré !") + " (IP copiée : " + pollUrl + ")",
+            message:
+              getI18nText("sync.localServerStarted", "Serveur local démarré !") +
+              " (IP copiée : " +
+              startedAddressLabel +
+              ")",
             duration: 4000,
           });
         }
@@ -11360,10 +11787,13 @@ function setupSyncSessionModalBindings() {
           if (navigator.clipboard && navigator.clipboard.readText) {
             text = await navigator.clipboard.readText();
           }
-          if (text && text.trim().startsWith("ws://") && text.includes(":8787")) {
+          const detectedUrl = extractRelayUrlFromText(text);
+          if (detectedUrl && detectedUrl.includes(":8787")) {
+            rememberSuggestedLocalRelayUrl(detectedUrl);
+            updateSyncSessionNetworkStatus(modal);
             autoFillDone = true;
-            if (relayUrlInput && relayUrlInput.value !== text.trim()) {
-              relayUrlInput.value = text.trim();
+            if (relayUrlInput && relayUrlInput.value !== detectedUrl) {
+              relayUrlInput.value = detectedUrl;
               // Do NOT auto-save: the user must click Apply to confirm.
             }
           }
@@ -11643,6 +12073,7 @@ function setupSyncSessionModalBindings() {
 
     const copied = await copySyncSessionCodeToClipboard(sessionCode);
     if (copied) {
+      pulseCopyButton(copyCodeBtn);
       showSyncSessionToast({
         type: "success",
         message: getI18nText("sync.codeCopied", "Code copied: {{code}}", { code: sessionCode }),
@@ -26252,6 +26683,43 @@ tooltip.id = "custom-tooltip";
 document.body.appendChild(tooltip);
 
 let tooltipTimeout;
+let activeTooltipTarget = null;
+let activeTooltipFollowCursor = false;
+let tooltipPointerX = 0;
+let tooltipPointerY = 0;
+
+const positionTooltipForTarget = (target) => {
+  if (!target) return;
+  let left = 0;
+  let top = 0;
+  if (activeTooltipFollowCursor) {
+    left = tooltipPointerX + 14;
+    top = tooltipPointerY + 16;
+    if (left + tooltip.offsetWidth > window.innerWidth - 10) {
+      left = tooltipPointerX - tooltip.offsetWidth - 14;
+    }
+    if (top + tooltip.offsetHeight > window.innerHeight - 10) {
+      top = tooltipPointerY - tooltip.offsetHeight - 14;
+    }
+  } else {
+    const rect = target.getBoundingClientRect();
+    left = rect.left + rect.width / 2 - tooltip.offsetWidth / 2;
+    top = rect.top - tooltip.offsetHeight - 8;
+    if (top < 0) top = rect.bottom + 8;
+  }
+
+  if (left < 10) left = 10;
+  if (left + tooltip.offsetWidth > window.innerWidth - 10) {
+    left = window.innerWidth - tooltip.offsetWidth - 10;
+  }
+  if (top < 10) top = 10;
+  if (top + tooltip.offsetHeight > window.innerHeight - 10) {
+    top = window.innerHeight - tooltip.offsetHeight - 10;
+  }
+
+  tooltip.style.left = `${left}px`;
+  tooltip.style.top = `${top}px`;
+};
 
 document.addEventListener("mouseover", (e) => {
   const target = e.target.closest("[data-tooltip]");
@@ -26262,11 +26730,20 @@ document.addEventListener("mouseover", (e) => {
 
   const text = target.getAttribute("data-tooltip");
   if (!text) return;
+  clearTimeout(tooltipTimeout);
+  activeTooltipTarget = target;
+  activeTooltipFollowCursor = target.id === "sync-session-network-status";
+  tooltipPointerX = Number(e.clientX || 0);
+  tooltipPointerY = Number(e.clientY || 0);
+  target.removeAttribute("title");
 
   // On utilise CONFIG.tooltipDelay ici
   tooltipTimeout = setTimeout(() => {
+    if (!activeTooltipTarget || activeTooltipTarget !== target) return;
+    const liveText = target.getAttribute("data-tooltip");
+    if (!liveText) return;
     // Formater les raccourcis entre crochets ou parenthèses en gris
-    const safeText = escapeHtml(text);
+    const safeText = escapeHtml(liveText);
     const formattedText = safeText
       .replace(/\[([^\]]+)\]/g, '<span class="tooltip-shortcut">[$1]</span>')
       .replace(/\(([^)]+)\)/g, '<span class="tooltip-shortcut">($1)</span>')
@@ -26274,42 +26751,46 @@ document.addEventListener("mouseover", (e) => {
     tooltip.innerHTML = formattedText;
 
     // Détecter si le texte contient un saut de ligne
-    if (text.includes("\n")) {
+    if (liveText.includes("\n")) {
       tooltip.classList.add("multiline");
     } else {
       tooltip.classList.remove("multiline");
     }
 
     tooltip.style.opacity = "1";
-
-    const rect = target.getBoundingClientRect();
-
-    // Calcul position
-    let left = rect.left + rect.width / 2 - tooltip.offsetWidth / 2;
-    let top = rect.top - tooltip.offsetHeight - 8;
-
-    // Anti-débordement
-    if (left < 10) left = 10;
-    if (left + tooltip.offsetWidth > window.innerWidth - 10) {
-      left = window.innerWidth - tooltip.offsetWidth - 10;
-    }
-    if (top < 0) top = rect.bottom + 8;
-
-    tooltip.style.left = `${left}px`;
-    tooltip.style.top = `${top}px`;
+    positionTooltipForTarget(target);
   }, CONFIG.tooltipDelay); // <--- Appel dynamique à la config
 });
 
+document.addEventListener("mousemove", (e) => {
+  if (!activeTooltipFollowCursor || !activeTooltipTarget) return;
+  const target = e.target.closest("[data-tooltip]");
+  if (!target || target !== activeTooltipTarget) return;
+  tooltipPointerX = Number(e.clientX || 0);
+  tooltipPointerY = Number(e.clientY || 0);
+  if (tooltip.style.opacity === "1") {
+    positionTooltipForTarget(activeTooltipTarget);
+  }
+});
+
 document.addEventListener("mouseout", (e) => {
-  if (e.target.closest("[data-tooltip]")) {
-    clearTimeout(tooltipTimeout);
-    tooltip.style.opacity = "0";
+  const target = e.target.closest("[data-tooltip]");
+  if (!target) return;
+  const relatedTarget = e.relatedTarget;
+  if (relatedTarget && target.contains(relatedTarget)) return;
+  clearTimeout(tooltipTimeout);
+  tooltip.style.opacity = "0";
+  if (activeTooltipTarget === target) {
+    activeTooltipTarget = null;
+    activeTooltipFollowCursor = false;
   }
 });
 
 document.addEventListener("mousedown", () => {
   clearTimeout(tooltipTimeout);
   tooltip.style.opacity = "0";
+  activeTooltipTarget = null;
+  activeTooltipFollowCursor = false;
 });
 // --- Fin infobulle ---
 
