@@ -31,7 +31,7 @@ if exist "dist\eagle-plugin\manifest.json" (
   echo [PoseChrono] Dossier dist\eagle-plugin absent: lance generation\build-eagle.bat.
 )
 
-if exist "dist\windows\release.json" (
+if exist "dist\windows*" (
   echo [PoseChrono] Verification artefact Windows...
   call npm run verify:windows-dist
   if errorlevel 1 (

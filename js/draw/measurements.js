@@ -450,7 +450,7 @@ function getShapeGroupBoundsFromEdge(edgeLine) {
 
 function getShapeFillStyle(shapeConfig, fallbackStroke) {
   if (!shapeConfig?.fillEnabled) return null;
-  const fillOpacity = Math.min(0.9, Math.max(0.05, shapeConfig.fillOpacity ?? 0.2));
+  const fillOpacity = Math.min(1.0, Math.max(0.05, shapeConfig.fillOpacity ?? 0.2));
   const baseColor = shapeConfig.fillColor || shapeConfig.color || fallbackStroke || "#ff3333";
   return { color: baseColor, opacity: fillOpacity };
 }

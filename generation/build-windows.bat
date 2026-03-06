@@ -27,8 +27,7 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo [PoseChrono] OK. Sorties:
+echo [PoseChrono] OK. Sortie:
 echo - dist\windows-YYYY-MM-DD_THH-mm_NN\posechrono-desktop-*-setup.exe
-echo - dist\windows-YYYY-MM-DD_THH-mm_NN\release.json
 pause
 endlocal

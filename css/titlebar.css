@@ -2,9 +2,47 @@
    BARRE DE TITRE PERSONNALISÉE - PoseChrono
    ============================================ */
 
+/* Hauteur de la titlebar, accessible globalement */
+:root {
+  --titlebar-height: 36px;
+}
+
 /* Masquer la barre de titre personnalisée si frame: true dans manifest.json */
 body:not(.frameless) .custom-titlebar {
   display: none !important;
+}
+
+/* ============================================
+   COMPENSATION DE LAYOUT — titlebar active
+   La classe frameless est ajoutée sur body par frame-mode-detection.js
+   quand manifest.json indique frame:false (mode desktop).
+   La titlebar est position:fixed, top:0, height:36px — le layout doit
+   décaler son contenu vers le bas pour ne pas se faire mordre.
+   ============================================ */
+
+/* Écran de dessin : conteneur principal */
+body.frameless #drawing-screen {
+  padding-top: var(--titlebar-height);
+}
+
+/* Zone image : réduire la hauteur pour compenser le décalage */
+body.frameless .image-container {
+  height: calc(100vh - var(--titlebar-height));
+}
+
+/* Ajustement max-height des médias : la propriété doit correspondre à la
+   hauteur réellement disponible pour éviter un décalage de l'inline-flex
+   (le wrapper se dimensionne sur max-height déclaré, pas sur la contrainte
+   du conteneur, ce qui causerait un écart entre l'image et la barre de
+   progression / les bordures dessin). */
+body.frameless #current-image,
+body.frameless #current-video {
+  max-height: calc(100vh - 40px - 6px - var(--titlebar-height));
+}
+
+/* Écran paramètres / home (et tout écran .screen autre que drawing) */
+body.frameless .screen:not(#drawing-screen) {
+  padding-top: calc(7vh + var(--titlebar-height));
 }
 
 header,
@@ -13,8 +51,6 @@ main {
 }
 
 .custom-titlebar {
-  --titlebar-height: 36px;
-
   -webkit-app-region: drag;
   user-select: none;
   display: flex;
@@ -102,6 +138,55 @@ main {
   flex-shrink: 0;
 }
 
+.titlebar-btn-sync svg {
+  width: 18px;
+  height: 18px;
+}
+
+.titlebar-btn-sync.is-idle {
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.titlebar-btn-sync.is-connecting {
+  color: #f1c085;
+}
+
+.titlebar-btn-sync.is-hosting {
+  color: #8fd6a8;
+}
+
+.titlebar-btn-sync.is-joined {
+  color: #9ec8ff;
+}
+
+.titlebar-btn-sync.is-connecting:hover {
+  background: rgba(241, 192, 133, 0.12);
+  color: #f1c085;
+}
+
+.titlebar-btn-sync.is-hosting:hover {
+  background: rgba(143, 214, 168, 0.15);
+  color: #8fd6a8;
+}
+
+.titlebar-btn-sync.is-joined:hover {
+  background: rgba(108, 156, 255, 0.16);
+  color: #9ec8ff;
+}
+
+.titlebar-btn img {
+  width: 16px;
+  height: 16px;
+  display: block;
+  flex-shrink: 0;
+  opacity: 0.75;
+  transition: opacity var(--transition-fast);
+}
+
+.titlebar-btn:hover img {
+  opacity: 0.95;
+}
+
 .titlebar-btn:hover {
   background: rgba(255, 255, 255, 0.08);
   color: rgba(255, 255, 255, 0.9);
@@ -144,6 +229,44 @@ main {
 
 .titlebar-btn-close:active {
   background: rgba(255, 100, 100, 0.15);
+}
+
+.sync-runtime-status-badge {
+  position: fixed;
+  left: 12px;
+  bottom: 12px;
+  z-index: 11000;
+  max-width: min(76vw, 560px);
+  pointer-events: none;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(17, 21, 29, 0.84);
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 11px;
+  line-height: 1.25;
+  opacity: 0;
+  transform: translateY(4px);
+  transition:
+    opacity 0.16s ease,
+    transform 0.16s ease;
+}
+
+.sync-runtime-status-badge.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.sync-runtime-status-badge.is-hosting {
+  border-color: rgba(143, 214, 168, 0.5);
+  background: rgba(18, 49, 33, 0.78);
+  color: #b3efc8;
+}
+
+.sync-runtime-status-badge.is-joined {
+  border-color: rgba(158, 200, 255, 0.52);
+  background: rgba(25, 45, 75, 0.8);
+  color: #c8ddff;
 }
 
 /* ============================================

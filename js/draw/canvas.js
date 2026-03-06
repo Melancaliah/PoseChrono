@@ -625,6 +625,30 @@ function changeDrawingSize(delta) {
 
   annotationStyle.size = newSize;
 
+  // Sauvegarder pour l'outil courant (persistence pour raccourcis clavier/molette)
+  const toolId = currentTool;
+  const style = drawingManager.toolStyles[toolId];
+  if (style) {
+    style.size = newSize;
+
+    // Si l'outil appartient à un groupe (ex: mesures), synchroniser la taille pour tout le groupe
+    if (style.group) {
+      Object.values(drawingManager.toolStyles).forEach((ts) => {
+        if (ts.group === style.group) {
+          ts.size = newSize;
+        }
+      });
+    }
+
+    // [FIX] Mise à jour immédiate pour les outils de mesure
+    if (["measure", "calibrate", "protractor"].includes(toolId)) {
+      measureState.lineWidth = newSize;
+      if (typeof redrawDrawingMeasurements === "function") {
+        redrawDrawingMeasurements();
+      }
+    }
+  }
+
   // Mettre à jour les sliders si présents
   const drawingSizeInput = document.getElementById("drawing-size");
   const zoomSizeInput = document.getElementById("zoom-drawing-size");

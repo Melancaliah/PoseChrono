@@ -5,6 +5,20 @@
 
 
 // ================================================================
+// UTILITAIRES DOM
+// ================================================================
+
+function escapeTimelineHtml(input) {
+  const str = String(input ?? "");
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+// ================================================================
 // CONSTANTES
 // ================================================================
 
@@ -1029,6 +1043,8 @@ const TimelineData = {
           .slice(0, 1000)
       : [];
 
+    const isOnline = session.isOnline === true;
+
     return {
       timestamp,
       hour,
@@ -1039,6 +1055,7 @@ const TimelineData = {
       memoryType,
       customQueue,
       images,
+      ...(isOnline ? { isOnline: true } : {}),
     };
   },
 
@@ -1884,8 +1901,9 @@ const TimelineData = {
     }
 
     const data = this.getData();
-    const today = DateUtils.toKey(new Date());
     const now = new Date();
+    const sessionDate = details.startTime ? new Date(details.startTime) : now;
+    const today = DateUtils.toKey(sessionDate);
 
     // Ajouter aux données du jour
     if (!data.days[today]) {
@@ -1908,6 +1926,7 @@ const TimelineData = {
       memoryType: details.memoryType || null,
       customQueue: details.customQueue || null,
       images: details.images || [],
+      ...(details.isOnline ? { isOnline: true } : {}),
     });
 
     // Limiter le nombre de sessions détaillées conservées (garder les 50 dernières par jour)
@@ -2137,6 +2156,44 @@ const TimelineTemplates = {
   footer(stats) {
     const ICONS = typeof window.ICONS !== "undefined" ? window.ICONS : {};
 
+    // Stats dérivées calculées à la volée
+    const days = TimelineData.getData().days;
+    const practicedDays = Object.values(days).filter((d) => (d.poses || 0) > 0).length;
+    const avgTimePerPose = stats.totalPoses > 0 ? Math.round(stats.totalTime / stats.totalPoses) : 0;
+    const avgTimePerDay = practicedDays > 0 ? Math.round(stats.totalTime / practicedDays) : 0;
+    const avgPosesPerDay = practicedDays > 0 ? Math.round(stats.totalPoses / practicedDays) : 0;
+
+    // Breakdown des modes (sur toutes les sessions)
+    const modeCounts = { classique: 0, memory: 0, custom: 0, relax: 0 };
+    let totalSessions = 0;
+    for (const day of Object.values(days)) {
+      for (const session of day.sessions || []) {
+        const m = String(session.mode || "classique").toLowerCase();
+        if (m in modeCounts) modeCounts[m]++;
+        else modeCounts.classique++;
+        totalSessions++;
+      }
+    }
+    const modeBreakdownHtml = totalSessions > 0
+      ? Object.entries(modeCounts)
+          .filter(([, count]) => count > 0)
+          .sort(([, a], [, b]) => b - a)
+          .map(([mode, count]) => {
+            const pct = Math.round((count / totalSessions) * 100);
+            const label = getModeLabel(mode, null);
+            return `<div class="extra-stat-row extra-stat-mode-row">
+              <span class="extra-stat-label">${label}</span>
+              <div class="extra-stat-mode-bar-wrap">
+                <div class="extra-stat-mode-bar" style="width:${pct}%"></div>
+              </div>
+              <span class="extra-stat-value">${pct}%</span>
+            </div>`;
+          })
+          .join("")
+      : "";
+
+    const statsBarIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -960 960 960" fill="currentColor"><path d="M160-160v-320h160v320H160Zm240 0v-640h160v640H400Zm240 0v-440h160v440H640Z"/></svg>`;
+
     return `
       <div class="timeline-footer">
         <button type="button" class="timeline-reset-btn" data-action="reset-history" data-tooltip="${tl("timeline.resetHistory", {}, "Réinitialiser l'historique")}">
@@ -2174,6 +2231,31 @@ const TimelineTemplates = {
             </span>
             <span class="stat-label">${tl("timeline.streakRecord", {}, "Record de streak")}</span>
           </div>
+          <div class="timeline-extra-stats-wrapper">
+            <button type="button" class="timeline-extra-stats-btn">
+              ${statsBarIconSvg}
+            </button>
+            <div class="timeline-extra-stats-popover">
+              <div class="extra-stat-row extra-stat-row--highlight">
+                <span class="extra-stat-value--big">${practicedDays}</span>
+                <span class="extra-stat-label--big">${tl("timeline.practicedDays", {}, "jours pratiqués")}</span>
+              </div>
+              <div class="extra-stat-divider"></div>
+              <div class="extra-stat-row">
+                <span class="extra-stat-label">${tl("timeline.avgTimePerPose", {}, "Durée / pose")}</span>
+                <span class="extra-stat-value">${FormatUtils.time(avgTimePerPose)}</span>
+              </div>
+              <div class="extra-stat-row">
+                <span class="extra-stat-label">${tl("timeline.avgTimePerDay", {}, "Durée / jour")}</span>
+                <span class="extra-stat-value">${FormatUtils.time(avgTimePerDay)}</span>
+              </div>
+              <div class="extra-stat-row">
+                <span class="extra-stat-label">${tl("timeline.avgPosesPerDay", {}, "Poses / jour")}</span>
+                <span class="extra-stat-value">${avgPosesPerDay}</span>
+              </div>
+              ${modeBreakdownHtml ? `<div class="extra-stat-divider"></div>${modeBreakdownHtml}` : ""}
+            </div>
+          </div>
         </div>
       </div>
     `;
@@ -2206,7 +2288,7 @@ const TimelineTemplates = {
           </div>
           <div class="session-header">
             <span class="session-number">#${dayData.sessions.length - index}</span>
-            <span class="session-mode">${getModeLabel(session.mode, session.memoryType)}</span>
+            <span class="session-mode">${escapeTimelineHtml(getModeLabel(session.mode, session.memoryType))}${session.isOnline ? ` <span class="session-online-badge">${escapeTimelineHtml(tl("timeline.onlineBadge", {}, "(en ligne)"))}</span>` : ""}</span>
           </div>
           <div class="session-stats">
             <span class="session-poses ${session.mode === "custom" && session.customQueue ? "has-custom-structure" : ""}" 
@@ -2239,8 +2321,8 @@ const TimelineTemplates = {
                     ? `<div class="video-thumb-indicator">${ICONS.VIDEO_PLAY || "▶"}</div>`
                     : "";
                   return `
-                <div class="session-image-wrapper ${videoClass}" data-img-index="${idx}" data-img-id="${imgId}">
-                  <img src="${imgSrc}" alt="" loading="lazy" onerror="this.style.display='none'" class="session-image-thumb">
+                <div class="session-image-wrapper ${videoClass}" data-img-index="${idx}" data-img-id="${escapeTimelineHtml(imgId)}">
+                  <img src="${escapeTimelineHtml(imgSrc)}" alt="" loading="lazy" class="session-image-thumb">
                   ${videoIndicator}
                 </div>
               `;
@@ -2779,6 +2861,9 @@ class TimelineRenderer {
     document.body.appendChild(modal);
     this._currentModal = modal;
 
+    // Gérer les images manquantes/corrompues (onerror inline bloqué par CSP)
+    this._initMissingImageHandlers(modal);
+
     // Configurer les événements du modal
     this._setupModalEvents(modal, dateKey);
 
@@ -3270,6 +3355,7 @@ class TimelineRenderer {
             imgEl.className = "session-image-thumb";
             imgEl.onerror = function () {
               this.style.display = "none";
+              this.closest(".session-image-wrapper").classList.add("img-missing");
             };
 
             wrapper.appendChild(imgEl);
@@ -3316,6 +3402,59 @@ class TimelineRenderer {
   }
 
   /**
+   * Marque les images manquantes/corrompues avec la classe img-missing.
+   * Remplace l'onerror inline (bloqué par le CSP d'Electron).
+   */
+  _initMissingImageHandlers(container) {
+    container.querySelectorAll(".session-image-thumb").forEach((img) => {
+      const markMissing = () => {
+        img.style.display = "none";
+        const wrapper = img.closest(".session-image-wrapper");
+        if (wrapper) {
+          wrapper.classList.add("img-missing");
+          this._checkSessionAllMissing(wrapper);
+        }
+      };
+      // Image déjà en erreur au moment de l'appel
+      if (img.complete && img.naturalWidth === 0) {
+        markMissing();
+      } else {
+        img.addEventListener("error", markMissing, { once: true });
+      }
+    });
+  }
+
+  /**
+   * Désactive le bouton "reuse-session" si toutes les images de la session sont confirmées manquantes.
+   */
+  _checkSessionAllMissing(wrapper) {
+    const sessionEl = wrapper.closest(".day-detail-session");
+    if (!sessionEl) return;
+    const sessionImages = sessionEl.querySelector(".session-images");
+    if (!sessionImages) return;
+
+    const total = parseInt(sessionImages.dataset.total || "0");
+    if (total === 0) return;
+
+    const shownCount = sessionImages.querySelectorAll(".session-image-wrapper").length;
+    const missingCount = sessionImages.querySelectorAll(".session-image-wrapper.img-missing").length;
+
+    // On ne peut confirmer que si tous les wrappers affichés = toutes les images de la session
+    if (shownCount === total && missingCount === total) {
+      sessionImages.style.display = "none";
+
+      const reuseBtn = sessionEl.querySelector("[data-action='reuse-session']");
+      if (reuseBtn && !reuseBtn.disabled) {
+        reuseBtn.disabled = true;
+        reuseBtn.setAttribute(
+          "data-tooltip",
+          tl("timeline.reuseSessionAllMissing", {}, "Fichiers introuvables"),
+        );
+      }
+    }
+  }
+
+  /**
    * Attache les handlers de zoom sur les images d'un conteneur
    */
   _attachImageZoomHandlers(container, dateKey, sessionIndex) {
@@ -3323,6 +3462,7 @@ class TimelineRenderer {
     wrappers.forEach((wrapper) => {
       const handler = (e) => {
         e.stopPropagation();
+        if (wrapper.classList.contains("img-missing")) return;
         this._openZoomForSessionImage(
           dateKey,
           sessionIndex,
@@ -3350,6 +3490,7 @@ class TimelineRenderer {
       wrappers.forEach((wrapper) => {
         const handler = (e) => {
           e.stopPropagation();
+          if (wrapper.classList.contains("img-missing")) return;
           this._openZoomForSessionImage(
             dateKey,
             sessionIndex,
@@ -3728,7 +3869,7 @@ class TimelineRenderer {
     cells.forEach((cell) => {
       const enterHandler = (e) => {
         const text = e.target.dataset.tooltip;
-        tooltip.innerHTML = text.replace(/\n/g, "<br>");
+        tooltip.innerHTML = escapeTimelineHtml(text).replace(/\n/g, "<br>");
         tooltip.classList.add("visible");
 
         const rect = e.target.getBoundingClientRect();

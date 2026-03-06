@@ -205,6 +205,14 @@
       callIfFn(input.toggleSound);
     } else if (keyLow === String(hk.GRID || "").toLowerCase()) {
       state.gridEnabled = !state.gridEnabled;
+      if (
+        state.gridEnabled &&
+        state.gridMode === "none" &&
+        (!Array.isArray(state.gridGuides) || state.gridGuides.length === 0)
+      ) {
+        if (!Array.isArray(state.gridGuides)) state.gridGuides = [];
+        state.gridGuides.push({ type: "vertical", position: 50 });
+      }
       callIfFn(input.updateGridOverlay);
     } else if (keyLow === String(hk.SILHOUETTE || "").toLowerCase()) {
       state.silhouetteEnabled = !state.silhouetteEnabled;

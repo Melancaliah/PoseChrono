@@ -99,14 +99,12 @@ try {
     "disk-cache-dir",
     diskCacheDir,
   );
-  app.commandLine.appendSwitch("disk-cache-size", "0");
-  app.commandLine.appendSwitch("disable-http-cache");
-  app.commandLine.appendSwitch("disable-gpu-shader-disk-cache");
+
 } catch (_) {}
 
 let mainWindow = null;
-let hasPromptedForMediaFolder = false;
 let windowStateSaveTimer = null;
+let localSyncRelayProcess = null;
 let scanCache = {
   key: "",
   byId: new Map(),
@@ -127,6 +125,119 @@ function logBootTraceMain(step, details = null) {
   console.log(`[BootTrace:main +${delta}ms] ${step}${suffix}`);
 }
 
+function resolveLocalSyncRelayScript() {
+  const candidates = getLocalSyncRelayScriptCandidates();
+  for (const filePath of candidates) {
+    if (fs.existsSync(filePath)) return filePath;
+  }
+  return "";
+}
+
+function getLocalSyncRelayScriptCandidates() {
+  return [
+    // Packaged app: script inside app.asar
+    path.join(__dirname, "..", "web", "js", "syncroModule", "sync-server-deploy", "server.js"),
+    // Packaged app: explicit asar path fallback
+    path.join(
+      process.resourcesPath,
+      "app.asar",
+      "web",
+      "js",
+      "syncroModule",
+      "sync-server-deploy",
+      "server.js",
+    ),
+    // Dev mode: repository script
+    path.join(APP_ROOT, "scripts", "sync-relay-server.js"),
+    // Dev mirror used by sync:web
+    path.join(
+      APP_ROOT,
+      "apps",
+      "desktop",
+      "web",
+      "js",
+      "syncroModule",
+      "sync-server-deploy",
+      "server.js",
+    ),
+    // Some packagers may unpack selected assets
+    path.join(
+      process.resourcesPath,
+      "app.asar.unpacked",
+      "web",
+      "js",
+      "syncroModule",
+      "sync-server-deploy",
+      "server.js",
+    ),
+  ];
+}
+
+function isLocalSyncRelayRunning() {
+  return !!localSyncRelayProcess;
+}
+
+async function startLocalSyncRelay() {
+  if (isLocalSyncRelayRunning()) {
+    return {
+      ok: true,
+      alreadyRunning: true,
+      inProcess: true,
+    };
+  }
+  const relayScript = resolveLocalSyncRelayScript();
+  if (!relayScript) {
+    return {
+      ok: false,
+      errorCode: "relay-script-not-found",
+      candidates: getLocalSyncRelayScriptCandidates(),
+    };
+  }
+  try {
+    const resolvedRelayPath = require.resolve(relayScript);
+    if (!require.cache[resolvedRelayPath]) {
+      require(resolvedRelayPath);
+    }
+    localSyncRelayProcess = {
+      inProcess: true,
+      script: resolvedRelayPath,
+      startedAt: Date.now(),
+    };
+    return {
+      ok: true,
+      inProcess: true,
+    };
+  } catch (error) {
+    localSyncRelayProcess = null;
+    const message = String(error && error.message ? error.message : error);
+    // eslint-disable-next-line no-console
+    console.error("[sync-relay] desktop start failed:", {
+      relayScript,
+      error: message,
+      stack: error && error.stack ? String(error.stack) : "",
+    });
+    return {
+      ok: false,
+      errorCode: "relay-start-failed",
+      error: message,
+      relayScript,
+      stack: error && error.stack ? String(error.stack) : "",
+    };
+  }
+}
+function stopLocalSyncRelay() {
+  if (localSyncRelayProcess && localSyncRelayProcess.inProcess) {
+    try {
+      const serverModule = require(localSyncRelayProcess.script);
+      if (serverModule && typeof serverModule.stopServer === "function") {
+        serverModule.stopServer();
+      }
+      try { delete require.cache[localSyncRelayProcess.script]; } catch (_) {}
+    } catch (_) {}
+  }
+  localSyncRelayProcess = null;
+  return { ok: true };
+}
 function migrateLegacyDevUserDataIfNeeded() {
   if (app.isPackaged) return;
   if (!DEV_USER_DATA_PATH) return;
@@ -173,18 +284,26 @@ function getPrefsFilePath() {
   return path.join(app.getPath("userData"), PREFS_FILE_NAME);
 }
 
+let _prefsCache = null;
+
 async function readPrefsFile() {
+  if (_prefsCache) return _prefsCache;
   const filePath = getPrefsFilePath();
   try {
     const raw = await fsp.readFile(filePath, "utf8");
     const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object") return { preferences: {} };
+    if (!parsed || typeof parsed !== "object") {
+      _prefsCache = { preferences: {} };
+      return _prefsCache;
+    }
     if (!parsed.preferences || typeof parsed.preferences !== "object") {
       parsed.preferences = {};
     }
-    return parsed;
+    _prefsCache = parsed;
+    return _prefsCache;
   } catch (_) {
-    return { preferences: {} };
+    _prefsCache = { preferences: {} };
+    return _prefsCache;
   }
 }
 
@@ -196,6 +315,7 @@ async function writePrefsFile(payload) {
   }
   await fsp.mkdir(path.dirname(filePath), { recursive: true });
   await fsp.writeFile(filePath, JSON.stringify(data, null, 2), "utf8");
+  _prefsCache = data;
 }
 
 function getStorageFilePath() {
@@ -419,25 +539,6 @@ async function setConfiguredMediaFolders(folderPaths) {
   return normalized;
 }
 
-async function promptForMediaFolder(win) {
-  const result = await dialog.showOpenDialog(win, {
-    title: "Select media folder",
-    properties: ["openDirectory"],
-  });
-  if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
-    return [];
-  }
-  return setConfiguredMediaFolders(result.filePaths);
-}
-
-async function ensureMediaFolders(win) {
-  let folders = await getConfiguredMediaFolders();
-  if (folders.length > 0) return folders;
-  if (hasPromptedForMediaFolder) return folders;
-  hasPromptedForMediaFolder = true;
-  folders = await promptForMediaFolder(win);
-  return folders;
-}
 
 async function scanMediaFilesInFolder(folderPath, folderId, outItems) {
   let entries = [];
@@ -447,10 +548,11 @@ async function scanMediaFilesInFolder(folderPath, folderId, outItems) {
     return;
   }
 
+  const subdirPromises = [];
   for (const entry of entries) {
     const absolute = path.join(folderPath, entry.name);
     if (entry.isDirectory()) {
-      await scanMediaFilesInFolder(absolute, folderId, outItems);
+      subdirPromises.push(scanMediaFilesInFolder(absolute, folderId, outItems));
       continue;
     }
     if (!entry.isFile()) continue;
@@ -471,6 +573,10 @@ async function scanMediaFilesInFolder(folderPath, folderId, outItems) {
       thumbnailURL: "",
       thumbnail: "",
     });
+  }
+
+  if (subdirPromises.length > 0) {
+    await Promise.all(subdirPromises);
   }
 }
 
@@ -507,14 +613,15 @@ async function scanMediaItems({ folderIds = null } = {}) {
   for (const item of items) {
     byId.set(item.id, item);
   }
+  const uniqueItems = [...byId.values()];
 
-  scanCache = { key, byId, items };
+  scanCache = { key, byId, items: uniqueItems };
   logBootTraceMain("scanMediaItems.full-scan", {
     folders: folders.length,
-    items: items.length,
+    items: uniqueItems.length,
     durationMs: Date.now() - scanStartMs,
   });
-  return items;
+  return uniqueItems;
 }
 
 function getBrowserWindowFromEvent(event) {
@@ -522,6 +629,11 @@ function getBrowserWindowFromEvent(event) {
 }
 
 function registerIpcHandlers() {
+  ipcMain.handle("posechrono:window:close", (event) => {
+    const win = getBrowserWindowFromEvent(event);
+    win?.close();
+  });
+
   ipcMain.handle("posechrono:window:hide", (event) => {
     const win = getBrowserWindowFromEvent(event);
     win?.hide();
@@ -598,30 +710,51 @@ function registerIpcHandlers() {
       options.properties.includes("openDirectory")
     ) {
       await setConfiguredMediaFolders(result.filePaths);
-      hasPromptedForMediaFolder = true;
       scanCache = { key: "", byId: new Map(), items: [] };
     }
 
     return result;
   });
 
-  ipcMain.handle("posechrono:items:getSelected", async (event) => {
-    const win = getBrowserWindowFromEvent(event);
-    const folders = await ensureMediaFolders(win);
+  ipcMain.handle("posechrono:items:getSelected", async () => {
+    const folders = await getConfiguredMediaFolders();
     if (!folders.length) return [];
     return scanMediaItems({
       folderIds: folders.map((folder) => folder.id),
     });
   });
 
-  ipcMain.handle("posechrono:folders:getSelected", async (event) => {
-    const win = getBrowserWindowFromEvent(event);
-    return ensureMediaFolders(win);
+  ipcMain.handle("posechrono:folders:getSelected", async () => {
+    return getConfiguredMediaFolders();
   });
 
-  ipcMain.handle("posechrono:items:get", async (event, query) => {
+  ipcMain.handle("posechrono:folders:browseAndAdd", async (event) => {
     const win = getBrowserWindowFromEvent(event);
-    const folders = await ensureMediaFolders(win);
+    const result = await dialog.showOpenDialog(win, {
+      title: "Add media folders",
+      properties: ["openDirectory", "multiSelections"],
+    });
+    if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
+      return null;
+    }
+    const existing = await getConfiguredMediaFolders();
+    const existingPaths = existing.map((f) => f.path);
+    const merged = [...existingPaths, ...result.filePaths];
+    const folders = await setConfiguredMediaFolders(merged);
+    scanCache = { key: "", byId: new Map(), items: [] };
+    return folders;
+  });
+
+  ipcMain.handle("posechrono:folders:removeFolder", async (event, folderId) => {
+    const existing = await getConfiguredMediaFolders();
+    const filtered = existing.filter((f) => f.id !== folderId).map((f) => f.path);
+    const folders = await setConfiguredMediaFolders(filtered);
+    scanCache = { key: "", byId: new Map(), items: [] };
+    return folders;
+  });
+
+  ipcMain.handle("posechrono:items:get", async (_, query) => {
+    const folders = await getConfiguredMediaFolders();
     if (!folders.length) return [];
     const folderIds =
       query && Array.isArray(query.folders) ? query.folders : null;
@@ -697,6 +830,14 @@ function registerIpcHandlers() {
     return false;
   });
 
+  ipcMain.handle("posechrono:shell:openPath", async (_, filePath) => {
+    if (typeof filePath === "string" && filePath.trim()) {
+      await shell.openPath(path.resolve(filePath));
+      return true;
+    }
+    return false;
+  });
+
   ipcMain.handle("posechrono:notification:show", async (_, payload) => {
     const title =
       payload && typeof payload.title === "string" ? payload.title : "PoseChrono";
@@ -711,6 +852,15 @@ function registerIpcHandlers() {
 
   ipcMain.handle("posechrono:tag:get", async () => []);
   ipcMain.handle("posechrono:tagGroup:get", async () => []);
+
+  // Démarre le serveur relay local via le runtime Node intégré d'Electron.
+  // Desktop n'utilise pas le .bat (fragile en app packagée).
+  ipcMain.handle("posechrono:sync:startLocalServer", async () => {
+    return startLocalSyncRelay();
+  });
+  ipcMain.handle("posechrono:sync:stopLocalServer", async () => {
+    return stopLocalSyncRelay();
+  });
 }
 
 function resolveWebEntryFile() {
@@ -738,6 +888,7 @@ async function createMainWindow() {
     autoHideMenuBar: true,
     backgroundColor: "#1b1c22",
     frame: false,
+    roundedCorners: true,
     ...(windowIcon ? { icon: windowIcon } : {}),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -872,6 +1023,7 @@ app.whenReady().then(async () => {
 });
 
 app.on("window-all-closed", () => {
+  stopLocalSyncRelay();
   if (process.platform !== "darwin") {
     app.quit();
   }

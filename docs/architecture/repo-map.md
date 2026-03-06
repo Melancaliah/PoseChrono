@@ -23,7 +23,7 @@ Rule: shared logic goes to `packages/shared` first. Platform-specific behavior s
 - `packages/shared/`: reusable cross-platform modules (single source of truth).
 - `apps/desktop/`: Electron app (`src/main.js`, preload bridge, builder config).
 - `scripts/`: build/release/verification automation.
-- `generation/`: Windows `.bat` wrappers for common generation and verification actions.
+- `generation/`: Windows/Linux `.bat` wrappers for common generation and verification actions.
 - `docs/`: release, architecture, and manual QA documentation.
 - `tasks/`: migration/restructuration planning and execution tracking.
 - `dist/`: generated artifacts only (never source).
@@ -47,7 +47,10 @@ Rule: shared logic goes to `packages/shared` first. Platform-specific behavior s
 - Windows release:
   - command: `npm run release:windows`
   - output: `dist/windows/`
-- Both:
+- Linux release:
+  - command: `npm run release:linux`
+  - output: `dist/linux/` (AppImage)
+- All platforms:
   - command: `npm run release:all`
 
 ## 5) Update Workflow (Recommended)
@@ -57,7 +60,7 @@ Rule: shared logic goes to `packages/shared` first. Platform-specific behavior s
 3. Run gates:
    - `npm run verify:smoke`
    - `npm run verify:builds`
-4. Build target artifacts (`release:eagle`, `release:windows`, or `release:all`).
+4. Build target artifacts (`release:eagle`, `release:windows`, `release:linux`, or `release:all`).
 5. Validate manually in Eagle and Desktop for UI-sensitive changes.
 
 ## 6) Guardrails

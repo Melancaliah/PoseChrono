@@ -1,5 +1,5 @@
 // PoseChrono Drawing Module - Bundled from js/draw/
-// Generated: 2026-02-14T23:10:37.217Z
+// Generated: 2026-03-06T00:02:26.118Z
 
 // ================================================================
 // MODULE: utils.js
@@ -1187,6 +1187,24 @@ class DrawingManager {
       index: -1,
       maxSize: DRAWING_CONSTANTS.MAX_HISTORY,
     };
+
+    // Style par outil (persistance taille/couleur)
+    const defSize = typeof CONFIG !== "undefined" ? CONFIG.defaultDrawingSize : 4;
+    const defMeasureColor = typeof DRAWING_CONSTANTS !== "undefined" ? DRAWING_CONSTANTS.DEFAULT_MEASURE_COLOR : "#f17e20";
+    
+    this.toolStyles = {
+      pencil: { size: defSize, color: "#ff3333" },
+      eraser: { size: defSize * 2, color: "#ffffff" }, // Gomme plus grande par défaut
+      line: { size: defSize, color: "#ff3333" },
+      arrow: { size: defSize, color: "#ff3333" },
+      rectangle: { size: defSize, color: "#ff3333" },
+      circle: { size: defSize, color: "#ff3333" },
+      laser: { size: defSize, color: "#ff3333" },
+      // Outils de mesure partagent la même taille
+      measure: { size: 3, color: defMeasureColor, group: 'measure' },
+      calibrate: { size: 3, color: "#10b981", group: 'measure' },
+      protractor: { size: 3, color: "#f59e0b", group: 'measure' }
+    };
   }
 
   getContext(type) {
@@ -1381,6 +1399,40 @@ function getActivePencilStrokeSize() {
   return annotationStyle.size;
 }
 
+function updateToolStyles(toolId) {
+  if (!drawingManager.toolStyles[toolId]) return;
+
+  const style = drawingManager.toolStyles[toolId];
+
+  // Mettre à jour annotationStyle
+  annotationStyle.size = style.size;
+  annotationStyle.color = style.color;
+
+  // Mettre à jour measureState pour les outils de mesure
+  if (["measure", "calibrate", "protractor"].includes(toolId)) {
+    measureState.lineWidth = style.size;
+    measureState.color = style.color;
+  }
+
+  // Mettre à jour l'UI dans tous les contextes possibles (Normal et Zoom)
+  const inputPairIds = [
+    { color: "drawing-color", size: "drawing-size" },
+    { color: "zoom-drawing-color", size: "zoom-drawing-size" }
+  ];
+
+  inputPairIds.forEach(ids => {
+    const colorInput = document.getElementById(ids.color);
+    const sizeInput = document.getElementById(ids.size);
+    if (colorInput) colorInput.value = style.color;
+    if (sizeInput) sizeInput.value = style.size;
+  });
+
+  // Forcer la mise à jour du curseur
+  if (typeof updateDrawingCursor === "function") {
+    updateDrawingCursor();
+  }
+}
+
 // ================================================================
 // ALIASES POUR COMPATIBILITÉ (seront progressivement supprimés)
 // ================================================================
@@ -1395,7 +1447,13 @@ Object.defineProperties(window, {
   // drawState aliases
   currentTool: { 
     get() { return _getDrawState().currentTool; },
-    set(v) { _getDrawState().currentTool = v; }
+    set(v) { 
+      const oldTool = _getDrawState().currentTool;
+      if (oldTool !== v) {
+        _getDrawState().currentTool = v;
+        updateToolStyles(v);
+      }
+    }
   },
   isDrawing: { 
     get() { return _getDrawState().isDrawing; },
@@ -2848,6 +2906,30 @@ function changeDrawingSize(delta) {
 
   annotationStyle.size = newSize;
 
+  // Sauvegarder pour l'outil courant (persistence pour raccourcis clavier/molette)
+  const toolId = currentTool;
+  const style = drawingManager.toolStyles[toolId];
+  if (style) {
+    style.size = newSize;
+
+    // Si l'outil appartient à un groupe (ex: mesures), synchroniser la taille pour tout le groupe
+    if (style.group) {
+      Object.values(drawingManager.toolStyles).forEach((ts) => {
+        if (ts.group === style.group) {
+          ts.size = newSize;
+        }
+      });
+    }
+
+    // [FIX] Mise à jour immédiate pour les outils de mesure
+    if (["measure", "calibrate", "protractor"].includes(toolId)) {
+      measureState.lineWidth = newSize;
+      if (typeof redrawDrawingMeasurements === "function") {
+        redrawDrawingMeasurements();
+      }
+    }
+  }
+
   // Mettre à jour les sliders si présents
   const drawingSizeInput = document.getElementById("drawing-size");
   const zoomSizeInput = document.getElementById("zoom-drawing-size");
@@ -4221,7 +4303,7 @@ function getShapeGroupBoundsFromEdge(edgeLine) {
 
 function getShapeFillStyle(shapeConfig, fallbackStroke) {
   if (!shapeConfig?.fillEnabled) return null;
-  const fillOpacity = Math.min(0.9, Math.max(0.05, shapeConfig.fillOpacity ?? 0.2));
+  const fillOpacity = Math.min(1.0, Math.max(0.05, shapeConfig.fillOpacity ?? 0.2));
   const baseColor = shapeConfig.fillColor || shapeConfig.color || fallbackStroke || "#ff3333";
   return { color: baseColor, opacity: fillOpacity };
 }
@@ -5210,7 +5292,22 @@ function createStyleInputs(options = {}) {
   colorInput.className = colorClass;
   colorInput.setAttribute("data-tooltip", i18next.t("draw.config.color"));
   colorInput.oninput = (e) => {
-    annotationStyle.color = e.target.value;
+    const newColor = e.target.value;
+    annotationStyle.color = newColor;
+    
+    // Sauvegarder pour l'outil courant
+    const toolId = currentTool;
+    if (drawingManager.toolStyles[toolId]) {
+      drawingManager.toolStyles[toolId].color = newColor;
+    }
+
+    // [FIX] Mise à jour immédiate pour les outils de mesure
+    if (["measure", "calibrate", "protractor"].includes(toolId)) {
+      measureState.color = newColor;
+      if (typeof redrawDrawingMeasurements === "function") {
+        redrawDrawingMeasurements();
+      }
+    }
   };
 
   const sizeInput = document.createElement("input");
@@ -5222,7 +5319,33 @@ function createStyleInputs(options = {}) {
   sizeInput.className = sizeClass;
   sizeInput.title = i18next.t("draw.sliders.size");
   sizeInput.oninput = (e) => {
-    annotationStyle.size = parseInt(e.target.value);
+    const newSize = parseInt(e.target.value);
+    annotationStyle.size = newSize;
+    
+    // Sauvegarder pour l'outil courant
+    const toolId = currentTool;
+    const style = drawingManager.toolStyles[toolId];
+    if (style) {
+      style.size = newSize;
+      
+      // Si l'outil appartient à un groupe (ex: mesures), synchroniser la taille pour tout le groupe
+      if (style.group) {
+        Object.values(drawingManager.toolStyles).forEach(ts => {
+          if (ts.group === style.group) {
+            ts.size = newSize;
+          }
+        });
+      }
+
+      // [FIX] Mise à jour immédiate pour les outils de mesure
+      if (["measure", "calibrate", "protractor"].includes(toolId)) {
+        measureState.lineWidth = newSize;
+        if (typeof redrawDrawingMeasurements === "function") {
+          redrawDrawingMeasurements();
+        }
+      }
+    }
+    
     updateDrawingCursor();
   };
 
@@ -6987,7 +7110,7 @@ function buildShapeConfigSchema(vm) {
               labelKey: "draw.config.fillOpacity",
               value: vm.currentFillOpacity,
               min: 5,
-              max: 90,
+              max: 100,
               step: 1,
               unit: "%",
               useInlineLabel: true,
@@ -9054,7 +9177,7 @@ function rasterizeEditableShapeLineToCanvas(line, ctx) {
     const ry = Math.max(1, (maxY - minY) / 2);
     if (line.config?.fillEnabled) {
       const fillColor = line.config?.fillColor || color;
-      const fillOpacity = Math.min(0.9, Math.max(0.05, line.config?.fillOpacity ?? 0.2));
+      const fillOpacity = Math.min(1.0, Math.max(0.05, line.config?.fillOpacity ?? 0.2));
       ctx.save();
       ctx.fillStyle = fillColor;
       ctx.globalAlpha = fillOpacity;
@@ -9083,7 +9206,7 @@ function rasterizeEditableShapeLineToCanvas(line, ctx) {
     if (baseCfg.fillEnabled) {
       if (buildShapeEdgeGroupPath(ctx, line)) {
         const fillColor = baseCfg.fillColor || color;
-        const fillOpacity = Math.min(0.9, Math.max(0.05, baseCfg.fillOpacity ?? 0.2));
+        const fillOpacity = Math.min(1.0, Math.max(0.05, baseCfg.fillOpacity ?? 0.2));
         ctx.save();
         ctx.fillStyle = fillColor;
         ctx.globalAlpha = fillOpacity;
@@ -11819,9 +11942,14 @@ async function openDrawingMode() {
     }
   }
 
-  // Mettre en pause la session si elle est en cours
+  // Mettre en pause la session si elle est en cours,
+  // sauf si la préférence par mode l'interdit (__poseChronoDrawPause === false).
   if (typeof state !== "undefined" && state.isPlaying) {
-    if (typeof togglePlayPause === "function") {
+    const drawPauseEnabled =
+      typeof window !== "undefined"
+        ? window.__poseChronoDrawPause !== false
+        : true;
+    if (drawPauseEnabled && typeof togglePlayPause === "function") {
       togglePlayPause();
     }
   }

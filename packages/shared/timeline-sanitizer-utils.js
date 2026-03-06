@@ -107,6 +107,8 @@
             .slice(0, 1000)
         : [];
 
+      const isOnline = session.isOnline === true;
+
       return {
         timestamp,
         hour,
@@ -117,6 +119,7 @@
         memoryType,
         customQueue,
         images,
+        ...(isOnline ? { isOnline: true } : {}),
       };
     }
 

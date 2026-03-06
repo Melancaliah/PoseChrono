@@ -1244,7 +1244,7 @@ function buildShapeConfigSchema(vm) {
               labelKey: "draw.config.fillOpacity",
               value: vm.currentFillOpacity,
               min: 5,
-              max: 90,
+              max: 100,
               step: 1,
               unit: "%",
               useInlineLabel: true,

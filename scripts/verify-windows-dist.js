@@ -8,8 +8,8 @@ const ROOT = path.resolve(__dirname, "..");
 const DIST_ROOT = path.join(ROOT, "dist");
 const LEGACY_DIST_DIR = path.join(DIST_ROOT, "windows");
 const MANIFEST_PATH = path.join(ROOT, "manifest.json");
-const OPTIONAL_FILES = new Set(["release.json"]);
-const OPTIONAL_EXTENSIONS = new Set([".blockmap"]);
+const OPTIONAL_FILES = new Set([]);
+const OPTIONAL_EXTENSIONS = new Set([]);
 
 async function exists(p) {
   try {
@@ -28,7 +28,8 @@ async function readJson(filePath) {
 function isSetupFileName(name) {
   return (
     /^PoseChrono-Setup-.*\.exe$/i.test(name) ||
-    /^posechrono-desktop-[0-9A-Za-z._-]+-setup\.exe$/i.test(name)
+    /^posechrono-desktop-[0-9A-Za-z._-]+-setup\.exe$/i.test(name) ||
+    /^PoseChrono_v[0-9A-Za-z._-]+_[0-9]{4}-[0-9]{2}-[0-9]{2}_windows_T[0-9]{2}-[0-9]{2}_[0-9]{2}\.exe$/i.test(name)
   );
 }
 
@@ -53,12 +54,14 @@ async function main() {
         .filter(
           (entry) =>
             entry.isDirectory() &&
-            (entry.name === "windows" || entry.name.startsWith("windows-")),
+            (entry.name === "windows" ||
+              entry.name.startsWith("windows-") ||
+              /^PoseChrono_v[^_]+.*_windows_T/i.test(entry.name)),
         )
         .map((entry) => entry.name);
 
       const dated = candidates
-        .filter((name) => name.startsWith("windows-"))
+        .filter((name) => name.startsWith("windows-") || /^PoseChrono_v/i.test(name))
         .sort((a, b) => b.localeCompare(a));
       if (dated.length > 0) {
         distDir = path.join(DIST_ROOT, dated[0]);
@@ -101,32 +104,6 @@ async function main() {
   for (const file of files) {
     if (!isAllowedEntry(file)) {
       errors.push(`Unexpected file in dist/windows: ${file}`);
-    }
-  }
-
-  const releaseMetaPath = path.join(distDir, "release.json");
-  if (!(await exists(releaseMetaPath))) {
-    errors.push("Missing release.json in dist/windows.");
-  } else {
-    try {
-      const meta = await readJson(releaseMetaPath);
-      const setupFile = String(meta.setupFile || "").trim();
-      if (!setupFile || !isSetupFileName(setupFile)) {
-        errors.push("release.json: setupFile is missing or invalid.");
-      } else if (!(await exists(path.join(distDir, setupFile)))) {
-        errors.push(`release.json: setupFile not found: ${setupFile}`);
-      }
-
-      const manifest = await readJson(MANIFEST_PATH);
-      const manifestVersion = String(manifest?.version || "").trim();
-      const metaVersion = String(meta?.manifestVersion || "").trim();
-      if (manifestVersion && metaVersion && manifestVersion !== metaVersion) {
-        errors.push(
-          `Version mismatch: manifest.json=${manifestVersion}, release.json.manifestVersion=${metaVersion}`,
-        );
-      }
-    } catch (err) {
-      errors.push(`release.json parse/validation error: ${err.message}`);
     }
   }
 

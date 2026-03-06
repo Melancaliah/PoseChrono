@@ -7,7 +7,6 @@ const { spawnSync } = require("child_process");
 
 const ROOT = path.resolve(__dirname, "..");
 const DIST_ROOT = path.join(ROOT, "dist");
-const EAGLE_ZIP_DIR = path.join(DIST_ROOT, "eagle");
 const EAGLE_LATEST_DIR = path.join(DIST_ROOT, "eagle-plugin");
 
 // Keep this list explicit to avoid desktop/standalone pollution.
@@ -22,8 +21,7 @@ const REQUIRED_ENTRIES = [
   "assets",
 ];
 
-const OPTIONAL_ENTRIES = ["LICENSE", "README.md"];
-const ZIP_NAME_PREFIX = "posechrono-eagle-";
+const OPTIONAL_ENTRIES = ["LICENSE", "README.md", "GabContainer"];
 
 function escapePowerShellSingleQuotes(input) {
   return String(input ?? "").replace(/'/g, "''");
@@ -46,11 +44,36 @@ function runNodeScriptOrThrow(relPath, args = []) {
   }
 }
 
-function buildVersionedZipName(version) {
-  const safe = String(version || "0.0.0")
-    .trim()
-    .replace(/[^0-9A-Za-z._-]/g, "-");
-  return `${ZIP_NAME_PREFIX}${safe}.zip`;
+function formatArtifactBaseName(version, platform, date = new Date()) {
+  const safe = String(version || "0.0.0").trim().replace(/[^0-9A-Za-z._-]/g, "-");
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `PoseChrono_v${safe}_${year}-${month}-${day}_${platform}_T${hours}-${minutes}`;
+}
+
+async function createArtifactDir(rootDir, version, platform) {
+  await fsp.mkdir(rootDir, { recursive: true });
+  const base = formatArtifactBaseName(version, platform);
+  for (let index = 1; index < 1000; index += 1) {
+    const suffix = String(index).padStart(2, "0");
+    const fullName = `${base}_${suffix}`;
+    const candidate = path.join(rootDir, fullName);
+    try {
+      await fsp.mkdir(candidate, { recursive: false });
+      return { dirPath: candidate, baseName: fullName };
+    } catch (err) {
+      if (err && err.code === "EEXIST") {
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error(
+    `[release:eagle] Unable to allocate output folder for '${platform}'.`,
+  );
 }
 
 async function readManifestVersion() {
@@ -183,35 +206,6 @@ function isLockError(err) {
   );
 }
 
-function formatReleaseStamp(date = new Date()) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  const hours = String(date.getHours()).padStart(2, "0");
-  const minutes = String(date.getMinutes()).padStart(2, "0");
-  return `${year}-${month}-${day}_T${hours}-${minutes}`;
-}
-
-async function createIncrementedOutputDir(rootDir, prefix) {
-  await fsp.mkdir(rootDir, { recursive: true });
-  const stamp = formatReleaseStamp();
-  for (let index = 1; index < 1000; index += 1) {
-    const suffix = String(index).padStart(2, "0");
-    const candidate = path.join(rootDir, `${prefix}-${stamp}_${suffix}`);
-    try {
-      await fsp.mkdir(candidate, { recursive: false });
-      return candidate;
-    } catch (err) {
-      if (err && err.code === "EEXIST") {
-        continue;
-      }
-      throw err;
-    }
-  }
-  throw new Error(
-    `[release:eagle] Unable to allocate output folder for prefix '${prefix}'.`,
-  );
-}
 
 async function main() {
   const args = new Set(process.argv.slice(2));
@@ -230,7 +224,8 @@ async function main() {
     return;
   }
 
-  const outDir = await createIncrementedOutputDir(DIST_ROOT, "eagle-plugin");
+  const version = await readManifestVersion();
+  const { dirPath: outDir, baseName } = await createArtifactDir(DIST_ROOT, version, "eagle");
 
   const copied = [];
 
@@ -272,19 +267,17 @@ async function main() {
     const stat = await fsp.stat(file);
     totalBytes += stat.size;
   }
-  const version = await readManifestVersion();
-  const zipName = buildVersionedZipName(version);
-  let zipPath = path.join(EAGLE_ZIP_DIR, zipName);
+  const primaryZipPath = path.join(DIST_ROOT, `${baseName}.zip`);
+  let zipPath = primaryZipPath;
   try {
     await createZipArchive(outDir, zipPath);
   } catch (err) {
     if (!isLockError(err)) throw err;
     const ts = new Date().toISOString().replace(/[:.]/g, "-");
-    const fallbackZipName = zipName.replace(/\.zip$/i, `-${ts}.zip`);
-    zipPath = path.join(EAGLE_ZIP_DIR, fallbackZipName);
+    zipPath = path.join(DIST_ROOT, `${baseName}-locked-${ts}.zip`);
     await createZipArchive(outDir, zipPath);
     console.warn(
-      `[release:eagle] '${path.join(EAGLE_ZIP_DIR, zipName)}' is locked. Using fallback zip: ${zipPath}`,
+      `[release:eagle] '${primaryZipPath}' is locked. Using fallback zip: ${zipPath}`,
     );
   }
 

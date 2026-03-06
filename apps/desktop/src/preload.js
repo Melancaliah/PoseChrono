@@ -66,15 +66,6 @@ window.addEventListener("DOMContentLoaded", () => {
   } catch (_) {}
 });
 
-window.addEventListener("load", () => {
-  setTimeout(() => {
-    try {
-      const body = window.document && window.document.body;
-      if (!body) return;
-      body.style.opacity = "1";
-    } catch (_) {}
-  }, 80);
-});
 
 window.addEventListener("beforeunload", () => {
   for (const handler of hideHandlers) {
@@ -97,6 +88,7 @@ const eagleShim = {
     }
   },
   window: {
+    close: () => invoke("posechrono:window:close"),
     hide: () => invoke("posechrono:window:hide"),
     minimize: () => invoke("posechrono:window:minimize"),
     maximize: () => invoke("posechrono:window:maximize"),
@@ -129,6 +121,8 @@ const eagleShim = {
   },
   folder: {
     getSelected: () => invoke("posechrono:folders:getSelected"),
+    browseAndAdd: () => invoke("posechrono:folders:browseAndAdd"),
+    removeFolder: (id) => invoke("posechrono:folders:removeFolder", id),
   },
   clipboard: {
     copyFiles: (paths) => invoke("posechrono:clipboard:copyFiles", paths || []),
@@ -136,6 +130,8 @@ const eagleShim = {
   shell: {
     showItemInFolder: (filePath) =>
       invoke("posechrono:shell:showItemInFolder", filePath),
+    openPath: (filePath) => invoke("posechrono:shell:openPath", filePath),
+    openItem: (filePath) => invoke("posechrono:shell:openPath", filePath),
   },
   tag: {
     get: () => invoke("posechrono:tag:get"),
@@ -157,6 +153,12 @@ contextBridge.exposeInMainWorld("poseChronoDesktop", {
   version: "0.1.0-dev",
   bridge: "eagle-shim",
   bootTraceEnabled: process.env.POSECHRONO_BOOT_TRACE === "1",
+  sync: {
+    transport: process.env.POSECHRONO_SYNC_TRANSPORT || "",
+    wsUrl: process.env.POSECHRONO_SYNC_WS_URL || "",
+    startLocalServer: () => invoke("posechrono:sync:startLocalServer"),
+    stopLocalServer: () => invoke("posechrono:sync:stopLocalServer"),
+  },
   storage: {
     getJson: (key) => invoke("posechrono:storage:getJson", key),
     setJson: (key, value) => invoke("posechrono:storage:setJson", key, value),

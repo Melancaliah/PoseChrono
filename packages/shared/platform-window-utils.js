@@ -11,19 +11,52 @@
       typeof options.warnMissingCapability === "function"
         ? options.warnMissingCapability
         : () => {};
+    let fallbackMaximizedState = false;
 
     async function toggleMaximize() {
       const platform = getPlatform();
       try {
         if (platform?.window) {
-          const isMaximized = await (platform.window.isMaximized?.() || false);
-          if (isMaximized && platform.window.unmaximize) {
-            await platform.window.unmaximize();
-            return;
+          const canMaximize = typeof platform.window.maximize === "function";
+          const canUnmaximize = typeof platform.window.unmaximize === "function";
+          const canReadMaximized = typeof platform.window.isMaximized === "function";
+
+          if (canReadMaximized) {
+            try {
+              const isMaximized = !!(await platform.window.isMaximized());
+              fallbackMaximizedState = isMaximized;
+              if (isMaximized && canUnmaximize) {
+                await platform.window.unmaximize();
+                fallbackMaximizedState = false;
+                return null;
+              }
+              if (!isMaximized && canMaximize) {
+                await platform.window.maximize();
+                fallbackMaximizedState = true;
+                return null;
+              }
+            } catch (_) {}
           }
-          if (!isMaximized && platform.window.maximize) {
+
+          if (canMaximize && canUnmaximize) {
+            if (fallbackMaximizedState) {
+              await platform.window.unmaximize();
+              fallbackMaximizedState = false;
+            } else {
+              await platform.window.maximize();
+              fallbackMaximizedState = true;
+            }
+            return null;
+          }
+          if (canMaximize) {
             await platform.window.maximize();
-            return;
+            fallbackMaximizedState = true;
+            return null;
+          }
+          if (canUnmaximize) {
+            await platform.window.unmaximize();
+            fallbackMaximizedState = false;
+            return null;
           }
         }
       } catch (_) {}

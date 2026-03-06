@@ -1407,7 +1407,7 @@ function rasterizeEditableShapeLineToCanvas(line, ctx) {
     const ry = Math.max(1, (maxY - minY) / 2);
     if (line.config?.fillEnabled) {
       const fillColor = line.config?.fillColor || color;
-      const fillOpacity = Math.min(0.9, Math.max(0.05, line.config?.fillOpacity ?? 0.2));
+      const fillOpacity = Math.min(1.0, Math.max(0.05, line.config?.fillOpacity ?? 0.2));
       ctx.save();
       ctx.fillStyle = fillColor;
       ctx.globalAlpha = fillOpacity;
@@ -1436,7 +1436,7 @@ function rasterizeEditableShapeLineToCanvas(line, ctx) {
     if (baseCfg.fillEnabled) {
       if (buildShapeEdgeGroupPath(ctx, line)) {
         const fillColor = baseCfg.fillColor || color;
-        const fillOpacity = Math.min(0.9, Math.max(0.05, baseCfg.fillOpacity ?? 0.2));
+        const fillOpacity = Math.min(1.0, Math.max(0.05, baseCfg.fillOpacity ?? 0.2));
         ctx.save();
         ctx.fillStyle = fillColor;
         ctx.globalAlpha = fillOpacity;

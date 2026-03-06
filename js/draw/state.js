@@ -122,6 +122,24 @@ class DrawingManager {
       index: -1,
       maxSize: DRAWING_CONSTANTS.MAX_HISTORY,
     };
+
+    // Style par outil (persistance taille/couleur)
+    const defSize = typeof CONFIG !== "undefined" ? CONFIG.defaultDrawingSize : 4;
+    const defMeasureColor = typeof DRAWING_CONSTANTS !== "undefined" ? DRAWING_CONSTANTS.DEFAULT_MEASURE_COLOR : "#f17e20";
+    
+    this.toolStyles = {
+      pencil: { size: defSize, color: "#ff3333" },
+      eraser: { size: defSize * 2, color: "#ffffff" }, // Gomme plus grande par défaut
+      line: { size: defSize, color: "#ff3333" },
+      arrow: { size: defSize, color: "#ff3333" },
+      rectangle: { size: defSize, color: "#ff3333" },
+      circle: { size: defSize, color: "#ff3333" },
+      laser: { size: defSize, color: "#ff3333" },
+      // Outils de mesure partagent la même taille
+      measure: { size: 3, color: defMeasureColor, group: 'measure' },
+      calibrate: { size: 3, color: "#10b981", group: 'measure' },
+      protractor: { size: 3, color: "#f59e0b", group: 'measure' }
+    };
   }
 
   getContext(type) {
@@ -316,6 +334,40 @@ function getActivePencilStrokeSize() {
   return annotationStyle.size;
 }
 
+function updateToolStyles(toolId) {
+  if (!drawingManager.toolStyles[toolId]) return;
+
+  const style = drawingManager.toolStyles[toolId];
+
+  // Mettre à jour annotationStyle
+  annotationStyle.size = style.size;
+  annotationStyle.color = style.color;
+
+  // Mettre à jour measureState pour les outils de mesure
+  if (["measure", "calibrate", "protractor"].includes(toolId)) {
+    measureState.lineWidth = style.size;
+    measureState.color = style.color;
+  }
+
+  // Mettre à jour l'UI dans tous les contextes possibles (Normal et Zoom)
+  const inputPairIds = [
+    { color: "drawing-color", size: "drawing-size" },
+    { color: "zoom-drawing-color", size: "zoom-drawing-size" }
+  ];
+
+  inputPairIds.forEach(ids => {
+    const colorInput = document.getElementById(ids.color);
+    const sizeInput = document.getElementById(ids.size);
+    if (colorInput) colorInput.value = style.color;
+    if (sizeInput) sizeInput.value = style.size;
+  });
+
+  // Forcer la mise à jour du curseur
+  if (typeof updateDrawingCursor === "function") {
+    updateDrawingCursor();
+  }
+}
+
 // ================================================================
 // ALIASES POUR COMPATIBILITÉ (seront progressivement supprimés)
 // ================================================================
@@ -330,7 +382,13 @@ Object.defineProperties(window, {
   // drawState aliases
   currentTool: { 
     get() { return _getDrawState().currentTool; },
-    set(v) { _getDrawState().currentTool = v; }
+    set(v) { 
+      const oldTool = _getDrawState().currentTool;
+      if (oldTool !== v) {
+        _getDrawState().currentTool = v;
+        updateToolStyles(v);
+      }
+    }
   },
   isDrawing: { 
     get() { return _getDrawState().isDrawing; },

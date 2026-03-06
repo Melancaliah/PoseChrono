@@ -11,15 +11,15 @@ const CONFIG = {
 
   titlebarAlwaysVisible: false, // Titlebar toujours visible (default : false)
 
-  enableAnimations: true, // Activer/désactiver les animations (default : true)
+  enableAnimations: false, // Activer/désactiver les animations (default : true)
   enableFlipAnimation: false, // Activer/désactiver l'animation 3D de flip (default : false)
   defaultAutoFlip: false, // AutoFlip activé par défaut (default : true)
 
   animationDuration: 350, // Durée des transitions en ms (default : 350)
-  tooltipDelay: 500, // délai d'apparition de l'infobulle en ms (default : 500)
+  tooltipDelay: 420, // délai d'apparition de l'infobulle en ms (default : 500)
   smoothProgress: false, // La barre de progression diminue par accoup ou progressivement ? (default : false)
   smoothPauseCircle: true, // La barre de progression de l'écran de pause diminue par accoup ou progressivement ? (default : true)
-  reverseProgressiveBlur: false, // Progressive blur inversé : net → flou (false) ou flou → net (true) - (default : false)
+  reverseProgressiveBlur: false, // Progressive blur inversé : net -> flou (false) ou flou -> net (true) - (default : false)
   currentTheme: "violet", // Thème par défaut : "violet"
 
   enableStabilizerByDefault: true, // Stabilisateur activé par défaut dans le module dessin (default : true)
@@ -29,6 +29,32 @@ const CONFIG = {
   enableZoomInDrawingMode: true, // Autoriser le zoom dans le mode dessin (default : true)
   enableZoomScrollbars: false, // Afficher les scrollbars en mode zoom (default : false)
   zoomAnimated: true, // Animation fluide du zoom (default : true)
+
+  SYNC: {
+    enabled: true, // Activer/désactiver toute la fonctionnalité de synchronisation en ligne
+    allowPublicSync: true, // Activer le mode "Public" (internet) du sync. Si false : seul le mode local est disponible et le bouton Public est masqué.
+    transport: "ws", // Transport mode: "webrtc" (P2P via signaling), "ws" (WebSocket relay) or "mock" (local only, for dev)
+    wsUrl: "ws://127.0.0.1:8787", // Default WebSocket relay URL
+    webrtcSignalingUrl: "ws://127.0.0.1:8787", // Default signaling relay URL used by WebRTC mode
+    webrtcIceServers: [
+      { urls: "stun:stun.l.google.com:19302" },
+      { urls: "stun:stun.cloudflare.com:3478" },
+    ],
+    maxMeshPeers: 4, // Nombre max de peers WebRTC directs depuis l'hôte (au-delà: fallback relay)
+    p2pRequestTimeoutMs: 12000, // Timeout des requêtes P2P manifest/fichiers
+    mediaChunkBase64Size: 12000, // Taille d'un chunk média P2P (base64 chars)
+    maxBufferedAmountBeforeYield: 512 * 1024, // Backpressure DataChannel
+    sendYieldDelayMs: 12, // Pause ms pendant l'envoi chunké sous charge
+    enableLatencyLogs: false, // Log debug p50/p95 latence contrôle WebRTC
+    latencyLogEvery: 20, // Fréquence des logs de latence (1 log toutes N mesures)
+    latencyWindowSize: 120, // Fenêtre de mesures pour p50/p95
+    mirrorMediaToRelay: true, // Maintenir aussi le miroir relay pour fallback robuste
+    allowMediaTransfer: true, // Kill-switch client pour désactiver upload/download médias sync
+    requireTls: false, // Enforce wss:// in production (default: false)
+    maxReconnectAttempts: 10, // Max auto-reconnect attempts before giving up
+    reconnectBaseDelayMs: 1000, // Initial reconnect delay in ms
+    reconnectMaxDelayMs: 30000, // Max reconnect delay in ms
+  },
 
   HOTKEYS: {
     FLIP_H: "F1", // Flip horizontal (default : F1)
@@ -76,52 +102,16 @@ const CONFIG = {
 };
 
 // ================================================================
-// VALEURS PAR DÉFAUT DES RACCOURCIS (pour reset)
+// VALEURS PAR DEFAUT DES RACCOURCIS (pour reset)
 // ================================================================
 
-const DEFAULT_HOTKEYS = {
-  FLIP_H: "F1",
-  GRAYSCALE: "y",
-  BLUR: "f",
-  MUTE: "m",
-  GRID: "h",
-  GRID_MODAL: "H",
-  SIDEBAR: "Tab",
-  INFO: "i",
-  SILHOUETTE: "s",
-  SILHOUETTE_MODAL: "S",
-  THEME: "F6",
-  ANNOTATE: "b",
-  TAGS: "t",
-  VIDEO_SLOWER: "-",
-  VIDEO_FASTER: "+",
-  VIDEO_PREV_FRAME: "'",
-  VIDEO_NEXT_FRAME: "(",
-  VIDEO_LOOP: "l",
-  VIDEO_CONFIG: "V",
-  DRAWING_EXPORT: "s",
-  DRAWING_LIGHTBOX: ")",
-  DRAWING_CLOSE: "Escape",
-  DRAWING_TOOL_PENCIL: "b",
-  DRAWING_TOOL_ERASER: "e",
-  DRAWING_TOOL_RECTANGLE: "r",
-  DRAWING_TOOL_CIRCLE: "c",
-  DRAWING_TOOL_LINE: "l",
-  DRAWING_TOOL_ARROW: "a",
-  DRAWING_TOOL_MEASURE: "m",
-  DRAWING_TOOL_CALIBRATE: "u",
-  DRAWING_TOOL_LASER: "B",
-  DRAWING_TOOL_PROTRACTOR: "U",
-  DRAWING_ROTATE_SHAPE: "q",
-  DRAWING_SIZE_DECREASE: "é",
-  DRAWING_SIZE_INCREASE: '"',
-};
+const DEFAULT_HOTKEYS = { ...CONFIG.HOTKEYS };
 
 // Clé localStorage pour les raccourcis personnalisés
 const HOTKEYS_STORAGE_KEY = "posechrono_hotkeys";
 
 // ================================================================
-// CONSTANTES SÉMANTIQUES
+// CONSTANTES SEMANTIQUES
 // ================================================================
 
 const TIMER_CONSTANTS = {
@@ -183,7 +173,7 @@ const DRAWING_CONSTANTS = {
   MIN_CURSOR_SIZE: 6,
 
   // Valeurs par défaut des outils de mesure
-  DEFAULT_MEASURE_LINE_WIDTH: 3, // Épaisseur des lignes de mesure (default : 3)
+  DEFAULT_MEASURE_LINE_WIDTH: 3, // Epaisseur des lignes de mesure (default : 3)
   DEFAULT_MEASURE_LABEL_SIZE: 0.6, // Taille des valeurs affichées (1.0 = normal)
   DEFAULT_GRADUATION_SIZE: 1.5, // Taille des graduations sur les lignes
   DEFAULT_MEASURE_COLOR: "#f17e20", // Couleur des lignes de mesure
@@ -193,7 +183,7 @@ const DRAWING_CONSTANTS = {
   // Valeurs par défaut de l'outil compas (protractor)
   DEFAULT_COMPASS_COLOR: "#f59e0b", // Couleur du compas (orange)
   DEFAULT_COMPASS_PREVIEW_FILL_OPACITY: 0.1, // Opacité du fond du cercle de prévisualisation (0-1)
-  DEFAULT_COMPASS_LINE_WIDTH: 2, // Épaisseur du trait du compas
+  DEFAULT_COMPASS_LINE_WIDTH: 2, // Epaisseur du trait du compas
 
   // Resize debounce
   RESIZE_DEBOUNCE_MS: 100,

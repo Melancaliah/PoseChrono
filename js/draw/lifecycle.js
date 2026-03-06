@@ -183,9 +183,14 @@ async function openDrawingMode() {
     }
   }
 
-  // Mettre en pause la session si elle est en cours
+  // Mettre en pause la session si elle est en cours,
+  // sauf si la préférence par mode l'interdit (__poseChronoDrawPause === false).
   if (typeof state !== "undefined" && state.isPlaying) {
-    if (typeof togglePlayPause === "function") {
+    const drawPauseEnabled =
+      typeof window !== "undefined"
+        ? window.__poseChronoDrawPause !== false
+        : true;
+    if (drawPauseEnabled && typeof togglePlayPause === "function") {
       togglePlayPause();
     }
   }

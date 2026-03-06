@@ -3,7 +3,7 @@
 This project ships two products from one repository:
 
 - Eagle plugin runtime
-- Windows standalone desktop runtime
+- Windows / Linux standalone desktop runtime
 
 Please follow these rules to keep both stable.
 

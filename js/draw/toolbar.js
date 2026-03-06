@@ -185,7 +185,22 @@ function createStyleInputs(options = {}) {
   colorInput.className = colorClass;
   colorInput.setAttribute("data-tooltip", i18next.t("draw.config.color"));
   colorInput.oninput = (e) => {
-    annotationStyle.color = e.target.value;
+    const newColor = e.target.value;
+    annotationStyle.color = newColor;
+    
+    // Sauvegarder pour l'outil courant
+    const toolId = currentTool;
+    if (drawingManager.toolStyles[toolId]) {
+      drawingManager.toolStyles[toolId].color = newColor;
+    }
+
+    // [FIX] Mise à jour immédiate pour les outils de mesure
+    if (["measure", "calibrate", "protractor"].includes(toolId)) {
+      measureState.color = newColor;
+      if (typeof redrawDrawingMeasurements === "function") {
+        redrawDrawingMeasurements();
+      }
+    }
   };
 
   const sizeInput = document.createElement("input");
@@ -197,7 +212,33 @@ function createStyleInputs(options = {}) {
   sizeInput.className = sizeClass;
   sizeInput.title = i18next.t("draw.sliders.size");
   sizeInput.oninput = (e) => {
-    annotationStyle.size = parseInt(e.target.value);
+    const newSize = parseInt(e.target.value);
+    annotationStyle.size = newSize;
+    
+    // Sauvegarder pour l'outil courant
+    const toolId = currentTool;
+    const style = drawingManager.toolStyles[toolId];
+    if (style) {
+      style.size = newSize;
+      
+      // Si l'outil appartient à un groupe (ex: mesures), synchroniser la taille pour tout le groupe
+      if (style.group) {
+        Object.values(drawingManager.toolStyles).forEach(ts => {
+          if (ts.group === style.group) {
+            ts.size = newSize;
+          }
+        });
+      }
+
+      // [FIX] Mise à jour immédiate pour les outils de mesure
+      if (["measure", "calibrate", "protractor"].includes(toolId)) {
+        measureState.lineWidth = newSize;
+        if (typeof redrawDrawingMeasurements === "function") {
+          redrawDrawingMeasurements();
+        }
+      }
+    }
+    
     updateDrawingCursor();
   };
 

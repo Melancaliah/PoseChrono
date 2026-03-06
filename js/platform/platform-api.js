@@ -10,6 +10,7 @@
       onCreate: noop,
       onRun: noop,
       onHide: noop,
+      onLibraryChanged: noop,
     };
   }
 
@@ -85,6 +86,7 @@
   function createNoopFoldersApi() {
     return {
       getSelected: async () => [],
+      getAll: async () => [],
     };
   }
 
