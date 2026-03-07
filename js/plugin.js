@@ -26608,31 +26608,31 @@ function renderCustomQueue() {
       const s = stepModel.seconds;
       const modifier = isPause ? "step-item--pause" : "step-item--pose";
 
-      return `
+        return `
         <div class="step-item ${modifier} step-item--virtual" data-step-index="${index}">
-            <div class="step-item-left">
-                <div class="drag-handle step-item-drag-handle" draggable="true" data-step-index="${index}">⋮⋮</div>
-                ${
-                  isPause
-                    ? `<span class="step-item-pause-label">☕ PAUSE</span>`
-                    : `<input type="number" value="${step.count}" min="1"
-                            data-step-index="${index}" data-step-field="count"
-                            class="step-item-pose-count">
-                     <span class="step-item-poses-of">Poses de</span>`
-                }
-                <div class="hms-group step-item-hms">
-                    <input type="number" value="${h}" min="0" data-step-index="${index}" data-step-hms="h">
-                    <span class="step-item-hms-sep">h</span>
-                    <input type="number" value="${m}" min="0" max="59" data-step-index="${index}" data-step-hms="m">
-                    <span class="step-item-hms-sep">m</span>
-                    <input type="number" value="${s}" min="0" max="59" data-step-index="${index}" data-step-hms="s">
-                    <span class="step-item-hms-sep">s</span>
-                </div>
+          <div class="step-item-left">
+            <div class="drag-handle step-item-drag-handle" draggable="true" data-step-index="${index}">⋮⋮</div>
+            ${
+              isPause
+              ? `<span class="step-item-pause-label">☕ PAUSE</span>`
+              : `<input type="number" value="${step.count}" min="1"
+                  data-step-index="${index}" data-step-field="count"
+                  class="step-item-pose-count">
+                 <span class="step-item-poses-of">${typeof i18next !== 'undefined' ? i18next.t('settings.posesOf') : 'Poses de'}</span>`
+            }
+            <div class="hms-group step-item-hms">
+              <input type="number" value="${h}" min="0" data-step-index="${index}" data-step-hms="h">
+              <span class="step-item-hms-sep">h</span>
+              <input type="number" value="${m}" min="0" max="59" data-step-index="${index}" data-step-hms="m">
+              <span class="step-item-hms-sep">m</span>
+              <input type="number" value="${s}" min="0" max="59" data-step-index="${index}" data-step-hms="s">
+              <span class="step-item-hms-sep">s</span>
             </div>
-            <div class="step-item-right">
-                <span class="step-item-total">TOTAL: ${formatTime(groupTotalSeconds)}</span>
-                <button data-remove-step="${index}" class="step-item-remove">✕</button>
-            </div>
+          </div>
+          <div class="step-item-right">
+            <span class="step-item-total">TOTAL: ${formatTime(groupTotalSeconds)}</span>
+            <button data-remove-step="${index}" class="step-item-remove">✕</button>
+          </div>
         </div>`;
     };
 
@@ -26687,7 +26687,7 @@ function renderCustomQueue() {
                       : `<input type="number" value="${step.count}" min="1"
                               data-step-index="${index}" data-step-field="count"
                               class="step-item-pose-count">
-                       <span class="step-item-poses-of">Poses de</span>`
+                         <span class="step-item-poses-of">${typeof i18next !== 'undefined' ? i18next.t('settings.posesOf') : 'Poses de'}</span>`
                   }
                   <div class="hms-group step-item-hms">
                       <input type="number" value="${h}" min="0" data-step-index="${index}" data-step-hms="h">

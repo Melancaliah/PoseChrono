@@ -1,5 +1,5 @@
 // PoseChrono Drawing Module - Bundled from js/draw/
-// Generated: 2026-03-06T00:02:26.118Z
+// Generated: 2026-03-07T03:08:46.134Z
 
 // ================================================================
 // MODULE: utils.js
@@ -4945,6 +4945,10 @@ function finalizeCompass(center, mousePos) {
     type: "compass",
     radius: radius,
     multiplier: protractorMultiplier,
+    config: {
+      color: measureState.color,
+      lineWidth: measureState.lineWidth,
+    },
   });
 
   redrawDrawingMeasurements();
@@ -4966,8 +4970,10 @@ function finalizeDrawingMeasurement(start, end, isShift = false) {
     start: { ...start },
     end: finalEnd,
     type: "measure",
-    color: measureState.color,
-    lineWidth: measureState.lineWidth,
+    config: {
+      color: measureState.color,
+      lineWidth: measureState.lineWidth,
+    },
   });
 
   redrawDrawingMeasurements();
@@ -5000,6 +5006,10 @@ function finalizeDrawingCalibration(start, end, isShift = false) {
     start: { ...start },
     end: finalEnd,
     type: "calibrate",
+    config: {
+      color: measureState.color,
+      lineWidth: measureState.lineWidth,
+    },
   });
 
   // Mettre à jour la taille de toutes les mesures compass existantes

@@ -22,6 +22,10 @@ const REQUIRED_ENTRIES = [
 ];
 
 const OPTIONAL_ENTRIES = ["LICENSE", "README.md", "GabContainer"];
+const RELEASE_MANIFEST_OVERRIDES = {
+  id: "b459df53-4b7c-4116-a996-647c1ef63dc9",
+  logo: "/logo.png",
+};
 
 function escapePowerShellSingleQuotes(input) {
   return String(input ?? "").replace(/'/g, "''");
@@ -236,6 +240,13 @@ async function main() {
     copied.push(entry);
   }
 
+  // Patch manifest.json with production values (overrides dev ID and logo).
+  const outManifestPath = path.join(outDir, "manifest.json");
+  const outManifestRaw = await fsp.readFile(outManifestPath, "utf8");
+  const outManifest = JSON.parse(outManifestRaw);
+  Object.assign(outManifest, RELEASE_MANIFEST_OVERRIDES);
+  await fsp.writeFile(outManifestPath, JSON.stringify(outManifest, null, 2) + "\n", "utf8");
+
   for (const entry of OPTIONAL_ENTRIES) {
     const src = path.join(ROOT, entry);
     if (!existsSyncSafe(src)) continue;
@@ -300,3 +311,4 @@ main().catch((err) => {
   console.error("[release:eagle] Failed:", err);
   process.exitCode = 1;
 });
+

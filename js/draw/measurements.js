@@ -1092,6 +1092,10 @@ function finalizeCompass(center, mousePos) {
     type: "compass",
     radius: radius,
     multiplier: protractorMultiplier,
+    config: {
+      color: measureState.color,
+      lineWidth: measureState.lineWidth,
+    },
   });
 
   redrawDrawingMeasurements();
@@ -1113,8 +1117,10 @@ function finalizeDrawingMeasurement(start, end, isShift = false) {
     start: { ...start },
     end: finalEnd,
     type: "measure",
-    color: measureState.color,
-    lineWidth: measureState.lineWidth,
+    config: {
+      color: measureState.color,
+      lineWidth: measureState.lineWidth,
+    },
   });
 
   redrawDrawingMeasurements();
@@ -1147,6 +1153,10 @@ function finalizeDrawingCalibration(start, end, isShift = false) {
     start: { ...start },
     end: finalEnd,
     type: "calibrate",
+    config: {
+      color: measureState.color,
+      lineWidth: measureState.lineWidth,
+    },
   });
 
   // Mettre à jour la taille de toutes les mesures compass existantes
