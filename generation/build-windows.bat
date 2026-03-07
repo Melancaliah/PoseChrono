@@ -11,14 +11,6 @@ if not exist "package.json" (
   exit /b 1
 )
 
-echo [PoseChrono] Sync version desktop depuis manifest.json...
-call npm run version:sync-desktop
-if errorlevel 1 (
-  echo [PoseChrono] Echec version:sync-desktop.
-  pause
-  exit /b 1
-)
-
 echo [PoseChrono] Build release Windows...
 call npm run release:windows
 if errorlevel 1 (
@@ -27,7 +19,8 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo [PoseChrono] OK. Sortie:
-echo - dist\windows-YYYY-MM-DD_THH-mm_NN\posechrono-desktop-*-setup.exe
+echo.
+echo [PoseChrono] OK. Sortie dans dist\PoseChrono_v*_windows_*\
+echo   - PoseChrono-Setup-*.exe
 pause
 endlocal

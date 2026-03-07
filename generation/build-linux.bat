@@ -11,14 +11,6 @@ if not exist "package.json" (
   exit /b 1
 )
 
-echo [PoseChrono] Sync version desktop depuis manifest.json...
-call npm run version:sync-desktop
-if errorlevel 1 (
-  echo [PoseChrono] Echec version:sync-desktop.
-  pause
-  exit /b 1
-)
-
 echo [PoseChrono] Build release Linux...
 call npm run release:linux
 if errorlevel 1 (
@@ -27,8 +19,8 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo [PoseChrono] OK. Sorties:
-echo - dist\linux-YYYY-MM-DD_Txx-mm_NN\PoseChrono_*.AppImage
-echo - dist\linux-YYYY-MM-DD_Txx-mm_NN\release.json
+echo.
+echo [PoseChrono] OK. Sortie dans dist\PoseChrono_v*_linux_*\
+echo   - PoseChrono-*.AppImage
 pause
 endlocal

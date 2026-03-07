@@ -11,19 +11,17 @@ if not exist "package.json" (
   exit /b 1
 )
 
-echo [PoseChrono] Build release Eagle (timestamp + dossier fixe dist\eagle-plugin)...
-call npm run release:eagle:latest
+echo [PoseChrono] Build release Eagle...
+call npm run release:eagle
 if errorlevel 1 (
-  echo [PoseChrono] Echec release:eagle:latest.
+  echo [PoseChrono] Echec release:eagle.
   pause
   exit /b 1
 )
 
-echo [PoseChrono] OK. Sorties:
-echo - dist\eagle-plugin\ (chemin fixe pour import Eagle)
-echo - dist\eagle-plugin-YYYY-MM-DD_THH-mm_NN\
-echo - dist\eagle\posechrono-eagle-*.zip
 echo.
-echo Note: si dist\eagle-plugin n'est pas mis a jour, ferme Eagle puis relance ce script.
+echo [PoseChrono] OK. Sorties dans dist\PoseChrono_v*_eagle_*\
+echo   - Dossier decompresse (plugin Eagle)
+echo   - .zip correspondant
 pause
 endlocal

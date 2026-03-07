@@ -11,35 +11,17 @@ if not exist "package.json" (
   exit /b 1
 )
 
-echo [PoseChrono] Build release Eagle (latest)...
-call npm run release:eagle:latest
+echo [PoseChrono] Build unifie Eagle + Windows...
+call npm run release:all
 if errorlevel 1 (
-  echo [PoseChrono] Echec release:eagle:latest.
+  echo [PoseChrono] Echec release:all.
   pause
   exit /b 1
 )
 
-echo [PoseChrono] Sync version desktop depuis manifest.json...
-call npm run version:sync-desktop
-if errorlevel 1 (
-  echo [PoseChrono] Echec version:sync-desktop.
-  pause
-  exit /b 1
-)
-
-echo [PoseChrono] Build release Windows...
-call npm run release:windows
-if errorlevel 1 (
-  echo [PoseChrono] Echec release:windows.
-  pause
-  exit /b 1
-)
-
-echo [PoseChrono] OK. Sorties:
-echo - dist\eagle-plugin\ (chemin fixe pour import Eagle)
-echo - dist\eagle\posechrono-eagle-*.zip
-echo - dist\windows-YYYY-MM-DD_THH-mm_NN\posechrono-desktop-*-setup.exe
 echo.
-echo Note: si dist\eagle-plugin n'est pas mis a jour, ferme Eagle puis relance ce script.
+echo [PoseChrono] OK. Voir le dossier dist\v*\ pour les fichiers de release.
+echo   - .zip et .exe a la racine du dossier (prets pour GitHub)
+echo   - eagle\ = version store officiel (sans GabContainer)
 pause
 endlocal

@@ -11,7 +11,7 @@ const FILES = {
 };
 
 function isValidSemver(version) {
-  return /^\d+\.\d+\.\d+$/.test(String(version || "").trim());
+  return /^\d+\.\d+\.\d+(\.\d+)?$/.test(String(version || "").trim());
 }
 
 function bumpSemver(version, kind) {
