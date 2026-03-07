@@ -867,5 +867,13 @@
       "stop": "セッション終了",
       "settings": "ホーム"
     }
+  },
+  "update": {
+    "available": "PoseChrono v{{version}} が利用可能です！",
+    "install": "アップデート",
+    "download": "ダウンロード",
+    "downloading": "アップデートをダウンロード中…",
+    "installing": "インストール中… アプリケーションが再起動します。",
+    "error": "アップデートに失敗しました: {{error}}"
   }
 }

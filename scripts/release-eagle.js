@@ -141,6 +141,9 @@ async function copyRecursive(src, dest) {
   if (relFromRoot === "js/shared" || relFromRoot.startsWith("js/shared/")) {
     return;
   }
+  if (relFromRoot === "_fab" || relFromRoot.startsWith("_fab/")) {
+    return;
+  }
 
   const stat = await fsp.stat(src);
   if (stat.isDirectory()) {

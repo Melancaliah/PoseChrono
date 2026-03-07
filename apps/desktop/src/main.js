@@ -7,6 +7,7 @@ const {
   clipboard,
   dialog,
   ipcMain,
+  net,
   Notification,
   shell,
 } = require("electron");
@@ -23,6 +24,8 @@ const STORAGE_LEGACY_FILE_NAME = "posechrono-desktop-storage.json";
 const STORAGE_DIR_NAME = "storage";
 const DEV_MIGRATION_SENTINEL_FILE = ".posechrono-dev-migration-v1";
 const DESKTOP_MEDIA_FOLDER_KEY = "desktop.mediaFolders";
+const UPDATE_CHECK_URL =
+  "https://api.github.com/repos/Melancaliah/PoseChrono/releases/latest";
 const DESKTOP_WINDOW_BOUNDS_KEY = "desktop.windowBounds";
 const DESKTOP_WINDOW_MAXIMIZED_KEY = "desktop.windowMaximized";
 const WINDOW_STATE_SAVE_DEBOUNCE_MS = 250;
@@ -861,6 +864,14 @@ function registerIpcHandlers() {
   ipcMain.handle("posechrono:sync:stopLocalServer", async () => {
     return stopLocalSyncRelay();
   });
+
+  ipcMain.handle("posechrono:update:install", async (_, url) => {
+    if (typeof url === "string" && url.startsWith("https://")) {
+      downloadAndInstallUpdate(url).catch(() => {});
+      return true;
+    }
+    return false;
+  });
 }
 
 function resolveWebEntryFile() {
@@ -1001,6 +1012,147 @@ async function createMainWindow() {
   }
 }
 
+// ── Update checker & installer ──────────────────────────────────────
+
+const { spawn: spawnProcess } = require("child_process");
+const os = require("os");
+
+function compareVersions(a, b) {
+  const pa = String(a || "0").split(".").map(Number);
+  const pb = String(b || "0").split(".").map(Number);
+  const len = Math.max(pa.length, pb.length);
+  for (let i = 0; i < len; i++) {
+    const na = pa[i] || 0;
+    const nb = pb[i] || 0;
+    if (na > nb) return 1;
+    if (na < nb) return -1;
+  }
+  return 0;
+}
+
+function cleanVersionTag(tag) {
+  // "v1.0.7-stable" → "1.0.7"
+  let v = String(tag || "").trim();
+  if (v.startsWith("v") || v.startsWith("V")) v = v.slice(1);
+  const dashIdx = v.indexOf("-");
+  if (dashIdx > 0) v = v.slice(0, dashIdx);
+  return v;
+}
+
+function fetchJson(url) {
+  return new Promise((resolve, reject) => {
+    const request = net.request(url);
+    request.setHeader("User-Agent", "PoseChrono-Desktop");
+    let body = "";
+    request.on("response", (response) => {
+      response.on("data", (chunk) => { body += chunk.toString(); });
+      response.on("end", () => {
+        try { resolve(JSON.parse(body)); }
+        catch (e) { reject(e); }
+      });
+    });
+    request.on("error", reject);
+    request.end();
+  });
+}
+
+async function checkForUpdates() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+
+  const localVersion = app.getVersion();
+  const release = await fetchJson(UPDATE_CHECK_URL);
+  const remoteVersion = cleanVersionTag(release.tag_name);
+
+  if (!remoteVersion || compareVersions(remoteVersion, localVersion) <= 0) return;
+
+  // Find the Windows .exe asset
+  let downloadUrl = release.html_url; // fallback: release page
+  if (Array.isArray(release.assets)) {
+    const winAsset = release.assets.find(
+      (a) => /windows/i.test(a.name) && /\.exe$/i.test(a.name),
+    );
+    if (winAsset && winAsset.browser_download_url) {
+      downloadUrl = winAsset.browser_download_url;
+    }
+  }
+
+  mainWindow.webContents.send("posechrono:update:available", {
+    version: remoteVersion,
+    url: downloadUrl,
+  });
+}
+
+function downloadFile(url, destPath) {
+  return new Promise((resolve, reject) => {
+    const file = fs.createWriteStream(destPath);
+    const request = net.request(url);
+    request.setHeader("User-Agent", "PoseChrono-Desktop");
+    request.on("response", (response) => {
+      // Follow redirects (GitHub asset URLs redirect to S3)
+      if (
+        (response.statusCode === 301 || response.statusCode === 302) &&
+        response.headers.location
+      ) {
+        file.close();
+        fs.unlinkSync(destPath);
+        const redirectUrl = Array.isArray(response.headers.location)
+          ? response.headers.location[0]
+          : response.headers.location;
+        return downloadFile(redirectUrl, destPath).then(resolve, reject);
+      }
+      if (response.statusCode !== 200) {
+        file.close();
+        reject(new Error(`Download failed: HTTP ${response.statusCode}`));
+        return;
+      }
+      response.on("data", (chunk) => file.write(chunk));
+      response.on("end", () => file.end(() => resolve(destPath)));
+    });
+    request.on("error", (err) => {
+      file.close();
+      reject(err);
+    });
+    request.end();
+  });
+}
+
+async function downloadAndInstallUpdate(url) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+
+  const fileName = "PoseChrono-Update.exe";
+  const destPath = path.join(os.tmpdir(), fileName);
+
+  // Notify renderer: download started
+  mainWindow.webContents.send("posechrono:update:progress", {
+    status: "downloading",
+  });
+
+  try {
+    await downloadFile(url, destPath);
+  } catch (err) {
+    mainWindow.webContents.send("posechrono:update:progress", {
+      status: "error",
+      error: String(err.message || err),
+    });
+    return;
+  }
+
+  // Notify renderer: launching installer
+  mainWindow.webContents.send("posechrono:update:progress", {
+    status: "installing",
+  });
+
+  // Launch NSIS installer in silent mode and quit
+  spawnProcess(destPath, ["/S"], {
+    detached: true,
+    stdio: "ignore",
+  }).unref();
+
+  app.quit();
+}
+
+// ────────────────────────────────────────────────────────────────────
+
 app.whenReady().then(async () => {
   logBootTraceMain("app.whenReady");
   migrateLegacyDevUserDataIfNeeded();
@@ -1008,6 +1160,9 @@ app.whenReady().then(async () => {
   logBootTraceMain("ipc.handlers.registered");
   await createMainWindow();
   logBootTraceMain("createMainWindow.done");
+
+  // Check for updates after a short delay to not slow down startup
+  setTimeout(() => checkForUpdates().catch(() => {}), 5000);
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {

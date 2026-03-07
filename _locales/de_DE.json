@@ -859,5 +859,13 @@
       "stop": "Sitzung beenden",
       "settings": "Startseite"
     }
+  },
+  "update": {
+    "available": "PoseChrono v{{version}} ist verfügbar!",
+    "install": "Aktualisieren",
+    "download": "Herunterladen",
+    "downloading": "Update wird heruntergeladen…",
+    "installing": "Installation läuft… Die Anwendung wird neu gestartet.",
+    "error": "Update fehlgeschlagen: {{error}}"
   }
 }

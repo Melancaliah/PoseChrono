@@ -13760,6 +13760,56 @@ window.addEventListener("load", () => {
   }, 250);
 });
 
+// Desktop: listen for update notifications from main process
+if (window.poseChronoDesktop && typeof window.poseChronoDesktop.onUpdateAvailable === "function") {
+  window.poseChronoDesktop.onUpdateAvailable(({ version, url }) => {
+    if (typeof showPoseChronoToast !== "function") return;
+    const t = (key, opts) => typeof i18next !== "undefined" ? i18next.t(key, opts) : key;
+    const canAutoInstall =
+      typeof window.poseChronoDesktop.installUpdate === "function" &&
+      /\.exe$/i.test(url);
+    showPoseChronoToast({
+      type: "info",
+      message: t("update.available", { version }),
+      actionLabel: canAutoInstall ? t("update.install") : t("update.download"),
+      onAction: () => {
+        if (canAutoInstall) {
+          showPoseChronoToast({
+            type: "info",
+            message: t("update.downloading"),
+            duration: 60000,
+          });
+          window.poseChronoDesktop.installUpdate(url);
+        } else {
+          try { window.open(url, "_blank"); } catch (_) {}
+        }
+      },
+      duration: 15000,
+    });
+  });
+
+  // Listen for update progress events
+  if (typeof window.poseChronoDesktop.onUpdateProgress === "function") {
+    window.poseChronoDesktop.onUpdateProgress(({ status, error }) => {
+      if (typeof showPoseChronoToast !== "function") return;
+      const t = (key, opts) => typeof i18next !== "undefined" ? i18next.t(key, opts) : key;
+      if (status === "installing") {
+        showPoseChronoToast({
+          type: "success",
+          message: t("update.installing"),
+          duration: 5000,
+        });
+      } else if (status === "error") {
+        showPoseChronoToast({
+          type: "error",
+          message: t("update.error", { error: error || "unknown" }),
+          duration: 8000,
+        });
+      }
+    });
+  }
+}
+
 platformRuntimeOnHide(() => {
   stopTimer();
   killEagleLocalSyncServer();

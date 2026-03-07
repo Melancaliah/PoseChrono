@@ -164,4 +164,11 @@ contextBridge.exposeInMainWorld("poseChronoDesktop", {
     setJson: (key, value) => invoke("posechrono:storage:setJson", key, value),
     remove: (key) => invoke("posechrono:storage:remove", key),
   },
+  onUpdateAvailable: (callback) => {
+    ipcRenderer.on("posechrono:update:available", (_, data) => callback(data));
+  },
+  onUpdateProgress: (callback) => {
+    ipcRenderer.on("posechrono:update:progress", (_, data) => callback(data));
+  },
+  installUpdate: (url) => invoke("posechrono:update:install", url),
 });

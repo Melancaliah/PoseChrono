@@ -867,5 +867,13 @@
       "stop": "Завершить сессию",
       "settings": "Главная"
     }
+  },
+  "update": {
+    "available": "PoseChrono v{{version}} доступен!",
+    "install": "Обновить",
+    "download": "Скачать",
+    "downloading": "Загрузка обновления…",
+    "installing": "Установка… Приложение перезапустится.",
+    "error": "Ошибка обновления: {{error}}"
   }
 }

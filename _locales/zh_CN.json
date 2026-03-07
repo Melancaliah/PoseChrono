@@ -859,5 +859,13 @@
       "stop": "结束会话",
       "settings": "主页"
     }
+  },
+  "update": {
+    "available": "PoseChrono v{{version}} 已可用！",
+    "install": "更新",
+    "download": "下载",
+    "downloading": "正在下载更新…",
+    "installing": "正在安装… 应用程序将重新启动。",
+    "error": "更新失败：{{error}}"
   }
 }

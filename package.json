@@ -1,6 +1,6 @@
 {
   "name": "posechrono-tooling",
-  "version": "1.0.6",
+  "version": "1.0.5",
   "private": true,
   "description": "Tooling scripts for PoseChrono release and verification",
   "scripts": {

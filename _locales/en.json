@@ -867,5 +867,13 @@
       "stop": "End session",
       "settings": "Home"
     }
+  },
+  "update": {
+    "available": "PoseChrono v{{version}} is available!",
+    "install": "Update",
+    "download": "Download",
+    "downloading": "Downloading update…",
+    "installing": "Installing… The application will restart.",
+    "error": "Update failed: {{error}}"
   }
 }
