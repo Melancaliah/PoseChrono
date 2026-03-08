@@ -164,8 +164,15 @@ async function openZoomDrawingMode(overlay, image) {
   zoomDrawingPreview.style.cssText =
     canvasStyle + "pointer-events: auto; cursor: crosshair;";
 
-  // Ajouter les canvas au wrapper
+  // Canvas remote (dessins distants)
+  const zoomDrawingRemote = document.createElement("canvas");
+  zoomDrawingRemote.id = "zoom-drawing-remote";
+  zoomDrawingRemote.className = "drawing-canvas";
+  zoomDrawingRemote.style.cssText = canvasStyle + "pointer-events: none;";
+
+  // Ajouter les canvas au wrapper (ordre : lightbox, remote, canvas, mesures, preview)
   drawingWrapper.appendChild(zoomDrawingLightbox);
+  drawingWrapper.appendChild(zoomDrawingRemote);
   drawingWrapper.appendChild(zoomDrawingCanvas);
   drawingWrapper.appendChild(zoomDrawingMeasures);
   drawingWrapper.appendChild(zoomDrawingPreview);
@@ -180,6 +187,7 @@ async function openZoomDrawingMode(overlay, image) {
   // Définir les dimensions des canvas (utilise naturalWidth/naturalHeight déjà déclarés plus haut)
   [
     zoomDrawingLightbox,
+    zoomDrawingRemote,
     zoomDrawingMeasures,
     zoomDrawingCanvas,
     zoomDrawingPreview,
@@ -204,6 +212,8 @@ async function openZoomDrawingMode(overlay, image) {
   drawingManager.zoom.measuresCtx = zoomDrawingMeasuresCtx;
   drawingManager.zoom.lightbox = zoomDrawingLightbox;
   drawingManager.zoom.lightboxCtx = zoomDrawingLightboxCtx;
+  drawingManager.zoom.remote = zoomDrawingRemote;
+  drawingManager.zoom.remoteCtx = zoomDrawingRemote.getContext("2d", { willReadFrequently: true });
   drawingManager.zoom.targetImage = overlay.querySelector("img");
   drawingManager.setContext('zoom');
 

@@ -843,6 +843,11 @@ function initPencilDrawing(coords) {
   drawingCtx.lineWidth = getActivePencilStrokeSize();
   drawingCtx.lineCap = "round";
   drawingCtx.lineJoin = "round";
+
+  // Sync remote drawing
+  if (remoteDrawState.sharingEnabled) {
+    remoteDrawSyncStartStroke(coords, "pencil", annotationStyle.color, getActivePencilStrokeSize());
+  }
 }
 
 /**
@@ -853,6 +858,11 @@ function initEraserDrawing(coords) {
   lastDrawnPoint = { ...coords };
   eraseAtDrawingPoint(coords.x, coords.y, drawingCtx, drawingCanvas);
   applyEraserShapeModeAlongStroke(coords, coords, drawingCtx, drawingCanvas);
+
+  // Sync remote drawing
+  if (remoteDrawState.sharingEnabled) {
+    remoteDrawSyncStartStroke(coords, "eraser", null, annotationStyle.size);
+  }
 }
 
 /**
@@ -884,7 +894,10 @@ function handleDrawingMouseDown(e) {
   // Shift+Alt+clic = mode suppression (bloquer toute création)
   if (e.shiftKey && e.altKey && !e.ctrlKey) {
     // Tenter la suppression si on est sur un segment
-    handleShiftClickDelete(coords);
+    const deleted = handleShiftClickDelete(coords);
+    if (deleted && remoteDrawState.sharingEnabled) {
+      remoteDrawSyncCanvasSnapshot();
+    }
     // Dans tous les cas, ne PAS créer de segment quand Shift+Alt est maintenu
     return;
   }
@@ -1201,6 +1214,10 @@ function handlePencilMove(coords, ctx, previewCtx, previewCanvas) {
     ctx.beginPath();
     ctx.moveTo(coords.x, coords.y);
     lastDrawnPoint = { ...coords };
+    
+    if (remoteDrawState.sharingEnabled) {
+      remoteDrawSyncBufferPoint(coords);
+    }
     stabilizerBuffer = [coords];
     wasShiftPressed = false;
     clearCanvas(previewCtx, previewCanvas);
@@ -1231,6 +1248,10 @@ function handlePencilMove(coords, ctx, previewCtx, previewCanvas) {
       ctx.beginPath();
       ctx.moveTo(midX, midY);
       lastDrawnPoint = { ...smoothed };
+
+      if (remoteDrawState.sharingEnabled) {
+        remoteDrawSyncBufferPoint(smoothed);
+      }
 
       // Afficher un aperçu de la "corde" entre le point lissé et la souris
       // Seulement si le lissage est > 60%
@@ -1287,6 +1308,10 @@ function handlePencilMove(coords, ctx, previewCtx, previewCanvas) {
       ctx.moveTo(coords.x, coords.y);
     }
     lastDrawnPoint = { ...coords };
+    
+    if (remoteDrawState.sharingEnabled) {
+      remoteDrawSyncBufferPoint(coords);
+    }
   }
 }
 
@@ -1317,6 +1342,11 @@ function handleEraserMove(coords, ctx, canvas, previewCtx, previewCanvas) {
     eraseLineBetweenPoints(lastDrawnPoint, coords, ctx, canvas);
     applyEraserShapeModeAlongStroke(lastDrawnPoint, coords, ctx, canvas);
     lastDrawnPoint = { ...coords };
+    
+    if (remoteDrawState.sharingEnabled) {
+      remoteDrawSyncBufferPoint(coords);
+    }
+    
     wasShiftPressed = false;
     clearCanvas(previewCtx, previewCanvas);
     return;
@@ -1335,6 +1365,10 @@ function handleEraserMove(coords, ctx, canvas, previewCtx, previewCanvas) {
     applyEraserShapeModeAlongStroke(coords, coords, ctx, canvas);
   }
   lastDrawnPoint = { ...coords };
+  
+  if (remoteDrawState.sharingEnabled) {
+    remoteDrawSyncBufferPoint(coords);
+  }
 }
 
 function drawArrowHeadLocal(ctx, from, to, headLength) {
@@ -2856,12 +2890,16 @@ function handleDrawingMouseUp(e = null) {
 
   isDrawing = false;
 
+  // isDrawing est passé à false, mais nous terminons la logique locale avant
+  // de fermer le stroke pour le sync distant (cas des lignes droites shift)
+
   if (isDraggingShapeControl) {
     isDraggingShapeControl = false;
     dragShapeControlLine = null;
     resetDragShapeSession();
     scheduleDrawingMeasurementsRedraw();
     saveDrawingHistory();
+    if (remoteDrawState.sharingEnabled) remoteDrawSyncCanvasSnapshot();
     startPoint = null;
     hideDrawingEditHud();
 
@@ -2877,6 +2915,7 @@ function handleDrawingMouseUp(e = null) {
     resetDragShapeSession();
     scheduleDrawingMeasurementsRedraw();
     saveDrawingHistory();
+    if (remoteDrawState.sharingEnabled) remoteDrawSyncCanvasSnapshot();
     startPoint = null;
     hideDrawingEditHud();
 
@@ -2892,6 +2931,7 @@ function handleDrawingMouseUp(e = null) {
     resetDragShapeSession();
   scheduleDrawingMeasurementsRedraw();
     saveDrawingHistory();
+    if (remoteDrawState.sharingEnabled) remoteDrawSyncCanvasSnapshot();
     startPoint = null;
     hideDrawingEditHud();
 
@@ -2908,6 +2948,7 @@ function handleDrawingMouseUp(e = null) {
     dragLabelMeasurement = null;
     redrawDrawingMeasurements();
     saveDrawingHistory();
+    if (remoteDrawState.sharingEnabled) remoteDrawSyncCanvasSnapshot();
     startPoint = null;
     hideDrawingEditHud();
 
@@ -2930,6 +2971,12 @@ function handleDrawingMouseUp(e = null) {
       drawingCtx.lineWidth = getActivePencilStrokeSize();
       drawingCtx.lineCap = "round";
       drawingCtx.stroke();
+      
+      if (remoteDrawState.sharingEnabled) {
+        remoteDrawSyncBufferPoint(lineOrigin);
+        remoteDrawSyncBufferPoint(endPoint);
+      }
+      
       // Mettre à jour lastDrawnPoint pour une éventuelle continuation
       lastDrawnPoint = { ...endPoint };
     }
@@ -2945,6 +2992,12 @@ function handleDrawingMouseUp(e = null) {
     if (lineOrigin) {
       eraseLineBetweenPoints(lineOrigin, endPoint, drawingCtx, drawingCanvas);
       applyEraserShapeModeAlongStroke(lineOrigin, endPoint, drawingCtx, drawingCanvas);
+      
+      if (remoteDrawState.sharingEnabled) {
+        remoteDrawSyncBufferPoint(lineOrigin);
+        remoteDrawSyncBufferPoint(endPoint);
+      }
+      
       lastDrawnPoint = { ...endPoint };
     }
     // Effacer la prévisualisation
@@ -2979,6 +3032,8 @@ function handleDrawingMouseUp(e = null) {
       !!keysState.shift,
       !!keysState.ctrl,
     );
+    // Capturer le nombre de shapes avant pour sync
+    const _shapesBeforeCount = measurementLines.length;
     // Dessiner la forme finale avec les contraintes
     drawFinalShapeConstrained(
       startPoint,
@@ -2987,6 +3042,10 @@ function handleDrawingMouseUp(e = null) {
       keysState.shift,
       keysState.alt,
     );
+    // Sync remote drawing — envoyer les nouvelles formes
+    if (remoteDrawState.sharingEnabled && measurementLines.length > _shapesBeforeCount) {
+      remoteDrawSyncShapeAdd(measurementLines.slice(_shapesBeforeCount));
+    }
     // Effacer la prévisualisation
     if (drawingPreviewCtx && drawingPreview) {
       clearCanvas(drawingPreviewCtx, drawingPreview);
@@ -3043,6 +3102,14 @@ function handleDrawingMouseUp(e = null) {
   if (currentTool === "pencil" && lastDrawnPoint && !keysState.shift) {
     drawingCtx.lineTo(lastDrawnPoint.x, lastDrawnPoint.y);
     drawingCtx.stroke();
+  }
+  
+  // Sync remote drawing — terminer le stroke sortant (pencil/eraser)
+  remoteDrawSyncEndStroke();
+
+  // Gomme : envoyer un snapshot complet pour propager les effacements de formes
+  if (currentTool === "eraser" && remoteDrawState.sharingEnabled) {
+    remoteDrawSyncCanvasSnapshot();
   }
 
   // Cacher l'info de mesure

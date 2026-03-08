@@ -304,14 +304,29 @@ ul {
   color: var(--text-secondary);
   cursor: pointer;
   border-radius: 6px;
+  position: relative;
+  z-index: 1;
 }
 .mode-btn:hover {
   color: white;
 }
 
 .mode-btn.active {
-  background: #3a3a3a;
+  background: transparent;
   color: var(--text-primary);
+}
+
+.mode-indicator {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  left: 0;
+  width: 25%;
+  background: #3a3a3a;
+  border-radius: 6px;
+  transition: transform var(--transition-slide);
+  z-index: 0;
+  pointer-events: none;
 }
 
 .add-step-btn {
@@ -1407,16 +1422,22 @@ body.dragging-active .step-item * {
   z-index: 1;
 }
 
-#drawing-canvas {
+#drawing-remote {
   z-index: 2;
+  pointer-events: none;
+  opacity: var(--remote-drawing-opacity, 0.6);
 }
 
-#drawing-measures {
+#drawing-canvas {
   z-index: 3;
 }
 
-#drawing-preview {
+#drawing-measures {
   z-index: 4;
+}
+
+#drawing-preview {
+  z-index: 5;
   pointer-events: auto;
   cursor: crosshair;
   touch-action: none;
@@ -1427,19 +1448,266 @@ body.dragging-active .step-item * {
   z-index: 1;
 }
 
-#zoom-drawing-canvas {
+#zoom-drawing-remote {
   z-index: 2;
+  pointer-events: none;
+  opacity: var(--remote-drawing-opacity, 0.6);
 }
 
-#zoom-drawing-measures {
+#zoom-drawing-canvas {
   z-index: 3;
 }
 
-#zoom-drawing-preview {
+#zoom-drawing-measures {
   z-index: 4;
+}
+
+#zoom-drawing-preview {
+  z-index: 5;
   pointer-events: auto;
   cursor: crosshair;
   touch-action: none;
+}
+
+/* Drawing share button — active state (no pulse) */
+#drawing-share-btn.sharing-active {
+  color: #22c55e;
+}
+
+/* Context menu styles for remote draw */
+.context-menu-section-label {
+  padding: 4px 12px 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.5);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.context-menu-item--info {
+  padding: 3px 12px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.7);
+  cursor: default;
+}
+
+.context-menu-item--muted {
+  padding: 6px 12px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.35);
+  font-style: italic;
+  cursor: default;
+}
+
+/* ── Remote Draw Popover ── */
+.remote-draw-popover {
+  position: fixed;
+  visibility: hidden; /* Shown after positioning in rAF */
+  z-index: 10200;
+  background: #1e1e1efa;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  padding: 0;
+  min-width: 230px;
+  max-width: 280px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  font-family: inherit;
+  color: #e0e0e0;
+  font-size: 13px;
+  overflow: hidden;
+}
+
+.remote-draw-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px 6px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  cursor: move;
+  user-select: none;
+}
+
+.remote-draw-popover-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.remote-draw-popover-title svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.remote-draw-popover-close {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  transition:
+    color 0.15s,
+    background 0.15s;
+}
+
+.remote-draw-popover-close:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.remote-draw-popover-row {
+  padding: 7px 12px;
+}
+
+/* Compact share toggle button inside popover (thinner option-toggle-btn) */
+.remote-draw-popover-share-toggle {
+  width: 100%;
+  min-height: unset;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  gap: 6px;
+  justify-content: center;
+}
+
+.remote-draw-popover-share-toggle svg {
+  width: 15px;
+  height: 15px;
+}
+
+.remote-draw-popover-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.remote-draw-popover-slider-label {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.55);
+  white-space: nowrap;
+}
+
+.remote-draw-popover-slider {
+  flex: 1;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+
+.remote-draw-popover-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  border: 2px solid #1e1e1e;
+  cursor: pointer;
+}
+
+.remote-draw-popover-slider-value {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+  min-width: 32px;
+  text-align: right;
+}
+
+.remote-draw-popover-sep {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.08);
+  margin: 2px 0;
+}
+
+.remote-draw-popover-section {
+  padding: 4px 12px 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.45);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+/* ── Sharer rows (per-participant eye toggle) ── */
+.remote-draw-popover-sharer-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px 5px 14px;
+  cursor: pointer;
+  transition: background 0.12s;
+  border-radius: 4px;
+}
+
+.remote-draw-popover-sharer-row:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.remote-draw-popover-sharer-icon {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.remote-draw-popover-sharer-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.remote-draw-popover-sharer-name {
+  flex: 1;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.75);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remote-draw-popover-sharer-eye {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--color-primary);
+  transition: color 0.15s;
+}
+
+.remote-draw-popover-sharer-eye svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* Hidden state: greyed out, eye-barred */
+.remote-draw-popover-sharer-row--hidden .remote-draw-popover-sharer-icon {
+  color: rgba(255, 255, 255, 0.2);
+}
+
+.remote-draw-popover-sharer-row--hidden .remote-draw-popover-sharer-name {
+  color: rgba(255, 255, 255, 0.3);
+  text-decoration: line-through;
+}
+
+.remote-draw-popover-sharer-row--hidden .remote-draw-popover-sharer-eye {
+  color: rgba(255, 255, 255, 0.25);
+}
+
+.remote-draw-popover-muted {
+  padding: 6px 12px 8px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.3);
+  font-style: italic;
 }
 
 /* Drawing toolbar (standalone, outside modal) */
@@ -1447,7 +1715,9 @@ body.dragging-active .step-item * {
 #drawing-toolbar {
   z-index: 100; /* Au-dessus du contenu, en dessous des modals (1000) */
   left: 20px; /* Position légèrement différente */
-  top: calc(50% + 60px); /* Décalé vers le bas pour éviter les badges (PAUSE/DESSIN) */
+  top: calc(
+    50% + 60px
+  ); /* Décalé vers le bas pour éviter les badges (PAUSE/DESSIN) */
 }
 
 #drawing-toolbar.hidden {

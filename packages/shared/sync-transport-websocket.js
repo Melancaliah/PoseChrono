@@ -52,11 +52,14 @@
 
     const requireTls = options.requireTls === true;
     const urlProtocol = (targetUrl.split("://")[0] || "").toLowerCase();
-    if (requireTls && urlProtocol !== "wss") {
+    // Localhost + réseau privé (LAN) sont exemptés de TLS — pas de risque d'interception
+    const isLocalOrPrivate =
+      /^wss?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})(:|\/|$)/i.test(targetUrl);
+    if (requireTls && urlProtocol !== "wss" && !isLocalOrPrivate) {
       logger("[SyncWS] TLS required but URL uses " + urlProtocol + "://");
       throw new Error("websocket-tls-required");
     }
-    if (!requireTls && urlProtocol === "ws") {
+    if (!requireTls && urlProtocol === "ws" && !isLocalOrPrivate) {
       logger("[SyncWS] Warning: using unencrypted ws:// — consider wss:// for production");
     }
 
@@ -267,6 +270,7 @@
         ws.onerror = (event) => {
           logger("[SyncWS] socket error", event);
           if (!settled) {
+            settled = true;
             connectPromise = null;
             reject(new Error("websocket-connect-failed"));
           }
@@ -298,7 +302,8 @@
 
     async function request(action, payload = {}) {
       await ensureConnected();
-      const requestId = String(nextRequestId++);
+      const requestId = String(nextRequestId);
+      nextRequestId = (nextRequestId % Number.MAX_SAFE_INTEGER) + 1;
       const sentAt = now();
 
       return new Promise((resolve, reject) => {
@@ -408,6 +413,9 @@
       updateParticipantState(payload) {
         return request("updateParticipantState", payload || {});
       },
+      updateParticipantProfile(payload) {
+        return request("updateParticipantProfile", payload || {});
+      },
       uploadSessionPack(payload) {
         return request("uploadSessionPack", payload || {});
       },
@@ -440,6 +448,9 @@
       },
       sendRtcSignal(payload) {
         return request("sendRtcSignal", payload || {});
+      },
+      sendDrawingSync(payload) {
+        return request("sendDrawingSync", payload || {});
       },
       getRoomSnapshot(sessionCode) {
         return request("getRoomSnapshot", {

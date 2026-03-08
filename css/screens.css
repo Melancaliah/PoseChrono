@@ -220,6 +220,11 @@
   align-items: center;
 }
 
+.desktop-source-item-icon--files {
+  color: var(--color-primary);
+  opacity: 0.7;
+}
+
 .desktop-source-item-info {
   flex: 1;
   min-width: 0;
@@ -326,6 +331,7 @@
 
 .mode-selector {
   display: flex;
+  position: relative;
   border-radius: 8px;
   padding: 4px;
   margin-bottom: 20px;
@@ -363,30 +369,72 @@
 
 .settings-modes-container {
   position: relative;
-  transition: min-height 0.35s ease-in-out;
+  transition: height var(--transition-slide);
   overflow: hidden;
 }
 
-#mode-classique-settings,
-#mode-custom-settings {
+/* --- Slide animation pour panels mode --- */
+.settings-modes-container > .setting-group {
   width: 100%;
   transition:
-    opacity 0.35s cubic-bezier(0.4, 0, 0.2, 1),
-    transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
-  transform-origin: center top;
+    opacity var(--transition-slide),
+    transform var(--transition-slide);
+  will-change: transform, opacity;
 }
 
-#mode-classique-settings.fade-in,
-#mode-custom-settings.fade-in {
+/* Panel actif (visible, position naturelle) */
+.slide-active {
   opacity: 1;
-  transform: translateY(0) scale(1);
+  transform: translateX(0);
+  position: relative;
+  z-index: 1;
+  pointer-events: all;
 }
 
-#mode-classique-settings.fade-out,
-#mode-custom-settings.fade-out {
+/* Sortie vers la gauche */
+.slide-out-left {
   opacity: 0;
-  transform: translateY(-15px) scale(0.98);
+  transform: translateX(-30%);
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 0;
   pointer-events: none;
+}
+
+/* Sortie vers la droite */
+.slide-out-right {
+  opacity: 0;
+  transform: translateX(30%);
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+/* Position de départ : arrive depuis la droite (transition: none pour placement instantané) */
+.slide-ready-right {
+  opacity: 0;
+  transform: translateX(30%);
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1;
+  pointer-events: none;
+  transition: none;
+}
+
+/* Position de départ : arrive depuis la gauche */
+.slide-ready-left {
+  opacity: 0;
+  transform: translateX(-30%);
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1;
+  pointer-events: none;
+  transition: none;
 }
 
 #mode-classique-settings.mode-frozen,
@@ -398,30 +446,6 @@
   transition:
     opacity var(--transition-normal),
     filter var(--transition-normal);
-}
-
-.fade-out {
-  opacity: 0;
-  transform: translateY(10px);
-  position: absolute;
-  top: 0;
-  left: 0;
-  pointer-events: none;
-  transition:
-    opacity var(--transition-normal),
-    transform var(--transition-normal);
-  z-index: 0;
-}
-
-.fade-in {
-  opacity: 1;
-  transform: translateY(0);
-  position: relative;
-  transition:
-    opacity var(--transition-normal),
-    transform var(--transition-normal);
-  z-index: 1;
-  pointer-events: all;
 }
 
 #mode-custom-settings {

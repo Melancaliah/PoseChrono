@@ -12,6 +12,17 @@ const {
   shell,
 } = require("electron");
 
+const {
+  isPathAllowed,
+  isValidStorageKey,
+  sanitizeDialogOptions,
+  isAllowedUpdateUrl,
+  filterAllowedPaths,
+  ALLOWED_MESSAGEBOX_KEYS,
+  ALLOWED_OPEN_DIALOG_KEYS,
+  ALLOWED_SAVE_DIALOG_KEYS,
+} = require("./ipc-validators");
+
 const APP_ROOT = path.resolve(__dirname, "..", "..", "..");
 const ROOT_WEB_ENTRY = path.join(APP_ROOT, "index.html");
 const BUNDLED_WEB_ENTRY = path.join(__dirname, "..", "web", "index.html");
@@ -24,6 +35,8 @@ const STORAGE_LEGACY_FILE_NAME = "posechrono-desktop-storage.json";
 const STORAGE_DIR_NAME = "storage";
 const DEV_MIGRATION_SENTINEL_FILE = ".posechrono-dev-migration-v1";
 const DESKTOP_MEDIA_FOLDER_KEY = "desktop.mediaFolders";
+const DESKTOP_MEDIA_FILES_KEY = "desktop.mediaFiles";
+const INDIVIDUAL_FILES_VIRTUAL_FOLDER_ID = "desktop-files:individual";
 const UPDATE_CHECK_URL =
   "https://api.github.com/repos/Melancaliah/PoseChrono/releases/latest";
 const DESKTOP_WINDOW_BOUNDS_KEY = "desktop.windowBounds";
@@ -198,7 +211,27 @@ async function startLocalSyncRelay() {
   }
   try {
     const resolvedRelayPath = require.resolve(relayScript);
+    // Si le module n'est pas en cache, le serveur n'est pas en cours.
+    // Tenter de tuer un éventuel serveur orphelin (lancé hors de ce process)
+    // avant de démarrer proprement.
     if (!require.cache[resolvedRelayPath]) {
+      try {
+        const http = require("http");
+        await new Promise((resolve) => {
+          const req = http.request(
+            "http://127.0.0.1:8787/shutdown",
+            { method: "POST", timeout: 1000 },
+            (res) => {
+              res.resume();
+              console.log("[sync-relay] killed orphaned server on port 8787");
+              setTimeout(resolve, 600);
+            },
+          );
+          req.on("error", () => resolve()); // pas de serveur — normal
+          req.on("timeout", () => { req.destroy(); resolve(); });
+          req.end();
+        });
+      } catch (_) {}
       require(resolvedRelayPath);
     }
     localSyncRelayProcess = {
@@ -542,6 +575,24 @@ async function setConfiguredMediaFolders(folderPaths) {
   return normalized;
 }
 
+async function getConfiguredMediaFiles() {
+  const value = await getPreference(DESKTOP_MEDIA_FILES_KEY);
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((fp) => typeof fp === "string" && fp.trim())
+    .map((fp) => path.resolve(fp.trim()))
+    .filter((fp, idx, arr) => arr.indexOf(fp) === idx);
+}
+
+async function setConfiguredMediaFiles(filePaths) {
+  const normalized = (Array.isArray(filePaths) ? filePaths : [])
+    .filter((fp) => typeof fp === "string" && fp.trim())
+    .map((fp) => path.resolve(fp.trim()))
+    .filter((fp, idx, arr) => arr.indexOf(fp) === idx);
+  await setPreference(DESKTOP_MEDIA_FILES_KEY, normalized);
+  return normalized;
+}
+
 
 async function scanMediaFilesInFolder(folderPath, folderId, outItems) {
   let entries = [];
@@ -591,10 +642,20 @@ async function scanMediaItems({ folderIds = null } = {}) {
       ? allFolders.filter((folder) => folderIds.includes(folder.id))
       : allFolders;
 
-  const key = folders.map((folder) => folder.path).sort().join("|");
+  // Fichiers individuels — toujours inclus (pas de filtre par folderIds)
+  const individualFiles = await getConfiguredMediaFiles();
+
+  // Clé cache = dossiers + fichiers individuels
+  const key = [
+    ...folders.map((folder) => folder.path),
+    ...individualFiles,
+  ]
+    .sort()
+    .join("|");
   if (key && scanCache.key === key && scanCache.items.length > 0) {
     logBootTraceMain("scanMediaItems.cache-hit", {
       folders: folders.length,
+      individualFiles: individualFiles.length,
       items: scanCache.items.length,
       durationMs: Date.now() - scanStartMs,
     });
@@ -604,6 +665,30 @@ async function scanMediaItems({ folderIds = null } = {}) {
   const items = [];
   for (const folder of folders) {
     await scanMediaFilesInFolder(folder.path, folder.id, items);
+  }
+
+  // Ajouter les fichiers individuels
+  for (const filePath of individualFiles) {
+    const ext = path.extname(filePath).slice(1).toLowerCase();
+    if (!MEDIA_EXTENSIONS.has(ext)) continue;
+    try {
+      await fsp.access(filePath, fs.constants.R_OK);
+    } catch (_) {
+      continue; // Fichier inaccessible — ignorer silencieusement
+    }
+    items.push({
+      id: toItemId(filePath),
+      name: path.basename(filePath, path.extname(filePath)),
+      fileName: path.basename(filePath),
+      filePath,
+      path: filePath,
+      file: filePath,
+      ext,
+      folderId: INDIVIDUAL_FILES_VIRTUAL_FOLDER_ID,
+      tags: [],
+      thumbnailURL: "",
+      thumbnail: "",
+    });
   }
 
   items.sort((a, b) => {
@@ -621,6 +706,7 @@ async function scanMediaItems({ folderIds = null } = {}) {
   scanCache = { key, byId, items: uniqueItems };
   logBootTraceMain("scanMediaItems.full-scan", {
     folders: folders.length,
+    individualFiles: individualFiles.length,
     items: uniqueItems.length,
     durationMs: Date.now() - scanStartMs,
   });
@@ -629,6 +715,30 @@ async function scanMediaItems({ folderIds = null } = {}) {
 
 function getBrowserWindowFromEvent(event) {
   return BrowserWindow.fromWebContents(event.sender) || mainWindow;
+}
+
+/**
+ * Retourne les dossiers racine autorisés pour les opérations fichier IPC.
+ * Inclut : userData, dossiers médias configurés, fichiers médias individuels.
+ */
+async function getAllowedFileRoots() {
+  const roots = [app.getPath("userData")];
+  try {
+    const folders = await getConfiguredMediaFolders();
+    for (const f of folders) {
+      if (f.path) roots.push(f.path);
+    }
+    const files = await getConfiguredMediaFiles();
+    // Ajouter les dossiers parents des fichiers individuels
+    const parentDirs = new Set();
+    for (const filePath of files) {
+      if (typeof filePath === "string") parentDirs.add(path.dirname(filePath));
+    }
+    for (const dir of parentDirs) roots.push(dir);
+  } catch (_) {
+    /* keep at least userData */
+  }
+  return roots;
 }
 
 function registerIpcHandlers() {
@@ -673,44 +783,57 @@ function registerIpcHandlers() {
     return !!win?.isAlwaysOnTop();
   });
 
-  ipcMain.handle("posechrono:preferences:get", async (_, key) =>
-    getPreference(key),
-  );
+  ipcMain.handle("posechrono:preferences:get", async (_, key) => {
+    if (!isValidStorageKey(key)) return undefined;
+    return getPreference(key);
+  });
 
   ipcMain.handle("posechrono:preferences:set", async (_, key, value) => {
+    if (!isValidStorageKey(key)) {
+      console.warn("[IPC] preferences:set blocked — invalid key:", key);
+      return false;
+    }
     await setPreference(key, value);
     return true;
   });
 
   ipcMain.handle("posechrono:storage:getJson", async (_, key) => {
+    if (!isValidStorageKey(key)) return { found: false, value: null };
     return readStorageEntry(key);
   });
 
   ipcMain.handle("posechrono:storage:setJson", async (_, key, value) => {
+    if (!isValidStorageKey(key)) {
+      console.warn("[IPC] storage:setJson blocked — invalid key:", key);
+      return false;
+    }
     return writeStorageEntry(key, value);
   });
 
   ipcMain.handle("posechrono:storage:remove", async (_, key) => {
+    if (!isValidStorageKey(key)) return false;
     return removeStorageEntry(key);
   });
 
   ipcMain.handle("posechrono:dialogs:showMessageBox", async (event, options) => {
     const win = getBrowserWindowFromEvent(event);
-    return dialog.showMessageBox(win, options || {});
+    const safe = sanitizeDialogOptions(options, ALLOWED_MESSAGEBOX_KEYS);
+    return dialog.showMessageBox(win, safe);
   });
 
   ipcMain.handle("posechrono:dialogs:showOpenDialog", async (event, options) => {
     const win = getBrowserWindowFromEvent(event);
-    const result = await dialog.showOpenDialog(win, options || {});
+    const safe = sanitizeDialogOptions(options, ALLOWED_OPEN_DIALOG_KEYS);
+    const result = await dialog.showOpenDialog(win, safe);
 
     if (
       result &&
       !result.canceled &&
       Array.isArray(result.filePaths) &&
       result.filePaths.length > 0 &&
-      options &&
-      Array.isArray(options.properties) &&
-      options.properties.includes("openDirectory")
+      safe &&
+      Array.isArray(safe.properties) &&
+      safe.properties.includes("openDirectory")
     ) {
       await setConfiguredMediaFolders(result.filePaths);
       scanCache = { key: "", byId: new Map(), items: [] };
@@ -721,7 +844,8 @@ function registerIpcHandlers() {
 
   ipcMain.handle("posechrono:items:getSelected", async () => {
     const folders = await getConfiguredMediaFolders();
-    if (!folders.length) return [];
+    const individualFiles = await getConfiguredMediaFiles();
+    if (!folders.length && !individualFiles.length) return [];
     return scanMediaItems({
       folderIds: folders.map((folder) => folder.id),
     });
@@ -756,9 +880,39 @@ function registerIpcHandlers() {
     return folders;
   });
 
+  // ---- Individual files management ----
+
+  ipcMain.handle("posechrono:files:browseAndAdd", async (event) => {
+    const win = getBrowserWindowFromEvent(event);
+    const result = await dialog.showOpenDialog(win, {
+      title: "Add media files",
+      properties: ["openFile", "multiSelections"],
+      filters: [{ name: "Media", extensions: [...MEDIA_EXTENSIONS] }],
+    });
+    if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
+      return null;
+    }
+    const existing = await getConfiguredMediaFiles();
+    const merged = [...existing, ...result.filePaths];
+    const files = await setConfiguredMediaFiles(merged);
+    scanCache = { key: "", byId: new Map(), items: [] };
+    return files;
+  });
+
+  ipcMain.handle("posechrono:files:removeAll", async () => {
+    await setConfiguredMediaFiles([]);
+    scanCache = { key: "", byId: new Map(), items: [] };
+    return [];
+  });
+
+  ipcMain.handle("posechrono:files:getSelected", async () => {
+    return getConfiguredMediaFiles();
+  });
+
   ipcMain.handle("posechrono:items:get", async (_, query) => {
     const folders = await getConfiguredMediaFolders();
-    if (!folders.length) return [];
+    const individualFiles = await getConfiguredMediaFiles();
+    if (!folders.length && !individualFiles.length) return [];
     const folderIds =
       query && Array.isArray(query.folders) ? query.folders : null;
     return scanMediaItems({ folderIds });
@@ -819,26 +973,35 @@ function registerIpcHandlers() {
 
   ipcMain.handle("posechrono:clipboard:copyFiles", async (_, paths) => {
     if (!Array.isArray(paths) || !paths.length) return false;
-    const valid = paths.filter((p) => typeof p === "string" && p.trim());
+    const allowedRoots = await getAllowedFileRoots();
+    const valid = filterAllowedPaths(paths, allowedRoots);
     if (!valid.length) return false;
     clipboard.writeText(valid.join("\n"));
     return true;
   });
 
   ipcMain.handle("posechrono:shell:showItemInFolder", async (_, filePath) => {
-    if (typeof filePath === "string" && filePath.trim()) {
-      shell.showItemInFolder(path.resolve(filePath));
-      return true;
+    if (typeof filePath !== "string" || !filePath.trim()) return false;
+    const resolved = path.resolve(filePath);
+    const allowedRoots = await getAllowedFileRoots();
+    if (!isPathAllowed(resolved, allowedRoots)) {
+      console.warn("[IPC] shell:showItemInFolder blocked — path outside allowed roots:", resolved);
+      return false;
     }
-    return false;
+    shell.showItemInFolder(resolved);
+    return true;
   });
 
   ipcMain.handle("posechrono:shell:openPath", async (_, filePath) => {
-    if (typeof filePath === "string" && filePath.trim()) {
-      await shell.openPath(path.resolve(filePath));
-      return true;
+    if (typeof filePath !== "string" || !filePath.trim()) return false;
+    const resolved = path.resolve(filePath);
+    const allowedRoots = await getAllowedFileRoots();
+    if (!isPathAllowed(resolved, allowedRoots)) {
+      console.warn("[IPC] shell:openPath blocked — path outside allowed roots:", resolved);
+      return false;
     }
-    return false;
+    await shell.openPath(resolved);
+    return true;
   });
 
   ipcMain.handle("posechrono:notification:show", async (_, payload) => {
@@ -851,6 +1014,38 @@ function registerIpcHandlers() {
       return true;
     }
     return false;
+  });
+
+  ipcMain.handle("posechrono:file:saveBuffer", async (_, filePath, base64Data) => {
+    if (
+      typeof filePath !== "string" ||
+      !filePath.trim() ||
+      typeof base64Data !== "string"
+    ) {
+      return false;
+    }
+    try {
+      const resolved = path.resolve(filePath);
+      const allowedRoots = await getAllowedFileRoots();
+      if (!isPathAllowed(resolved, allowedRoots)) {
+        console.warn("[IPC] file:saveBuffer blocked — path outside allowed roots:", resolved);
+        return false;
+      }
+      const dir = path.dirname(resolved);
+      await fsp.mkdir(dir, { recursive: true });
+      const buffer = Buffer.from(base64Data, "base64");
+      await fsp.writeFile(resolved, buffer);
+      return true;
+    } catch (err) {
+      console.error("[desktop] file:saveBuffer error:", err);
+      return false;
+    }
+  });
+
+  ipcMain.handle("posechrono:dialogs:showSaveDialog", async (event, options) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const safe = sanitizeDialogOptions(options, ALLOWED_SAVE_DIALOG_KEYS);
+    return dialog.showSaveDialog(win || BrowserWindow.getFocusedWindow(), safe);
   });
 
   ipcMain.handle("posechrono:tag:get", async () => []);
@@ -866,11 +1061,12 @@ function registerIpcHandlers() {
   });
 
   ipcMain.handle("posechrono:update:install", async (_, url) => {
-    if (typeof url === "string" && url.startsWith("https://")) {
-      downloadAndInstallUpdate(url).catch(() => {});
-      return true;
+    if (!isAllowedUpdateUrl(url)) {
+      console.warn("[IPC] update:install blocked — URL not in allowed domains:", url);
+      return false;
     }
-    return false;
+    downloadAndInstallUpdate(url).catch(() => {});
+    return true;
   });
 }
 
@@ -916,10 +1112,19 @@ async function createMainWindow() {
 
   mainWindow = new BrowserWindow({
     ...windowOptions,
+    show: false,
   });
   logBootTraceMain("window.created", {
     width: windowOptions.width,
     height: windowOptions.height,
+  });
+
+  mainWindow.once("ready-to-show", () => {
+    logBootTraceMain("window.ready-to-show");
+    mainWindow.show();
+    if (isMaximized) {
+      mainWindow.maximize();
+    }
   });
 
   mainWindow.on("move", () => {
@@ -1006,10 +1211,6 @@ async function createMainWindow() {
   console.log(`[desktop] Loading web entry: ${entryFile}`);
   logBootTraceMain("loadFile.begin", entryFile);
   mainWindow.loadFile(entryFile);
-
-  if (isMaximized) {
-    mainWindow.maximize();
-  }
 }
 
 // ── Update checker & installer ──────────────────────────────────────
@@ -1156,10 +1357,27 @@ async function downloadAndInstallUpdate(url) {
 app.whenReady().then(async () => {
   logBootTraceMain("app.whenReady");
   migrateLegacyDevUserDataIfNeeded();
+  const prefsCacheWarm = readPrefsFile();
   registerIpcHandlers();
   logBootTraceMain("ipc.handlers.registered");
+  await prefsCacheWarm;
+  logBootTraceMain("prefs.cache.warmed");
   await createMainWindow();
   logBootTraceMain("createMainWindow.done");
+
+  // Pre-warm media scan cache in background
+  setImmediate(async () => {
+    try {
+      const folders = await getConfiguredMediaFolders();
+      const files = await getConfiguredMediaFiles();
+      if (folders.length || files.length) {
+        await scanMediaItems({});
+        logBootTraceMain("media.cache.warm", {
+          items: scanCache.items.length,
+        });
+      }
+    } catch (_) {}
+  });
 
   // Check for updates after a short delay to not slow down startup
   setTimeout(() => checkForUpdates().catch(() => {}), 5000);

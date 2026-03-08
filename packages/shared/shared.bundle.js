@@ -2675,11 +2675,14 @@
 
     const requireTls = options.requireTls === true;
     const urlProtocol = (targetUrl.split("://")[0] || "").toLowerCase();
-    if (requireTls && urlProtocol !== "wss") {
+    // Localhost + réseau privé (LAN) sont exemptés de TLS — pas de risque d'interception
+    const isLocalOrPrivate =
+      /^wss?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})(:|\/|$)/i.test(targetUrl);
+    if (requireTls && urlProtocol !== "wss" && !isLocalOrPrivate) {
       logger("[SyncWS] TLS required but URL uses " + urlProtocol + "://");
       throw new Error("websocket-tls-required");
     }
-    if (!requireTls && urlProtocol === "ws") {
+    if (!requireTls && urlProtocol === "ws" && !isLocalOrPrivate) {
       logger("[SyncWS] Warning: using unencrypted ws:// — consider wss:// for production");
     }
 
@@ -2890,6 +2893,7 @@
         ws.onerror = (event) => {
           logger("[SyncWS] socket error", event);
           if (!settled) {
+            settled = true;
             connectPromise = null;
             reject(new Error("websocket-connect-failed"));
           }
@@ -2921,7 +2925,8 @@
 
     async function request(action, payload = {}) {
       await ensureConnected();
-      const requestId = String(nextRequestId++);
+      const requestId = String(nextRequestId);
+      nextRequestId = (nextRequestId % Number.MAX_SAFE_INTEGER) + 1;
       const sentAt = now();
 
       return new Promise((resolve, reject) => {
@@ -3031,6 +3036,9 @@
       updateParticipantState(payload) {
         return request("updateParticipantState", payload || {});
       },
+      updateParticipantProfile(payload) {
+        return request("updateParticipantProfile", payload || {});
+      },
       uploadSessionPack(payload) {
         return request("uploadSessionPack", payload || {});
       },
@@ -3063,6 +3071,9 @@
       },
       sendRtcSignal(payload) {
         return request("sendRtcSignal", payload || {});
+      },
+      sendDrawingSync(payload) {
+        return request("sendDrawingSync", payload || {});
       },
       getRoomSnapshot(sessionCode) {
         return request("getRoomSnapshot", {
@@ -3205,6 +3216,7 @@
     let localMediaUploadedBy = "";
     let localMediaTotalBytes = 0;
     const latencySamples = [];
+    let latencyHead = 0;
 
     function normalizeSessionCode(input) {
       const normalized = String(input || "")
@@ -3271,6 +3283,7 @@
 
     function clearLatencySamples() {
       latencySamples.length = 0;
+      latencyHead = 0;
     }
 
     function computePercentile(values, percentile) {
@@ -3287,9 +3300,11 @@
     function recordLatencySample(ms) {
       const value = Number(ms);
       if (!Number.isFinite(value) || value < 0) return;
-      latencySamples.push(value);
-      if (latencySamples.length > latencyWindowSize) {
-        latencySamples.splice(0, latencySamples.length - latencyWindowSize);
+      if (latencySamples.length < latencyWindowSize) {
+        latencySamples.push(value);
+      } else {
+        latencySamples[latencyHead] = value;
+        latencyHead = (latencyHead + 1) % latencyWindowSize;
       }
       if (!enableLatencyLogs) return;
       if (latencySamples.length % latencyLogEvery !== 0) return;
@@ -3925,6 +3940,7 @@
 
       channel.onopen = () => {
         entry.open = true;
+        peerReconnectAttempts.delete(peerId);
         emitConnectionState("connected");
         emitTransportDiagnostic("relay-fallback", {
           active: false,
@@ -3964,6 +3980,9 @@
         logger("[SyncWebRTC] create offer failed", error);
       }
     }
+
+    const peerReconnectAttempts = new Map();
+    const MAX_PEER_RECONNECT_ATTEMPTS = 5;
 
     function ensurePeer(peerClientId, initiator = false) {
       const peerId = normalizeClientId(peerClientId);
@@ -4010,7 +4029,12 @@
           });
           closePeer(peerId);
           if (role === "host") {
-            void ensurePeer(peerId, true);
+            const attempts = (peerReconnectAttempts.get(peerId) || 0) + 1;
+            peerReconnectAttempts.set(peerId, attempts);
+            if (attempts <= MAX_PEER_RECONNECT_ATTEMPTS) {
+              const delay = Math.min(1000 * Math.pow(2, attempts - 1), 30000);
+              setTimeoutFn(() => { void ensurePeer(peerId, true); }, delay);
+            }
           } else if (role === "participant" && peerId === hostClientId) {
             void sendRtcSignal(peerId, "peer-reset", {}).catch(() => {});
           }
@@ -4063,13 +4087,18 @@
         if (!entry || !entry.pc) return;
         const remote = toSessionDescription(signalPayload);
         if (!remote) return;
-        await entry.pc.setRemoteDescription(remote);
-        const answer = await entry.pc.createAnswer();
-        await entry.pc.setLocalDescription(answer);
-        await sendRtcSignal(sourceClientId, "answer", {
-          type: answer.type,
-          sdp: answer.sdp,
-        });
+        try {
+          await entry.pc.setRemoteDescription(remote);
+          const answer = await entry.pc.createAnswer();
+          await entry.pc.setLocalDescription(answer);
+          await sendRtcSignal(sourceClientId, "answer", {
+            type: answer.type,
+            sdp: answer.sdp,
+          });
+        } catch (err) {
+          logger("[SyncWebRTC] offer handling failed", err);
+          closePeer(sourceClientId);
+        }
         return;
       }
 
@@ -4078,7 +4107,12 @@
         if (!entry || !entry.pc) return;
         const remote = toSessionDescription(signalPayload);
         if (!remote) return;
-        await entry.pc.setRemoteDescription(remote);
+        try {
+          await entry.pc.setRemoteDescription(remote);
+        } catch (err) {
+          logger("[SyncWebRTC] answer handling failed", err);
+          closePeer(sourceClientId);
+        }
         return;
       }
 
@@ -4369,6 +4403,9 @@
       updateParticipantState(payload) {
         return signalingTransport.updateParticipantState(payload || {});
       },
+      updateParticipantProfile(payload) {
+        return signalingTransport.updateParticipantProfile(payload || {});
+      },
       uploadSessionPack(payload) {
         return signalingTransport.uploadSessionPack(payload || {});
       },
@@ -4429,6 +4466,9 @@
         }
         return signalingTransport.getSessionMediaFile(safePayload);
       },
+      sendDrawingSync(payload) {
+        return signalingTransport.sendDrawingSync(payload || {});
+      },
       sendRtcSignal(payload) {
         return sendRtcSignal(
           payload?.targetClientId,
@@ -4484,6 +4524,7 @@
         : null);
 
     const listeners = new Set();
+    const drawingSyncListeners = new Set();
     const generateSecureClientId = () => {
       try {
         if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -4700,8 +4741,14 @@
     function randomCodePart(length) {
       const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
       let out = "";
-      for (let i = 0; i < length; i += 1) {
-        out += chars[Math.floor(random() * chars.length)];
+      if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
+        const values = new Uint32Array(length);
+        crypto.getRandomValues(values);
+        for (let i = 0; i < length; i++) out += chars[values[i] % chars.length];
+      } else {
+        for (let i = 0; i < length; i++) {
+          out += chars[Math.floor(random() * chars.length)];
+        }
       }
       return out;
     }
@@ -4719,6 +4766,36 @@
       roomUnsubscribe = null;
     }
 
+    function resetToIdle(lastError = "") {
+      role = "none";
+      roomCode = "";
+      sessionPassword = "";
+      participantName = "";
+      clearRoomSubscription();
+      patchState({
+        status: "idle",
+        role: "none",
+        sessionCode: "",
+        sessionName: "",
+        hostClientId: "",
+        controlMode: "host-only",
+        participantsCount: 0,
+        participantIds: [],
+        participantProfiles: {},
+        participantSyncStates: {},
+        sessionPackMeta: null,
+        sessionMediaMeta: null,
+        sharedSessionState: null,
+        sharedSessionStateRevision: 0,
+        p2pFallbackActive: false,
+        p2pFallbackReason: "",
+        p2pMeshLimit: 0,
+        p2pRelayParticipantsCount: 0,
+        p2pRelayParticipantIds: [],
+        lastError,
+      });
+    }
+
     // Transport connection state awareness (reconnection handling)
     if (transport && typeof transport.onConnectionStateChange === "function") {
       transport.onConnectionStateChange((connectionState) => {
@@ -4733,43 +4810,29 @@
           if (!roomCode) return;
 
           if (role === "host") {
+            const reconnectRole = role;
+            const reconnectRoomCode = roomCode;
             // Host: re-fetch snapshot to resync
             if (typeof transport.getRoomSnapshot === "function") {
               transport
                 .getRoomSnapshot(roomCode)
                 .then((snapshot) => {
+                  if (role !== reconnectRole || roomCode !== reconnectRoomCode) return;
                   if (snapshot) applyRoomSnapshot(snapshot, "host");
                   patchState({ lastError: "" });
                 })
                 .catch((err) => {
+                  if (role !== reconnectRole || roomCode !== reconnectRoomCode) return;
                   logger("[Sync] host post-reconnect snapshot fetch failed", err);
                   const errCode = String(err?.message || "");
                   // Après reconnexion WS, la room a été détruite (le host a été détaché du serveur)
                   // → "not-joined" ou "session-not-found" → retour à l'état idle
                   if (errCode === "not-joined" || errCode === "session-not-found") {
-                    clearRoomSubscription();
-                    roomCode = "";
-                    role = "none";
-                    patchState({
-                      status: "idle",
-                      role: "none",
-                      sessionCode: "",
-                      hostClientId: "",
-                      participantsCount: 0,
-                      participantIds: [],
-                      participantProfiles: {},
-                      participantSyncStates: {},
-                      sessionPackMeta: null,
-                      sessionMediaMeta: null,
-                      sharedSessionState: null,
-                      sharedSessionStateRevision: 0,
-                      p2pFallbackActive: false,
-                      p2pFallbackReason: "",
-                      p2pMeshLimit: 0,
-                      p2pRelayParticipantsCount: 0,
-                      p2pRelayParticipantIds: [],
-                      lastError: "session-not-found",
-                    });
+                    resetToIdle("session-not-found");
+                  } else {
+                    // Erreur inattendue : WS reconnecté mais snapshot échoué.
+                    // Effacer l'indicateur "reconnexion en cours" pour ne pas bloquer l'UI.
+                    patchState({ lastError: "" });
                   }
                 });
             }
@@ -4777,6 +4840,8 @@
           }
 
           if (role === "participant") {
+            const reconnectRole = role;
+            const reconnectRoomCode = roomCode;
             // Participant: try snapshot, if not-joined then auto re-join
             const attemptReJoin = () => {
               if (typeof transport.joinRoom !== "function") return;
@@ -4788,41 +4853,19 @@
                   clientId,
                 })
                 .then((snapshot) => {
+                  if (role !== reconnectRole || roomCode !== reconnectRoomCode) return;
                   applyRoomSnapshot(snapshot, "participant");
                   patchState({ lastError: "" });
                 })
                 .catch((joinErr) => {
+                  if (role !== reconnectRole || roomCode !== reconnectRoomCode) return;
                   logger("[Sync] post-reconnect re-join failed", joinErr);
                   const joinErrCode = String(joinErr?.message || "");
                   if (
                     joinErrCode === "session-not-found" ||
                     joinErrCode === "session-closed"
                   ) {
-                    clearRoomSubscription();
-                    roomCode = "";
-                    role = "none";
-                    sessionPassword = "";
-                    participantName = "";
-                    patchState({
-                      status: "idle",
-                      role: "none",
-                      sessionCode: "",
-                      hostClientId: "",
-                      participantsCount: 0,
-                      participantIds: [],
-                      participantProfiles: {},
-                      participantSyncStates: {},
-                      sessionPackMeta: null,
-                      sessionMediaMeta: null,
-                      sharedSessionState: null,
-                      sharedSessionStateRevision: 0,
-                      p2pFallbackActive: false,
-                      p2pFallbackReason: "",
-                      p2pMeshLimit: 0,
-                      p2pRelayParticipantsCount: 0,
-                      p2pRelayParticipantIds: [],
-                      lastError: "session-not-found",
-                    });
+                    resetToIdle("session-not-found");
                   }
                 });
             };
@@ -4831,41 +4874,22 @@
               transport
                 .getRoomSnapshot(roomCode)
                 .then((snapshot) => {
+                  if (role !== reconnectRole || roomCode !== reconnectRoomCode) return;
                   if (snapshot) applyRoomSnapshot(snapshot, "participant");
                   patchState({ lastError: "" });
                 })
                 .catch((err) => {
+                  if (role !== reconnectRole || roomCode !== reconnectRoomCode) return;
                   const errCode = String(err?.message || "");
                   if (errCode === "not-joined") {
                     attemptReJoin();
                   } else if (errCode === "session-not-found") {
-                    clearRoomSubscription();
-                    roomCode = "";
-                    role = "none";
-                    sessionPassword = "";
-                    participantName = "";
-                    patchState({
-                      status: "idle",
-                      role: "none",
-                      sessionCode: "",
-                      hostClientId: "",
-                      participantsCount: 0,
-                      participantIds: [],
-                      participantProfiles: {},
-                      participantSyncStates: {},
-                      sessionPackMeta: null,
-                      sessionMediaMeta: null,
-                      sharedSessionState: null,
-                      sharedSessionStateRevision: 0,
-                      p2pFallbackActive: false,
-                      p2pFallbackReason: "",
-                      p2pMeshLimit: 0,
-                      p2pRelayParticipantsCount: 0,
-                      p2pRelayParticipantIds: [],
-                      lastError: "session-not-found",
-                    });
+                    resetToIdle("session-not-found");
                   } else {
                     logger("[Sync] participant post-reconnect snapshot failed", err);
+                    // Erreur inattendue : WS reconnecté mais snapshot échoué.
+                    // Effacer l'indicateur "reconnexion en cours" pour ne pas bloquer l'UI.
+                    patchState({ lastError: "" });
                   }
                 });
             } else {
@@ -4886,6 +4910,7 @@
 
     function applyRoomSnapshot(snapshot, forceRole = null) {
       if (!snapshot || typeof snapshot !== "object") return;
+      if (roomCode && snapshot.sessionCode && normalizeCode(snapshot.sessionCode) !== roomCode) return;
       const normalizedSharedState = normalizeSharedSessionStatePayload(
         snapshot.sessionState,
         snapshot.sessionStateRevision,
@@ -4962,12 +4987,17 @@
           return;
         }
 
+        if (eventPayload.type === "drawing-sync") {
+          if (eventPayload.sourceClientId === clientId) return;
+          drawingSyncListeners.forEach((listener) => {
+            try {
+              listener(eventPayload);
+            } catch (_) {}
+          });
+          return;
+        }
+
         if (eventPayload.type === "room-closed") {
-          clearRoomSubscription();
-          roomCode = "";
-          role = "none";
-          sessionPassword = "";
-          participantName = "";
           const closeSource = String(eventPayload.source || "").trim();
           const errorCode =
             closeSource === "host-left"
@@ -4975,26 +5005,7 @@
               : closeSource === "ttl-expired"
                 ? "session-expired"
                 : "session-closed";
-          patchState({
-            status: "idle",
-            role: "none",
-            sessionCode: "",
-            hostClientId: "",
-            participantsCount: 0,
-            participantIds: [],
-            participantProfiles: {},
-            participantSyncStates: {},
-            sessionPackMeta: null,
-            sessionMediaMeta: null,
-            sharedSessionState: null,
-            sharedSessionStateRevision: 0,
-            p2pFallbackActive: false,
-            p2pFallbackReason: "",
-            p2pMeshLimit: 0,
-            p2pRelayParticipantsCount: 0,
-            p2pRelayParticipantIds: [],
-            lastError: errorCode,
-          });
+          resetToIdle(errorCode);
         }
       });
     }
@@ -5013,6 +5024,7 @@
       const sessionName = normalizeSessionName(input.sessionName);
       const controlMode = normalizeControlMode(input.controlMode);
       const password = String(input.password || "");
+      const hostParticipantName = String(input.participantName || "").trim().slice(0, 32);
 
       patchState({
         status: "connecting",
@@ -5027,41 +5039,32 @@
           controlMode,
           hostClientId: clientId,
           password,
+          hostDisplayName: hostParticipantName,
         });
 
         role = "host";
         roomCode = sessionCode;
+        if (hostParticipantName) {
+          participantName = hostParticipantName;
+        }
         bindRoom(sessionCode, "host");
         applyRoomSnapshot(snapshot, "host");
+
+        // Injecter le pseudo de l'hôte dans les profils participants
+        if (hostParticipantName) {
+          patchState({
+            participantProfiles: Object.assign({}, state.participantProfiles, {
+              [clientId]: hostParticipantName,
+            }),
+          });
+        }
 
         return {
           sessionCode: snapshot.sessionCode,
           snapshot,
         };
       } catch (error) {
-        clearRoomSubscription();
-        roomCode = "";
-        role = "none";
-        patchState({
-          status: "idle",
-          role: "none",
-          sessionCode: "",
-          hostClientId: "",
-          participantsCount: 0,
-          participantIds: [],
-          participantProfiles: {},
-          participantSyncStates: {},
-          sessionPackMeta: null,
-            sessionMediaMeta: null,
-            sharedSessionState: null,
-            sharedSessionStateRevision: 0,
-            p2pFallbackActive: false,
-            p2pFallbackReason: "",
-            p2pMeshLimit: 0,
-            p2pRelayParticipantsCount: 0,
-            p2pRelayParticipantIds: [],
-            lastError: String(error?.message || "request-failed"),
-          });
+        resetToIdle(String(error?.message || "request-failed"));
         throw error;
       }
     }
@@ -5106,29 +5109,7 @@
           snapshot,
         };
       } catch (error) {
-        clearRoomSubscription();
-        roomCode = "";
-        role = "none";
-        patchState({
-          status: "idle",
-          role: "none",
-          sessionCode: "",
-          hostClientId: "",
-          participantsCount: 0,
-          participantIds: [],
-          participantProfiles: {},
-          participantSyncStates: {},
-          sessionPackMeta: null,
-          sessionMediaMeta: null,
-          sharedSessionState: null,
-          sharedSessionStateRevision: 0,
-          p2pFallbackActive: false,
-          p2pFallbackReason: "",
-          p2pMeshLimit: 0,
-          p2pRelayParticipantsCount: 0,
-          p2pRelayParticipantIds: [],
-          lastError: String(error?.message || "request-failed"),
-        });
+        resetToIdle(String(error?.message || "request-failed"));
         throw error;
       }
     }
@@ -5148,32 +5129,7 @@
         logger("[Sync] leaveSession error", error);
       }
 
-      clearRoomSubscription();
-      roomCode = "";
-      role = "none";
-      sessionPassword = "";
-      participantName = "";
-      patchState({
-        status: "idle",
-        role: "none",
-        sessionCode: "",
-        sessionName: "",
-        hostClientId: "",
-        controlMode: "host-only",
-        participantsCount: 0,
-        participantIds: [],
-        participantProfiles: {},
-        participantSyncStates: {},
-        sessionPackMeta: null,
-        sessionMediaMeta: null,
-        sharedSessionState: null,
-        sharedSessionStateRevision: 0,
-        p2pFallbackActive: false,
-        p2pFallbackReason: "",
-        p2pMeshLimit: 0,
-        p2pRelayParticipantsCount: 0,
-        p2pRelayParticipantIds: [],
-      });
+      resetToIdle();
 
       return { left: true };
     }
@@ -5191,13 +5147,18 @@
         patch.controlMode = normalizeControlMode(input.controlMode);
       }
 
-      const snapshot = await transport.updateRoom({
-        sessionCode: roomCode,
-        sourceClientId: clientId,
-        patch,
-      });
-      applyRoomSnapshot(snapshot, "host");
-      return true;
+      try {
+        const snapshot = await transport.updateRoom({
+          sessionCode: roomCode,
+          sourceClientId: clientId,
+          patch,
+        });
+        applyRoomSnapshot(snapshot, "host");
+        return true;
+      } catch (err) {
+        logger("[SyncSession] updateSessionMeta failed", err);
+        return false;
+      }
     }
 
     async function publishSessionState(input = {}) {
@@ -5209,21 +5170,26 @@
 
       const payload =
         input && typeof input === "object" ? { ...input } : {};
-      const statePayload = await transport.updateSessionState({
-        sessionCode: roomCode,
-        sourceClientId: clientId,
-        payload,
-      });
-      const normalizedSharedState = normalizeSharedSessionStatePayload(
-        statePayload,
-        statePayload?.revision,
-      );
-      patchState({
-        sharedSessionState: normalizedSharedState.payload,
-        sharedSessionStateRevision: normalizedSharedState.revision,
-        lastError: "",
-      });
-      return true;
+      try {
+        const statePayload = await transport.updateSessionState({
+          sessionCode: roomCode,
+          sourceClientId: clientId,
+          payload,
+        });
+        const normalizedSharedState = normalizeSharedSessionStatePayload(
+          statePayload,
+          statePayload?.revision,
+        );
+        patchState({
+          sharedSessionState: normalizedSharedState.payload,
+          sharedSessionStateRevision: normalizedSharedState.revision,
+          lastError: "",
+        });
+        return true;
+      } catch (err) {
+        logger("[SyncSession] publishSessionState failed", err);
+        return false;
+      }
     }
 
     async function publishSessionPack(input = {}) {
@@ -5233,13 +5199,18 @@
         return false;
       }
       const payload = input && typeof input === "object" ? { ...input } : {};
-      const snapshot = await transport.uploadSessionPack({
-        sessionCode: roomCode,
-        sourceClientId: clientId,
-        pack: payload.pack,
-      });
-      applyRoomSnapshot(snapshot, "host");
-      return state.sessionPackMeta;
+      try {
+        const snapshot = await transport.uploadSessionPack({
+          sessionCode: roomCode,
+          sourceClientId: clientId,
+          pack: payload.pack,
+        });
+        applyRoomSnapshot(snapshot, "host");
+        return state.sessionPackMeta;
+      } catch (err) {
+        logger("[SyncSession] publishSessionPack failed", err);
+        return false;
+      }
     }
 
     async function fetchSessionPack() {
@@ -5247,17 +5218,22 @@
       if (!transport || typeof transport.getSessionPack !== "function") {
         return null;
       }
-      const result = await transport.getSessionPack({
-        sessionCode: roomCode,
-        sourceClientId: clientId,
-      });
-      if (!result || typeof result !== "object") return null;
-      return {
-        pack: result.pack && typeof result.pack === "object" ? result.pack : null,
-        hash: String(result.hash || "").trim(),
-        updatedAt: Math.max(0, Number(result.updatedAt || 0) || 0),
-        size: Math.max(0, Number(result.size || 0) || 0),
-      };
+      try {
+        const result = await transport.getSessionPack({
+          sessionCode: roomCode,
+          sourceClientId: clientId,
+        });
+        if (!result || typeof result !== "object") return null;
+        return {
+          pack: result.pack && typeof result.pack === "object" ? result.pack : null,
+          hash: String(result.hash || "").trim(),
+          updatedAt: Math.max(0, Number(result.updatedAt || 0) || 0),
+          size: Math.max(0, Number(result.size || 0) || 0),
+        };
+      } catch (err) {
+        logger("[SyncSession] fetchSessionPack failed", err);
+        return null;
+      }
     }
 
     async function resetSessionMediaPack() {
@@ -5266,12 +5242,17 @@
       if (!transport || typeof transport.resetSessionMediaPack !== "function") {
         return false;
       }
-      const snapshot = await transport.resetSessionMediaPack({
-        sessionCode: roomCode,
-        sourceClientId: clientId,
-      });
-      applyRoomSnapshot(snapshot, "host");
-      return true;
+      try {
+        const snapshot = await transport.resetSessionMediaPack({
+          sessionCode: roomCode,
+          sourceClientId: clientId,
+        });
+        applyRoomSnapshot(snapshot, "host");
+        return true;
+      } catch (err) {
+        logger("[SyncSession] resetSessionMediaPack failed", err);
+        return false;
+      }
     }
 
     async function publishSessionMediaFile(input = {}) {
@@ -5280,13 +5261,18 @@
       if (!transport || typeof transport.uploadSessionMediaFile !== "function") {
         return false;
       }
-      const snapshot = await transport.uploadSessionMediaFile({
-        sessionCode: roomCode,
-        sourceClientId: clientId,
-        file: input.file || null,
-      });
-      applyRoomSnapshot(snapshot, "host");
-      return true;
+      try {
+        const snapshot = await transport.uploadSessionMediaFile({
+          sessionCode: roomCode,
+          sourceClientId: clientId,
+          file: input.file || null,
+        });
+        applyRoomSnapshot(snapshot, "host");
+        return true;
+      } catch (err) {
+        logger("[SyncSession] publishSessionMediaFile failed", err);
+        return false;
+      }
     }
 
     async function fetchSessionMediaManifest() {
@@ -5294,18 +5280,23 @@
       if (!transport || typeof transport.getSessionMediaManifest !== "function") {
         return null;
       }
-      const result = await transport.getSessionMediaManifest({
-        sessionCode: roomCode,
-        sourceClientId: clientId,
-      });
-      if (!result || typeof result !== "object") return null;
-      return {
-        files: Array.isArray(result.files) ? result.files.slice() : [],
-        filesCount: Math.max(0, Number(result.filesCount || 0) || 0),
-        totalBytes: Math.max(0, Number(result.totalBytes || 0) || 0),
-        updatedAt: Math.max(0, Number(result.updatedAt || 0) || 0),
-        uploadedBy: String(result.uploadedBy || "").trim(),
-      };
+      try {
+        const result = await transport.getSessionMediaManifest({
+          sessionCode: roomCode,
+          sourceClientId: clientId,
+        });
+        if (!result || typeof result !== "object") return null;
+        return {
+          files: Array.isArray(result.files) ? result.files.slice() : [],
+          filesCount: Math.max(0, Number(result.filesCount || 0) || 0),
+          totalBytes: Math.max(0, Number(result.totalBytes || 0) || 0),
+          updatedAt: Math.max(0, Number(result.updatedAt || 0) || 0),
+          uploadedBy: String(result.uploadedBy || "").trim(),
+        };
+      } catch (err) {
+        logger("[SyncSession] fetchSessionMediaManifest failed", err);
+        return null;
+      }
     }
 
     async function fetchSessionMediaFile(input = {}) {
@@ -5313,26 +5304,31 @@
       if (!transport || typeof transport.getSessionMediaFile !== "function") {
         return null;
       }
-      const result = await transport.getSessionMediaFile({
-        sessionCode: roomCode,
-        sourceClientId: clientId,
-        identity: String(input.identity || "").trim(),
-      });
-      if (!result || typeof result !== "object") return null;
-      const file = result.file && typeof result.file === "object" ? result.file : null;
-      if (!file) return null;
-      return {
-        file: {
-          identity: String(file.identity || "").trim(),
-          name: String(file.name || "").trim(),
-          ext: String(file.ext || "").trim().toLowerCase(),
-          mime: String(file.mime || "").trim().toLowerCase(),
-          size: Math.max(0, Number(file.size || 0) || 0),
-          sha256: String(file.sha256 || "").trim().toLowerCase(),
-          dataBase64: String(file.dataBase64 || "").trim(),
-          updatedAt: Math.max(0, Number(file.updatedAt || 0) || 0),
-        },
-      };
+      try {
+        const result = await transport.getSessionMediaFile({
+          sessionCode: roomCode,
+          sourceClientId: clientId,
+          identity: String(input.identity || "").trim(),
+        });
+        if (!result || typeof result !== "object") return null;
+        const file = result.file && typeof result.file === "object" ? result.file : null;
+        if (!file) return null;
+        return {
+          file: {
+            identity: String(file.identity || "").trim(),
+            name: String(file.name || "").trim(),
+            ext: String(file.ext || "").trim().toLowerCase(),
+            mime: String(file.mime || "").trim().toLowerCase(),
+            size: Math.max(0, Number(file.size || 0) || 0),
+            sha256: String(file.sha256 || "").trim().toLowerCase(),
+            dataBase64: String(file.dataBase64 || "").trim(),
+            updatedAt: Math.max(0, Number(file.updatedAt || 0) || 0),
+          },
+        };
+      } catch (err) {
+        logger("[SyncSession] fetchSessionMediaFile failed", err);
+        return null;
+      }
     }
 
     async function requestSharedPlayback(input = {}) {
@@ -5357,21 +5353,26 @@
         ts: now(),
       };
 
-      const statePayload = await transport.updateSessionState({
-        sessionCode: roomCode,
-        sourceClientId: clientId,
-        payload,
-      });
-      const normalizedSharedState = normalizeSharedSessionStatePayload(
-        statePayload,
-        statePayload?.revision,
-      );
-      patchState({
-        sharedSessionState: normalizedSharedState.payload,
-        sharedSessionStateRevision: normalizedSharedState.revision,
-        lastError: "",
-      });
-      return true;
+      try {
+        const statePayload = await transport.updateSessionState({
+          sessionCode: roomCode,
+          sourceClientId: clientId,
+          payload,
+        });
+        const normalizedSharedState = normalizeSharedSessionStatePayload(
+          statePayload,
+          statePayload?.revision,
+        );
+        patchState({
+          sharedSessionState: normalizedSharedState.payload,
+          sharedSessionStateRevision: normalizedSharedState.revision,
+          lastError: "",
+        });
+        return true;
+      } catch (err) {
+        logger("[SyncSession] requestSharedPlayback failed", err);
+        return false;
+      }
     }
 
     async function requestSharedPause(input = {}) {
@@ -5390,13 +5391,44 @@
         return false;
       }
       if (role !== "participant" && role !== "host") return false;
-      const snapshot = await transport.updateParticipantState({
-        sessionCode: roomCode,
-        sourceClientId: clientId,
-        syncState: input.syncState,
-      });
-      applyRoomSnapshot(snapshot, role === "host" ? "host" : "participant");
-      return true;
+      try {
+        const snapshot = await transport.updateParticipantState({
+          sessionCode: roomCode,
+          sourceClientId: clientId,
+          syncState: input.syncState,
+        });
+        applyRoomSnapshot(snapshot, role === "host" ? "host" : "participant");
+        return true;
+      } catch (err) {
+        logger("[SyncSession] updateParticipantState failed", err);
+        return false;
+      }
+    }
+
+    async function updateParticipantProfile(input = {}) {
+      if (!roomCode) return false;
+      if (
+        !transport ||
+        typeof transport.updateParticipantProfile !== "function"
+      ) {
+        return false;
+      }
+      if (role !== "participant" && role !== "host") return false;
+      const displayName = String(input.displayName || "").trim();
+      if (!displayName) return false;
+      try {
+        const snapshot = await transport.updateParticipantProfile({
+          sessionCode: roomCode,
+          sourceClientId: clientId,
+          displayName,
+        });
+        participantName = displayName;
+        applyRoomSnapshot(snapshot, role === "host" ? "host" : "participant");
+        return true;
+      } catch (err) {
+        logger("[SyncSession] updateParticipantProfile failed", err);
+        return false;
+      }
     }
 
     function getState() {
@@ -5416,8 +5448,43 @@
       };
     }
 
+    async function sendDrawingSync(msgType, data) {
+      if (!transport || typeof transport.sendDrawingSync !== "function") return false;
+      if (!roomCode) return false;
+      if (role !== "host" && role !== "participant") return false;
+      try {
+        await transport.sendDrawingSync({
+          sessionCode: roomCode,
+          sourceClientId: clientId,
+          msgType: String(msgType || ""),
+          data: data || {},
+        });
+        return true;
+      } catch (err) {
+        logger("[SyncSession] sendDrawingSync failed", err);
+        return false;
+      }
+    }
+
+    function onDrawingSync(listener) {
+      if (typeof listener !== "function") return () => {};
+      drawingSyncListeners.add(listener);
+      return () => {
+        drawingSyncListeners.delete(listener);
+      };
+    }
+
+    function offDrawingSync(listener) {
+      drawingSyncListeners.delete(listener);
+    }
+
+    function getClientId() {
+      return clientId;
+    }
+
     return {
       getState,
+      getClientId,
       subscribe,
       hostSession,
       joinSession,
@@ -5433,6 +5500,10 @@
       requestSharedPlayback,
       requestSharedPause,
       updateParticipantState,
+      updateParticipantProfile,
+      sendDrawingSync,
+      onDrawingSync,
+      offDrawingSync,
     };
   }
 

@@ -28,6 +28,7 @@
   /* Transitions */
   --transition-fast: 0.15s ease;
   --transition-normal: 0.3s ease;
+  --transition-slide: 0.32s cubic-bezier(0.4, 0, 0.2, 1);
 
   /* Filtres */
   --blur-default: 10px; /* valeur du blur par default du flou progressif */
@@ -37,6 +38,14 @@
 *:focus-visible {
   outline: none !important;
   box-shadow: none !important;
+}
+
+/* Bloquer toutes les transitions au chargement (retiré par JS après le 1er paint) */
+body.no-transitions,
+body.no-transitions *,
+body.no-transitions *::before,
+body.no-transitions *::after {
+  transition: none !important;
 }
 
 /* ============================================

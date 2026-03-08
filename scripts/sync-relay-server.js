@@ -1,4 +1,5 @@
-#!/usr/bin/env node
+// sync-relay-server.js — PoseChrono Sync Relay
+// (shebang removed: Eagle's require() wrapper does not support it)
 /* eslint-disable no-console */
 const http = require("http");
 const crypto = require("crypto");
@@ -128,6 +129,19 @@ const RTC_RATE_LIMIT_WINDOW_MS = Math.max(
 const RTC_RATE_LIMIT_MAX_MESSAGES = Math.max(
   10,
   Number(process.env.POSECHRONO_SYNC_RTC_RATE_MAX_MESSAGES || 90) || 90,
+);
+const DRAWING_RATE_LIMIT_WINDOW_MS = Math.max(
+  250,
+  Number(process.env.POSECHRONO_SYNC_DRAWING_RATE_WINDOW_MS || 1000) || 1000,
+);
+const DRAWING_RATE_LIMIT_MAX_MESSAGES = Math.max(
+  10,
+  Number(process.env.POSECHRONO_SYNC_DRAWING_RATE_MAX_MESSAGES || 60) || 60,
+);
+const MAX_DRAWING_SYNC_BYTES = Math.max(
+  4096,
+  Number(process.env.POSECHRONO_SYNC_MAX_DRAWING_BYTES || 2 * 1024 * 1024) ||
+    2 * 1024 * 1024,
 );
 const MAX_TOTAL_ROOMS = Math.max(
   1,
@@ -304,29 +318,39 @@ function normalizePassword(input) {
 }
 
 function hashPassword(password) {
-  if (!password) return "";
+  if (!password) return Promise.resolve("");
   const salt = crypto.randomBytes(16).toString("hex");
-  const hash = crypto.scryptSync(password, salt, 64).toString("hex");
-  return `${salt}:${hash}`;
+  return new Promise((resolve, reject) => {
+    crypto.scrypt(password, salt, 64, (err, key) => {
+      if (err) return reject(err);
+      resolve(`${salt}:${key.toString("hex")}`);
+    });
+  });
 }
 
 function verifyPassword(provided, storedHash) {
-  if (!storedHash) return true; // session has no password
-  if (!provided) return false;
+  if (!storedHash) return Promise.resolve(true); // session has no password
+  if (!provided) return Promise.resolve(false);
   const colonIdx = storedHash.indexOf(":");
-  if (colonIdx === -1) return false;
+  if (colonIdx === -1) return Promise.resolve(false);
   const salt = storedHash.slice(0, colonIdx);
   const hash = storedHash.slice(colonIdx + 1);
-  if (!salt || !hash) return false;
-  try {
-    const computedHash = crypto.scryptSync(provided, salt, 64).toString("hex");
-    return crypto.timingSafeEqual(
-      Buffer.from(computedHash, "hex"),
-      Buffer.from(hash, "hex"),
-    );
-  } catch (_) {
-    return false;
-  }
+  if (!salt || !hash) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    crypto.scrypt(provided, salt, 64, (err, key) => {
+      if (err) return resolve(false);
+      try {
+        resolve(
+          crypto.timingSafeEqual(
+            Buffer.from(key.toString("hex"), "hex"),
+            Buffer.from(hash, "hex"),
+          ),
+        );
+      } catch (_) {
+        resolve(false);
+      }
+    });
+  });
 }
 
 function toBoundedInt(value, min, max, errorCode) {
@@ -1039,11 +1063,32 @@ function normalizeSharedPlaybackRequestPayload(input) {
   };
 }
 
+const MAX_CONNECTIONS_PER_IP = 10;
+
 function createRelayState() {
   return {
     rooms: new Map(),
     clients: new Map(), // ws -> { subscriptions:Set<string>, joinedBySession:Map<string,string> }
+    connectionsPerIp: new Map(), // ip -> count
   };
+}
+
+const PASSWORD_RATE_LIMIT_WINDOW_MS = 60000;
+const PASSWORD_RATE_LIMIT_MAX_ATTEMPTS = 5;
+
+function isPasswordRateLimited(clientState, timestampMs) {
+  const ts = Math.max(0, Number(timestampMs || nowMs()) || nowMs());
+  if (!clientState || typeof clientState !== "object") return false;
+  if (
+    !clientState.passwordRateWindowStartMs ||
+    ts - clientState.passwordRateWindowStartMs > PASSWORD_RATE_LIMIT_WINDOW_MS
+  ) {
+    clientState.passwordRateWindowStartMs = ts;
+    clientState.passwordRateAttempts = 0;
+  }
+  clientState.passwordRateAttempts =
+    (clientState.passwordRateAttempts || 0) + 1;
+  return clientState.passwordRateAttempts > PASSWORD_RATE_LIMIT_MAX_ATTEMPTS;
 }
 
 function ensureClientState(state, ws) {
@@ -1053,10 +1098,14 @@ function ensureClientState(state, ws) {
       joinedBySession: new Map(),
       rateWindowStartMs: 0,
       rateCount: 0,
+      passwordRateWindowStartMs: 0,
+      passwordRateAttempts: 0,
       stateRateWindowStartMs: 0,
       stateRateCountBySession: new Map(),
       rtcRateWindowStartMs: 0,
       rtcRateCountBySession: new Map(),
+      drawingRateWindowStartMs: 0,
+      drawingRateCountBySession: new Map(),
       securityLastLogByReason: new Map(),
     });
   }
@@ -1132,6 +1181,36 @@ function isRtcSignalRateLimited(clientState, sessionCode, timestampMs) {
   const next = previous + 1;
   clientState.rtcRateCountBySession.set(normalizedSessionCode, next);
   return next > RTC_RATE_LIMIT_MAX_MESSAGES;
+}
+
+function isDrawingSyncRateLimited(clientState, sessionCode, timestampMs) {
+  const ts = Math.max(0, Number(timestampMs || nowMs()) || nowMs());
+  if (!clientState || typeof clientState !== "object") return false;
+  const normalizedSessionCode = normalizeSessionCode(sessionCode);
+  if (!normalizedSessionCode) return false;
+  if (
+    !clientState.drawingRateWindowStartMs ||
+    ts - clientState.drawingRateWindowStartMs >= DRAWING_RATE_LIMIT_WINDOW_MS
+  ) {
+    clientState.drawingRateWindowStartMs = ts;
+    if (
+      clientState.drawingRateCountBySession &&
+      typeof clientState.drawingRateCountBySession.clear === "function"
+    ) {
+      clientState.drawingRateCountBySession.clear();
+    }
+  }
+  if (!clientState.drawingRateCountBySession) {
+    clientState.drawingRateCountBySession = new Map();
+  }
+  const previous = Math.max(
+    0,
+    Number(clientState.drawingRateCountBySession.get(normalizedSessionCode) || 0) ||
+      0,
+  );
+  const next = previous + 1;
+  clientState.drawingRateCountBySession.set(normalizedSessionCode, next);
+  return next > DRAWING_RATE_LIMIT_MAX_MESSAGES;
 }
 
 function getClientAddress(ws) {
@@ -1216,6 +1295,8 @@ function trackClientJoin(state, ws, sessionCode, clientId) {
   const normalizedClientId = normalizeString(clientId);
   if (!code || !normalizedClientId) return;
   clientState.joinedBySession.set(code, normalizedClientId);
+  // Auto-subscribe to room events on join/create
+  clientState.subscriptions.add(code);
 }
 
 function trackClientLeave(state, ws, sessionCode) {
@@ -1232,7 +1313,17 @@ function sendJson(ws, payload) {
   return true;
 }
 
+function sendRawJsonResponse(ws, requestId, rawResultJson) {
+  if (!ws || ws.readyState !== ws.OPEN) return false;
+  const escapedId = String(requestId || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  ws.send(`{"type":"response","id":"${escapedId}","ok":true,"result":${rawResultJson}}`);
+  return true;
+}
+
 function sendResponse(ws, requestId, result) {
+  if (result && result.__rawJson) {
+    return sendRawJsonResponse(ws, requestId, result.__rawJson);
+  }
   sendJson(ws, {
     type: "response",
     id: String(requestId || ""),
@@ -1263,7 +1354,7 @@ function broadcastSessionEvent(state, sessionCode, eventPayload) {
   });
 }
 
-function createRoom(state, payload) {
+async function createRoom(state, payload) {
   const sessionCode = normalizeSessionCode(payload?.sessionCode);
   if (!sessionCode) throw new Error("invalid-session-code");
   if (state.rooms.has(sessionCode)) throw new Error("session-already-exists");
@@ -1279,7 +1370,7 @@ function createRoom(state, payload) {
     sessionName: normalizeSessionName(payload?.sessionName),
     controlMode: normalizeControlMode(payload?.controlMode),
     hostClientId,
-    passwordHash: hashPassword(normalizePassword(payload?.password)),
+    passwordHash: await hashPassword(normalizePassword(payload?.password)),
     participantIds: new Set([hostClientId]),
     participantProfiles: new Map([
       [hostClientId, normalizeParticipantName(payload?.hostDisplayName, "Hôte")],
@@ -1289,6 +1380,7 @@ function createRoom(state, payload) {
     sessionStateRevision: 0,
     sessionStateUpdatedAt: 0,
     sessionPack: null,
+    sessionPackSerialized: "",
     sessionPackHash: "",
     sessionPackSize: 0,
     sessionPackUpdatedAt: 0,
@@ -1312,18 +1404,18 @@ function createRoom(state, payload) {
   return snapshot;
 }
 
-function assertRoomAccess(room, password) {
+async function assertRoomAccess(room, password) {
   if (!room) throw new Error("session-not-found");
   const normalizedPassword = normalizePassword(password);
-  if (!verifyPassword(normalizedPassword, room.passwordHash)) {
+  if (!(await verifyPassword(normalizedPassword, room.passwordHash))) {
     throw new Error("invalid-password");
   }
 }
 
-function joinRoom(state, payload) {
+async function joinRoom(state, payload) {
   const sessionCode = normalizeSessionCode(payload?.sessionCode);
   const room = state.rooms.get(sessionCode);
-  assertRoomAccess(room, payload?.password);
+  await assertRoomAccess(room, payload?.password);
 
   const clientId = normalizeClientId(payload?.clientId, "invalid-client-id");
   if (clientId === room.hostClientId) throw new Error("forbidden-host-impersonation");
@@ -1375,6 +1467,11 @@ function leaveRoom(state, payload) {
       sessionCode,
       snapshot,
     });
+    // Clean up tracking & subscriptions for all participants AFTER broadcast
+    state.clients.forEach((cs) => {
+      cs.joinedBySession.delete(sessionCode);
+      cs.subscriptions.delete(sessionCode);
+    });
     return { closed: true, snapshot };
   }
 
@@ -1409,6 +1506,32 @@ function updateParticipantState(state, payload) {
   broadcastSessionEvent(state, sessionCode, {
     type: "room-updated",
     source: "participant-state-updated",
+    sessionCode,
+    snapshot,
+  });
+  return snapshot;
+}
+
+function updateParticipantProfile(state, payload) {
+  const sessionCode = normalizeSessionCode(payload?.sessionCode);
+  const room = state.rooms.get(sessionCode);
+  if (!room) throw new Error("session-not-found");
+
+  const sourceClientId = normalizeString(payload?.sourceClientId);
+  if (!room.participantIds.has(sourceClientId)) {
+    throw new Error("not-joined");
+  }
+
+  const displayName = normalizeParticipantName(payload?.displayName);
+  if (!displayName) throw new Error("invalid-display-name");
+
+  room.participantProfiles.set(sourceClientId, displayName);
+  room.updatedAt = nowMs();
+
+  const snapshot = makeRoomSnapshot(room);
+  broadcastSessionEvent(state, sessionCode, {
+    type: "room-updated",
+    source: "participant-profile-updated",
     sessionCode,
     snapshot,
   });
@@ -1533,6 +1656,7 @@ function uploadSessionPack(state, payload) {
   const updatedAt = nowMs();
 
   room.sessionPack = pack;
+  room.sessionPackSerialized = serializedPack;
   room.sessionPackHash = packHash;
   room.sessionPackSize = serializedPack.length;
   room.sessionPackUpdatedAt = updatedAt;
@@ -1562,11 +1686,12 @@ function getSessionPack(state, payload) {
     throw new Error("session-pack-not-found");
   }
 
+  const packJson = room.sessionPackSerialized || JSON.stringify(room.sessionPack);
+  const hash = String(room.sessionPackHash || "").trim();
+  const updatedAt = Math.max(0, Number(room.sessionPackUpdatedAt || 0) || 0);
+  const size = Math.max(0, Number(room.sessionPackSize || 0) || 0);
   return {
-    pack: room.sessionPack,
-    hash: String(room.sessionPackHash || "").trim(),
-    updatedAt: Math.max(0, Number(room.sessionPackUpdatedAt || 0) || 0),
-    size: Math.max(0, Number(room.sessionPackSize || 0) || 0),
+    __rawJson: `{"pack":${packJson},"hash":${JSON.stringify(hash)},"updatedAt":${updatedAt},"size":${size}}`,
   };
 }
 
@@ -1769,6 +1894,63 @@ function sendRtcSignal(state, payload) {
   return { ok: true };
 }
 
+const VALID_DRAWING_SYNC_MSG_TYPES = new Set([
+  "sharing-started",
+  "sharing-stopped",
+  "stroke-start",
+  "stroke-batch",
+  "stroke-end",
+  "shape-add",
+  "shape-remove",
+  "clear-raster",
+  "clear-all",
+  "canvas-snapshot",
+  "request-snapshot",
+]);
+
+function sendDrawingSync(state, payload) {
+  const sessionCode = normalizeSessionCode(payload?.sessionCode);
+  const room = state.rooms.get(sessionCode);
+  if (!room) throw new Error("session-not-found");
+
+  const sourceClientId = normalizeClientId(
+    payload?.sourceClientId,
+    "invalid-client-id",
+  );
+  if (!room.participantIds.has(sourceClientId)) {
+    throw new Error("not-joined");
+  }
+
+  const msgType = normalizeString(payload?.msgType);
+  if (!msgType || !VALID_DRAWING_SYNC_MSG_TYPES.has(msgType)) {
+    throw new Error("invalid-drawing-sync");
+  }
+
+  const data = isPlainObject(payload?.data) ? payload.data : {};
+
+  let serializedSize = 0;
+  try {
+    serializedSize = JSON.stringify(data).length;
+  } catch (_) {
+    throw new Error("invalid-drawing-sync");
+  }
+  if (serializedSize > MAX_DRAWING_SYNC_BYTES) {
+    throw new Error("drawing-sync-too-large");
+  }
+
+  room.updatedAt = nowMs();
+  broadcastSessionEvent(state, sessionCode, {
+    type: "drawing-sync",
+    sessionCode,
+    sourceClientId,
+    msgType,
+    data,
+    ts: nowMs(),
+  });
+
+  return { ok: true };
+}
+
 function getRoomSnapshot(state, payload) {
   const sessionCode = normalizeSessionCode(payload?.sessionCode);
   const room = state.rooms.get(sessionCode);
@@ -1776,7 +1958,7 @@ function getRoomSnapshot(state, payload) {
   return makeRoomSnapshot(room);
 }
 
-function executeAction(state, action, payload) {
+async function executeAction(state, action, payload) {
   const normalizedAction = String(action || "").trim();
   if (
     MEDIA_TRANSFER_DISABLED &&
@@ -1800,6 +1982,8 @@ function executeAction(state, action, payload) {
       return updateSessionState(state, payload);
     case "updateParticipantState":
       return updateParticipantState(state, payload);
+    case "updateParticipantProfile":
+      return updateParticipantProfile(state, payload);
     case "uploadSessionPack":
       return uploadSessionPack(state, payload);
     case "getSessionPack":
@@ -1814,6 +1998,8 @@ function executeAction(state, action, payload) {
       return getSessionMediaFile(state, payload);
     case "sendRtcSignal":
       return sendRtcSignal(state, payload);
+    case "sendDrawingSync":
+      return sendDrawingSync(state, payload);
     case "getRoomSnapshot":
       return getRoomSnapshot(state, payload);
     default:
@@ -1832,7 +2018,7 @@ function onNotify(state, ws, action, payload) {
   switch (String(action || "").trim()) {
     case "subscribe": {
       const sessionCode = normalizeSessionCode(payload?.sessionCode);
-      if (sessionCode) {
+      if (sessionCode && resolveTrackedClientId(state, ws, sessionCode)) {
         clientState.subscriptions.add(sessionCode);
       }
       break;
@@ -1887,17 +2073,26 @@ async function main() {
         JSON.stringify({
           ok: true,
           service: "posechrono-sync-relay",
-          rooms: state.rooms.size,
-          mediaTransferEnabled: !MEDIA_TRANSFER_DISABLED,
-          relayUrls,
-          suggestedRelayUrl,
           ts: nowMs(),
+          suggestedRelayUrl,
+          relayUrls,
         }),
       );
       return;
     }
 
     if (req.url === "/shutdown" && req.method === "POST") {
+      // Allow shutdown only from localhost (Eagle/Desktop kill orphaned servers)
+      const remoteIp = String(req.socket?.remoteAddress || "").trim();
+      const isLocal =
+        remoteIp === "127.0.0.1" ||
+        remoteIp === "::1" ||
+        remoteIp === "::ffff:127.0.0.1";
+      if (!isLocal) {
+        res.writeHead(403, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: false, message: "forbidden" }));
+        return;
+      }
       res.writeHead(200, {
         "content-type": "application/json",
         "access-control-allow-origin": "*",
@@ -1949,6 +2144,14 @@ async function main() {
       try { ws.close(1013, "server-full"); } catch (_) {}
       return;
     }
+    const clientIp = getClientAddress(ws);
+    const ipCount = (state.connectionsPerIp.get(clientIp) || 0) + 1;
+    if (ipCount > MAX_CONNECTIONS_PER_IP) {
+      console.warn(`[sync-relay] too many connections from IP ${clientIp} (${ipCount}), rejecting`);
+      try { ws.close(4029, "too-many-connections"); } catch (_) {}
+      return;
+    }
+    state.connectionsPerIp.set(clientIp, ipCount);
     const clientState = ensureClientState(state, ws);
 
     ws.on("error", (error) => {
@@ -1958,7 +2161,7 @@ async function main() {
       console.warn(`[sync-relay] ws client error${code ? ` (${code})` : ""}: ${message}`);
     });
 
-    ws.on("message", (raw) => {
+    ws.on("message", async (raw) => {
       const message = parseJsonMessage(raw);
       if (!message || typeof message !== "object") {
         return;
@@ -2010,13 +2213,16 @@ async function main() {
           action === "updateRoom" ||
           action === "updateSessionState" ||
           action === "updateParticipantState" ||
+          action === "updateParticipantProfile" ||
           action === "uploadSessionPack" ||
           action === "getSessionPack" ||
           action === "resetSessionMediaPack" ||
           action === "uploadSessionMediaFile" ||
           action === "getSessionMediaManifest" ||
           action === "getSessionMediaFile" ||
-          action === "sendRtcSignal"
+          action === "sendRtcSignal" ||
+          action === "sendDrawingSync" ||
+          action === "getRoomSnapshot"
             ? normalizeSessionCode(requestPayload.sessionCode)
             : "";
 
@@ -2026,6 +2232,13 @@ async function main() {
           }
           if (resolveTrackedClientId(state, ws, sessionCodeForTracking)) {
             throw new Error("already-joined");
+          }
+          if (isPasswordRateLimited(clientState, nowMs())) {
+            logSecurityEvent(ws, clientState, "password-rate-limited", {
+              action,
+              sessionCode: sessionCodeForTracking,
+            });
+            throw new Error("too-many-password-attempts");
           }
         }
 
@@ -2041,6 +2254,7 @@ async function main() {
           action === "updateRoom" ||
           action === "updateSessionState" ||
           action === "updateParticipantState" ||
+          action === "updateParticipantProfile" ||
           action === "uploadSessionPack" ||
           action === "getSessionPack" ||
           action === "resetSessionMediaPack" ||
@@ -2048,13 +2262,26 @@ async function main() {
           action === "getSessionMediaManifest" ||
           action === "getSessionMediaFile" ||
           action === "getRoomSnapshot" ||
-          action === "sendRtcSignal"
+          action === "sendRtcSignal" ||
+          action === "sendDrawingSync"
         ) {
           const trackedClientId = resolveTrackedClientId(state, ws, sessionCodeForTracking);
           if (!sessionCodeForTracking || !trackedClientId) {
             throw new Error("not-joined");
           }
           requestPayload.sourceClientId = trackedClientId;
+        }
+
+        if (
+          action === "updateParticipantProfile" &&
+          isSessionStateRateLimited(clientState, sessionCodeForTracking, nowMs())
+        ) {
+          logSecurityEvent(ws, clientState, "profile-rate-limited", {
+            action,
+            sessionCode: sessionCodeForTracking,
+            clientId: requestPayload.sourceClientId,
+          });
+          throw new Error("profile-rate-limited");
         }
 
         if (
@@ -2081,7 +2308,19 @@ async function main() {
           throw new Error("rtc-rate-limited");
         }
 
-        const result = executeAction(state, action, requestPayload);
+        if (
+          action === "sendDrawingSync" &&
+          isDrawingSyncRateLimited(clientState, sessionCodeForTracking, nowMs())
+        ) {
+          logSecurityEvent(ws, clientState, "drawing-rate-limited", {
+            action,
+            sessionCode: sessionCodeForTracking,
+            clientId: requestPayload.sourceClientId,
+          });
+          throw new Error("drawing-rate-limited");
+        }
+
+        const result = await executeAction(state, action, requestPayload);
         if (action === "createRoom") {
           trackClientJoin(state, ws, result?.sessionCode, requestPayload?.hostClientId);
         } else if (action === "joinRoom") {
@@ -2117,6 +2356,8 @@ async function main() {
           errorCode === "rate-limited" ||
           errorCode === "state-rate-limited" ||
           errorCode === "invalid-session-code" ||
+          errorCode === "invalid-password" ||
+          errorCode === "too-many-password-attempts" ||
           errorCode === "room-full" ||
           errorCode.startsWith("unknown-action:")
         ) {
@@ -2134,17 +2375,46 @@ async function main() {
     });
 
     ws.on("close", () => {
+      const closingIp = getClientAddress(ws);
+      const currentCount = state.connectionsPerIp.get(closingIp) || 0;
+      if (currentCount <= 1) {
+        state.connectionsPerIp.delete(closingIp);
+      } else {
+        state.connectionsPerIp.set(closingIp, currentCount - 1);
+      }
       detachClientFromRooms(state, ws);
     });
   });
 
   const isMainScript = require.main === module;
 
-  server.listen(args.port, args.host, () => {
-    console.log(
-      `[sync-relay] listening on ws://${args.host}:${args.port} (health: http://${args.host}:${args.port}/health)`,
-    );
+  // Gérer EADDRINUSE : si le port est encore occupé (serveur orphelin en
+  // cours de fermeture), on réessaye quelques fois avant d'abandonner.
+  const MAX_LISTEN_RETRIES = 3;
+  const LISTEN_RETRY_DELAY_MS = 500;
+  let listenAttempt = 0;
+
+  function tryListen() {
+    listenAttempt++;
+    server.listen(args.port, args.host, () => {
+      console.log(
+        `[sync-relay] listening on ws://${args.host}:${args.port} (health: http://${args.host}:${args.port}/health)`,
+      );
+    });
+  }
+
+  server.on("error", (err) => {
+    if (err.code === "EADDRINUSE" && listenAttempt < MAX_LISTEN_RETRIES) {
+      console.warn(
+        `[sync-relay] port ${args.port} busy, retrying in ${LISTEN_RETRY_DELAY_MS}ms (attempt ${listenAttempt}/${MAX_LISTEN_RETRIES})...`,
+      );
+      setTimeout(tryListen, LISTEN_RETRY_DELAY_MS);
+    } else {
+      console.error(`[sync-relay] server error: ${err.message}`);
+    }
   });
+
+  tryListen();
 
   function shutdown() {
     console.log("[sync-relay] shutting down...");

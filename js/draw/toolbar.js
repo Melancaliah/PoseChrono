@@ -414,6 +414,7 @@ function populateDrawingToolbar() {
     btnClass: "annotation-tool",
     context: "main",
   });
+  const shareBtn = createRemoteDrawShareButton("annotation-tool");
   const closeBtn = createCloseButton({
     btnClass: "annotation-btn-close",
     onClose: closeDrawingMode,
@@ -444,6 +445,7 @@ function populateDrawingToolbar() {
     DIVIDER,
     lightboxBtn,
     exportBtn,
+    shareBtn,
     DIVIDER,
     ...(CONFIG.enableZoomInDrawingMode ? [createZoomIndicator()] : []),
     closeBtn,

@@ -107,6 +107,12 @@ const eagleShim = {
       invoke("posechrono:dialogs:showMessageBox", options || {}),
     showOpenDialog: (options) =>
       invoke("posechrono:dialogs:showOpenDialog", options || {}),
+    showSaveDialog: (options) =>
+      invoke("posechrono:dialogs:showSaveDialog", options || {}),
+  },
+  file: {
+    saveBuffer: (filePath, base64Data) =>
+      invoke("posechrono:file:saveBuffer", filePath, base64Data),
   },
   notification: {
     show: (payload) => invoke("posechrono:notification:show", payload || {}),
@@ -123,6 +129,11 @@ const eagleShim = {
     getSelected: () => invoke("posechrono:folders:getSelected"),
     browseAndAdd: () => invoke("posechrono:folders:browseAndAdd"),
     removeFolder: (id) => invoke("posechrono:folders:removeFolder", id),
+  },
+  files: {
+    browseAndAdd: () => invoke("posechrono:files:browseAndAdd"),
+    removeAll: () => invoke("posechrono:files:removeAll"),
+    getSelected: () => invoke("posechrono:files:getSelected"),
   },
   clipboard: {
     copyFiles: (paths) => invoke("posechrono:clipboard:copyFiles", paths || []),

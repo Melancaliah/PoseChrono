@@ -71,6 +71,7 @@ function setupDrawingCanvasDimensions() {
     drawingMeasures,
     drawingPreview,
     drawingLightboxCanvas,
+    drawingRemoteCanvas,
   ];
 
   canvases.forEach((canvas) => {

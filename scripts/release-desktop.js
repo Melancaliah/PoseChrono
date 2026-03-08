@@ -126,6 +126,33 @@ async function main() {
   await copyRecursive(DESKTOP_APP_DIR, outAppDir);
   await copyRootRuntimeFiles(path.join(outAppDir, DESKTOP_WEB_DIRNAME));
 
+  // Replace bundles with minified versions if available
+  const webDir = path.join(outAppDir, DESKTOP_WEB_DIRNAME);
+  const MINIFIED_OVERRIDES = [
+    {
+      min: path.join(ROOT, "packages", "shared", "shared.bundle.min.js"),
+      dest: path.join(webDir, "packages", "shared", "shared.bundle.js"),
+    },
+    {
+      min: path.join(ROOT, "js", "syncroModule", "syncro.module.min.js"),
+      dest: path.join(webDir, "js", "syncroModule", "syncro.module.js"),
+    },
+    {
+      min: path.join(ROOT, "js", "plugin.min.js"),
+      dest: path.join(webDir, "js", "plugin.js"),
+    },
+  ];
+  let minifiedCount = 0;
+  for (const { min, dest } of MINIFIED_OVERRIDES) {
+    if (await exists(min) && await exists(dest)) {
+      await fsp.copyFile(min, dest);
+      minifiedCount++;
+    }
+  }
+  if (minifiedCount > 0) {
+    console.log(`[release:desktop] Replaced ${minifiedCount} bundle(s) with minified versions`);
+  }
+
   const files = await listFilesRecursive(outDir);
   let totalBytes = 0;
   for (const file of files) {

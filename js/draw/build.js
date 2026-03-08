@@ -12,6 +12,7 @@ const modules = [
   "toolbar.js",
   "menus.js",
   "tool-handlers.js",
+  "remote-sync.js",
   "lightbox-export.js",
   "zoom-mode.js",
   "lifecycle.js",

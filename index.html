@@ -12,7 +12,7 @@
     />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self' data: blob: file:; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: file:; font-src 'self' data: file:; media-src 'self' data: blob: file:; connect-src 'self' https: http: ws: wss: file: data: blob:; object-src 'none'; base-uri 'self'; form-action 'self';"
+      content="default-src 'self' data: blob: file:; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: file:; font-src 'self' data: file:; media-src 'self' data: blob: file:; connect-src 'self' https: http: wss: ws: file: data: blob:; object-src 'none'; base-uri 'self'; form-action 'self';"
     />
     <meta name="theme-color" content="#667eea" />
     <title>PoseChrono! - Session de modèles vivants</title>
@@ -22,10 +22,9 @@
     <link rel="stylesheet" href="css/titlebar.css" />
     <link rel="stylesheet" href="css/screens.css" />
     <link rel="stylesheet" href="css/modes.css" />
-    <link rel="stylesheet" href="css/modals.css" />
-    <link rel="stylesheet" href="css/timeline.css" />
+    <!-- modals.css + timeline.css chargés dynamiquement via JS (non-bloquant) -->
   </head>
-  <body>
+  <body class="no-transitions">
     <!-- ================================================================ -->
     <!-- BARRE DE TITRE PERSONNALISEE (Frame: false)                     -->
     <!-- ================================================================ -->
@@ -242,6 +241,7 @@
               <div id="session-type-section" class="setting-group">
                 <label>TYPE DE SESSION</label>
                 <div class="mode-selector">
+                  <span class="mode-indicator"></span>
                   <button class="mode-btn active" data-mode="classique">
                     Classique
                   </button>
@@ -262,7 +262,7 @@
             <!-- Paramètres des différents modes -->
             <div class="settings-modes-container">
               <!-- Mode Personnalisé -->
-              <div id="mode-custom-settings" class="setting-group fade-out">
+              <div id="mode-custom-settings" class="setting-group slide-out-left">
                 <div
                   style="
                     display: flex;
@@ -414,7 +414,7 @@
               </div>
 
               <!-- Mode Mémoire -->
-              <div id="mode-memory-settings" class="setting-group fade-out">
+              <div id="mode-memory-settings" class="setting-group slide-out-left">
                 <label data-i18n="modes.memory.trainingType"
                   >TYPE D'ENTRAÎNEMENT</label
                 >
@@ -761,7 +761,7 @@
               </div>
 
               <!-- Mode Classique -->
-              <div id="mode-classique-settings" class="setting-group fade-in">
+              <div id="mode-classique-settings" class="setting-group slide-active">
                 <label data-i18n="settings.timerLabel">CHRONO</label>
                 <div class="duration-row">
                   <button type="button" class="duration-btn" data-duration="30">
@@ -1021,6 +1021,7 @@
             <!-- Drawing Overlay (mode dessin intégré) -->
             <div id="drawing-overlay" class="drawing-overlay hidden">
               <canvas id="drawing-lightbox" class="drawing-canvas"></canvas>
+              <canvas id="drawing-remote" class="drawing-canvas"></canvas>
               <canvas id="drawing-canvas" class="drawing-canvas"></canvas>
               <canvas id="drawing-measures" class="drawing-canvas"></canvas>
               <canvas id="drawing-preview" class="drawing-canvas"></canvas>
@@ -1741,6 +1742,7 @@
               id="sync-session-copy-server-address-connected-btn"
               class="sync-session-copy-server-address-btn hidden"
               title="Copier l'adresse du serveur local"
+              data-i18n-title="sync.copyServerAddressTooltip"
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
@@ -1752,7 +1754,7 @@
                   d="M360-240q-33 0-56.5-23.5T280-320v-520q0-33 23.5-56.5T360-920h400q33 0 56.5 23.5T840-840v520q0 33-23.5 56.5T760-240H360Zm0-80h400v-520H360v520Zm-160 240q-33 0-56.5-23.5T120-160v-560h80v560h440v80H200Zm160-240v-520 520Z"
                 />
               </svg>
-              <span>Copier l'adresse serveur</span>
+              <span data-i18n="sync.copyServerAddress">Copier l'adresse serveur</span>
             </button>
 
             <button
@@ -1825,6 +1827,7 @@
                 id="sync-session-copy-server-address-host-btn"
                 class="sync-session-copy-server-address-btn hidden"
                 title="Copier l'adresse du serveur local"
+                data-i18n-title="sync.copyServerAddressTooltip"
               >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
@@ -1836,7 +1839,7 @@
                     d="M360-240q-33 0-56.5-23.5T280-320v-520q0-33 23.5-56.5T360-920h400q33 0 56.5 23.5T840-840v520q0 33-23.5 56.5T760-240H360Zm0-80h400v-520H360v520Zm-160 240q-33 0-56.5-23.5T120-160v-560h80v560h440v80H200Zm160-240v-520 520Z"
                   />
                 </svg>
-                <span>Copier l'adresse serveur</span>
+                <span data-i18n="sync.copyServerAddress">Copier l'adresse serveur</span>
               </button>
             </div>
             <label
@@ -1895,6 +1898,20 @@
                 </button>
               </div>
             </div>
+
+            <label
+              for="sync-session-host-pseudo"
+              data-i18n="sync.pseudoLabel"
+            >
+              Pseudo (optionnel)
+            </label>
+            <input
+              id="sync-session-host-pseudo"
+              class="modal-input"
+              type="text"
+              maxlength="32"
+              placeholder="ex: Samuel"
+            />
 
             <label
               for="sync-session-host-password"
@@ -1963,6 +1980,7 @@
               class="modal-input"
               type="text"
               maxlength="24"
+              aria-required="true"
               data-i18n-placeholder="sync.sessionCodePlaceholder"
               placeholder="ABCD-1234"
             />
@@ -2063,25 +2081,51 @@
             id="sync-session-connected-panel"
             class="sync-session-panel hidden"
           >
-            <label class="sync-session-inline-toggle">
+            <div
+              id="sync-session-connected-pseudo-row"
+              class="sync-session-connected-pseudo-row"
+            >
+              <label
+                for="sync-session-connected-pseudo"
+                class="sync-session-connected-pseudo-label"
+                data-i18n="sync.connectedPseudoLabel"
+                >Pseudo</label
+              >
+              <div class="sync-session-connected-pseudo-input-group">
+                <input
+                  id="sync-session-connected-pseudo"
+                  class="modal-input sync-session-connected-pseudo-input"
+                  type="text"
+                  maxlength="32"
+                  placeholder="ex: Samuel"
+                />
+                <button
+                  type="button"
+                  id="sync-session-connected-pseudo-save-btn"
+                  class="sync-session-connected-pseudo-save-btn"
+                  disabled
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" height="18" viewBox="0 -960 960 960" width="18" fill="currentColor">
+                    <path d="M382-240 154-468l57-57 171 171 367-367 57 57-424 424Z"/>
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <label
+              id="sync-session-save-pack-row"
+              class="sync-session-inline-toggle hidden"
+            >
               <div class="sync-session-inline-toggle-content">
                 <span
                   class="sync-session-inline-toggle-title"
-                  id="sync-session-guest-action-notifications-label"
-                  data-i18n="sync.showHostActionsNotifications"
-                  >Notify host actions</span
-                >
-                <span
-                  class="sync-session-inline-toggle-hint"
-                  id="sync-session-guest-action-notifications-hint"
-                  data-i18n="sync.showHostActionsNotificationsHint"
-                  >Pause, resume and pose/image changes.</span
+                  data-i18n="sync.savePackToLibrary"
+                  >Save images to library</span
                 >
               </div>
               <input
                 type="checkbox"
-                id="sync-session-guest-action-notifications-btn"
-                checked
+                id="sync-session-save-pack-toggle"
               />
             </label>
 
@@ -2104,7 +2148,7 @@
                   d="M200-120q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h280v80H200v560h280v80H200Zm440-160-55-58 102-102H360v-80h327L585-622l55-58 200 200-200 200Z"
                 />
               </svg>
-              <span class="sync-session-leave-label"
+              <span class="sync-session-leave-label" data-i18n="sync.leaveOnlineSessionLabel"
                 >Quitter la session en cours</span
               >
             </button>
@@ -2167,7 +2211,7 @@
     <script src="packages/shared/shared.bundle.js"></script>
     <script src="js/platform/platform-api.js"></script>
     <script src="js/platform/eagle-adapter.js"></script>
-    <script src="js/syncroModule/syncro.module.js"></script>
+    <!-- syncro.module.js chargé dynamiquement (lazy) depuis plugin.js -->
     <script src="js/plugin.js"></script>
   </body>
 </html>

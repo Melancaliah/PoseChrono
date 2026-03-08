@@ -494,7 +494,7 @@ function buildCurrentHistorySnapshot() {
   };
 }
 
-function applyHistorySnapshot(snapshot) {
+function applyHistorySnapshot(snapshot, onDone) {
   const normalized = normalizeHistorySnapshot(snapshot);
   measurementLines = cloneMeasurementLines(normalized.measurementLines);
   calibrationUnit = normalized.calibrationUnit;
@@ -505,6 +505,7 @@ function applyHistorySnapshot(snapshot) {
     updateDrawingTotalDistance();
     updateDrawingButtonStates("main");
     updateDrawingButtonStates("zoom");
+    if (typeof onDone === "function") onDone();
   };
 
   if (!drawingCtx || !drawingCanvas) {
@@ -724,6 +725,10 @@ function clearDrawingCanvas() {
     saveDrawingHistory();
     updateDrawingButtonStates("main");
     updateDrawingButtonStates("zoom");
+
+    // Sync remote drawing — envoyer le snapshot post-clear
+    // (snapshot = raster vide + shapes non-éditables restantes, reflète l'état exact)
+    remoteDrawSyncCanvasSnapshot();
   }
 }
 
@@ -752,6 +757,9 @@ function clearDrawingMeasurements() {
     // Mettre à jour les boutons pour les deux contextes
     updateDrawingButtonStates("main");
     updateDrawingButtonStates("zoom");
+
+    // Sync remote drawing — snapshot capture le raster inchangé + shapes vides
+    remoteDrawSyncCanvasSnapshot();
   }
 }
 
@@ -786,7 +794,12 @@ function undoDrawing() {
 
   drawingHistoryIndex--;
   const snapshot = drawingHistory[drawingHistoryIndex];
-  applyHistorySnapshot(snapshot);
+  applyHistorySnapshot(snapshot, () => {
+    // Sync remote drawing — envoyer un snapshot compressé après undo
+    if (remoteDrawState.sharingEnabled) {
+      remoteDrawSyncCanvasSnapshot();
+    }
+  });
 }
 
 /**
@@ -797,5 +810,10 @@ function redoDrawing() {
 
   drawingHistoryIndex++;
   const snapshot = drawingHistory[drawingHistoryIndex];
-  applyHistorySnapshot(snapshot);
+  applyHistorySnapshot(snapshot, () => {
+    // Sync remote drawing — envoyer un snapshot compressé après redo
+    if (remoteDrawState.sharingEnabled) {
+      remoteDrawSyncCanvasSnapshot();
+    }
+  });
 }

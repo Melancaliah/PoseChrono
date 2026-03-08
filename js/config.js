@@ -11,7 +11,8 @@ const CONFIG = {
 
   titlebarAlwaysVisible: false, // Titlebar toujours visible (default : false)
 
-  enableAnimations: false, // Activer/désactiver les animations (default : true)
+  enableAnimations: true, // Activer/désactiver les animations (default : true)
+  enableModeIndicatorAnimation: true, // Activer/désactiver l'animation de la pill du sélecteur de mode (default : true). Ignoré si enableAnimations est false.
   enableFlipAnimation: false, // Activer/désactiver l'animation 3D de flip (default : false)
   defaultAutoFlip: false, // AutoFlip activé par défaut (default : true)
 
@@ -50,7 +51,7 @@ const CONFIG = {
     latencyWindowSize: 120, // Fenêtre de mesures pour p50/p95
     mirrorMediaToRelay: true, // Maintenir aussi le miroir relay pour fallback robuste
     allowMediaTransfer: true, // Kill-switch client pour désactiver upload/download médias sync
-    requireTls: false, // Enforce wss:// in production (default: false)
+    requireTls: true, // Enforce wss:// in production — localhost/127.0.0.1 exempted (default: true)
     maxReconnectAttempts: 10, // Max auto-reconnect attempts before giving up
     reconnectBaseDelayMs: 1000, // Initial reconnect delay in ms
     reconnectMaxDelayMs: 30000, // Max reconnect delay in ms

@@ -13,6 +13,8 @@ class DrawingContext {
     this.measuresCtx = null;
     this.lightbox = null;
     this.lightboxCtx = null;
+    this.remote = null;
+    this.remoteCtx = null;
     this.toolbar = null;
     this.targetImage = null;
     this.overlay = null;
@@ -173,6 +175,7 @@ const drawingManager = new DrawingManager();
 // puis supprimer ces alias et syncDrawingContext().
 let drawingCanvas, drawingCtx, drawingPreview, drawingPreviewCtx;
 let drawingMeasures, drawingMeasuresCtx, drawingLightboxCanvas, drawingLightboxCtx;
+let drawingRemoteCanvas, drawingRemoteCtx;
 let drawingToolbar, targetImageElement;
 
 // Fonction pour synchroniser les variables legacy avec le contexte courant
@@ -186,6 +189,8 @@ function syncDrawingContext() {
   drawingMeasuresCtx = ctx.measuresCtx;
   drawingLightboxCanvas = ctx.lightbox;
   drawingLightboxCtx = ctx.lightboxCtx;
+  drawingRemoteCanvas = ctx.remote;
+  drawingRemoteCtx = ctx.remoteCtx;
   drawingToolbar = ctx.toolbar;
   targetImageElement = ctx.targetImage;
 }
@@ -246,6 +251,7 @@ const drawingDOM = {
   measures: null,
   preview: null,
   lightboxCanvas: null,
+  remoteCanvas: null,
   toolbar: null,
   targetImage: null,
   resizeObserver: null,

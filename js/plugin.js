@@ -286,6 +286,38 @@ function escapeHtml(input) {
   );
 }
 
+// ================================================================
+// CLEANUP REGISTRY — gestion centralisée des event listeners
+// ================================================================
+const _cleanupRegistry = new Map();
+
+/**
+ * Enregistre une fonction de nettoyage pour un contexte donné (ex: "grid-config", "silhouette-config").
+ * @param {string} context - Identifiant du contexte (popup, modal, etc.)
+ * @param {Function} fn - Fonction de cleanup (ex: removeEventListener)
+ */
+function registerCleanup(context, fn) {
+  if (!_cleanupRegistry.has(context)) _cleanupRegistry.set(context, []);
+  _cleanupRegistry.get(context).push(fn);
+}
+
+/**
+ * Exécute et supprime toutes les fonctions de cleanup enregistrées pour un contexte.
+ * @param {string} context - Identifiant du contexte
+ */
+function runCleanup(context) {
+  const fns = _cleanupRegistry.get(context);
+  if (!fns) return;
+  fns.forEach((fn) => {
+    try {
+      fn();
+    } catch (_) {
+      /* noop */
+    }
+  });
+  _cleanupRegistry.delete(context);
+}
+
 function encodeDataToken(input) {
   return callPluginSharedMethod(
     SHARED_DOM_SAFETY_UTILS,
@@ -759,6 +791,71 @@ async function platformFolderRemove(folderId) {
     }
   } catch (_) {}
   return [];
+}
+
+// ---- Individual files (desktop only) ----
+
+async function platformFilesBrowseAndAdd() {
+  if (!isDesktopStandaloneRuntime()) return null;
+  const platform = getPlatformAdapter();
+  try {
+    if (platform?.files?.browseAndAdd) {
+      return (await platform.files.browseAndAdd()) || null;
+    }
+  } catch (_) {}
+  return null;
+}
+
+async function platformFilesRemoveAll() {
+  if (!isDesktopStandaloneRuntime()) return [];
+  const platform = getPlatformAdapter();
+  try {
+    if (platform?.files?.removeAll) {
+      return (await platform.files.removeAll()) || [];
+    }
+  } catch (_) {}
+  return [];
+}
+
+async function platformFilesGetSelected() {
+  if (!isDesktopStandaloneRuntime()) return [];
+  const platform = getPlatformAdapter();
+  try {
+    if (platform?.files?.getSelected) {
+      return (await platform.files.getSelected()) || [];
+    }
+  } catch (_) {}
+  return [];
+}
+
+async function platformFolderCreate(options) {
+  const platform = getPlatformAdapter();
+  try {
+    if (platform?.folder?.create) {
+      return (await platform.folder.create(options)) || null;
+    }
+  } catch (_) {}
+  return null;
+}
+
+async function platformItemAddFromURL(url, options) {
+  const platform = getPlatformAdapter();
+  try {
+    if (platform?.item?.addFromURL) {
+      return (await platform.item.addFromURL(url, options)) || null;
+    }
+  } catch (_) {}
+  return null;
+}
+
+async function platformFileSaveBuffer(filePath, base64Data) {
+  const platform = getPlatformAdapter();
+  try {
+    if (platform?.file?.saveBuffer) {
+      return (await platform.file.saveBuffer(filePath, base64Data)) || false;
+    }
+  } catch (_) {}
+  return false;
 }
 
 async function platformItemGet(query = {}) {
@@ -1272,16 +1369,47 @@ const UI_PREFS_SCHEMA_VERSION = 1;
 const PREFS_PACKAGE_SCHEMA_VERSION = 1;
 const PREFS_PACKAGE_SECTION_KEYS = ["ui", "hotkeys", "plans", "timeline"];
 const PREF_KEY_PREFERRED_LANGUAGE = "preferredLanguage";
-const SYNCRO_MODULE =
-  typeof window !== "undefined" ? window.PoseChronoSyncroModule || null : null;
-const SYNC_SESSION_MODAL_HELPERS =
-  SYNCRO_MODULE?.syncSessionModalHelpers || null;
-const SYNC_SESSION_STATUS_UI = SYNCRO_MODULE?.syncSessionStatusUi || null;
-const SYNC_RUNTIME_HELPERS = SYNCRO_MODULE?.syncRuntimeHelpers || null;
-const SYNC_SESSION_CONTROLLER = SYNCRO_MODULE?.syncSessionController || null;
-const PREF_KEY_SYNC_GUEST_ACTION_NOTIFICATIONS =
-  SYNCRO_MODULE?.PREF_KEYS?.syncGuestActionNotificationsEnabled ||
-  "syncGuestActionNotificationsEnabled";
+// Syncro module : résolu à la demande (lazy) pour ne pas bloquer le boot
+let SYNCRO_MODULE = null;
+let SYNC_SESSION_MODAL_HELPERS = null;
+let SYNC_SESSION_STATUS_UI = null;
+let SYNC_RUNTIME_HELPERS = null;
+let SYNC_SESSION_CONTROLLER = null;
+let _syncroModuleResolved = false;
+let _syncroModuleLoadPromise = null;
+const SYNCRO_MODULE_SRC = "js/syncroModule/syncro.module.js";
+
+function _resolveSyncroModule() {
+  if (_syncroModuleResolved) return;
+  SYNCRO_MODULE =
+    typeof window !== "undefined"
+      ? window.PoseChronoSyncroModule || null
+      : null;
+  if (!SYNCRO_MODULE) return;
+  _syncroModuleResolved = true;
+  SYNC_SESSION_MODAL_HELPERS =
+    SYNCRO_MODULE.syncSessionModalHelpers || null;
+  SYNC_SESSION_STATUS_UI = SYNCRO_MODULE.syncSessionStatusUi || null;
+  SYNC_RUNTIME_HELPERS = SYNCRO_MODULE.syncRuntimeHelpers || null;
+  SYNC_SESSION_CONTROLLER = SYNCRO_MODULE.syncSessionController || null;
+}
+
+function _ensureSyncroModuleLoaded() {
+  if (_syncroModuleResolved) return Promise.resolve();
+  if (_syncroModuleLoadPromise) return _syncroModuleLoadPromise;
+  _syncroModuleLoadPromise = new Promise((resolve) => {
+    const script = document.createElement("script");
+    script.src = SYNCRO_MODULE_SRC;
+    script.async = true;
+    script.onload = () => {
+      _resolveSyncroModule();
+      resolve();
+    };
+    script.onerror = () => resolve();
+    document.head.appendChild(script);
+  });
+  return _syncroModuleLoadPromise;
+}
 const PREF_KEY_SOUND_ENABLED_BY_DEFAULT = "soundEnabledByDefault";
 const PREF_KEY_SIDEBAR_HIDDEN_BUTTONS = "sidebarHiddenButtons";
 const PREF_KEY_SIDEBAR_BUTTON_ORDER = "sidebarButtonOrder";
@@ -1430,7 +1558,11 @@ function reportBootTraceSummary() {
       "runRuntimeLifecycle.afterTranslations",
     ),
     loadImagesMs: bootTraceStepDuration(
-      "runRuntimeLifecycle.afterTranslations",
+      "runRuntimeLifecycle.afterCreate",
+      "runRuntimeLifecycle.afterLoadImages.inner",
+    ),
+    parallelBootMs: bootTraceStepDuration(
+      "runRuntimeLifecycle.afterCreate",
       "runRuntimeLifecycle.afterLoadImages",
     ),
   };
@@ -1489,8 +1621,8 @@ const POST_BOOT_PRELOAD_DELAY_MS =
   typeof window !== "undefined" &&
   !!window.poseChronoDesktop &&
   window.poseChronoDesktop.platform === "desktop"
-    ? 1400
-    : 900;
+    ? 200
+    : 400;
 
 function getDrawBundleWindow() {
   if (typeof window !== "undefined") return window;
@@ -1724,21 +1856,27 @@ function schedulePostBootPreloads() {
   postBootPreloadScheduled = true;
 
   const runPreloadSequence = async () => {
-    try {
-      if (!isTimelineModuleReady()) {
-        await ensureTimelineInitialized("post-boot-preload");
-      }
-    } catch (error) {
-      console.error("[Timeline] post-boot preload failed:", error);
+    const tasks = [];
+    if (!isTimelineModuleReady()) {
+      tasks.push(
+        ensureTimelineInitialized("post-boot-preload").catch((error) => {
+          console.error("[Timeline] post-boot preload failed:", error);
+        }),
+      );
     }
-
-    try {
-      if (!isDrawBundleReady()) {
-        await ensureDrawBundleLoaded("post-boot-preload");
-      }
-    } catch (error) {
-      console.warn("[Draw] post-boot preload failed:", error);
+    if (!isDrawBundleReady()) {
+      tasks.push(
+        ensureDrawBundleLoaded("post-boot-preload").catch((error) => {
+          console.warn("[Draw] post-boot preload failed:", error);
+        }),
+      );
     }
+    if (!_syncroModuleResolved) {
+      tasks.push(
+        _ensureSyncroModuleLoaded().catch(() => {}),
+      );
+    }
+    if (tasks.length > 0) await Promise.all(tasks);
   };
 
   const startWhenIdle = () => {
@@ -1747,7 +1885,7 @@ function schedulePostBootPreloads() {
         () => {
           void runPreloadSequence();
         },
-        { timeout: 2500 },
+        { timeout: 1000 },
       );
       return;
     }
@@ -2242,7 +2380,6 @@ const UIPreferences = SHARED_UI_PREFERENCES_FACTORY
             ? CONFIG?.defaultSessionMode
             : "classique",
         reviewDurationsVisible: true,
-        syncGuestActionNotificationsEnabled: true,
         hotkeysCollapsedCategories: [],
         globalSettingsCollapsedCategories: ["maintenance", "son", "appearance", "dessin"],
         preferredLanguage: readPreferredLanguageFromStorage() || "",
@@ -2287,7 +2424,6 @@ const UIPreferences = SHARED_UI_PREFERENCES_FACTORY
           titlebarAlwaysVisible: false,
           defaultSessionMode: "classique",
           reviewDurationsVisible: true,
-          syncGuestActionNotificationsEnabled: true,
           hotkeysCollapsedCategories: [],
           globalSettingsCollapsedCategories: ["maintenance"],
           preferredLanguage: "",
@@ -4025,12 +4161,16 @@ const SoundManager = {
     random: 0.5,
   },
 
-  // Initialisation du gestionnaire
-  init() {
-    this.sounds.tick = new Audio(this.paths.tick);
-    this.sounds.end = new Audio(this.paths.end);
-    this.sounds.group = new Audio(this.paths.group);
-    this.sounds.pause = new Audio(this.paths.pause);
+  // Initialisation du gestionnaire (lazy — Audio créés à la demande)
+  init() {},
+
+  // Crée l'objet Audio à la demande si nécessaire
+  _ensureSound(type) {
+    if (this.sounds[type]) return this.sounds[type];
+    const p = this.paths[type];
+    if (!p) return null;
+    this.sounds[type] = new Audio(p);
+    return this.sounds[type];
   },
 
   // Jouer un son avec gestion centralisée
@@ -4051,7 +4191,7 @@ const SoundManager = {
       if (type === "pause" && !UIPreferences.get(PREF_KEY_SOUND_PAUSE, true))
         return;
 
-      let sound = this.sounds[type];
+      let sound = type !== "random" ? this._ensureSound(type) : null;
 
       if (!sound && type !== "random") {
         return;
@@ -4087,7 +4227,7 @@ const SoundManager = {
   // Prévisualiser un son indépendamment du mute global
   preview(type) {
     try {
-      const sound = this.sounds[type];
+      const sound = this._ensureSound(type);
       if (!sound) return;
       sound.currentTime = 0;
       sound.volume = this.volumes[type] ?? 0.5;
@@ -4101,12 +4241,13 @@ const SoundManager = {
   // Débloquer le contexte audio du navigateur
   unlockAudioContext() {
     ["group", "pause"].forEach((type) => {
-      if (this.sounds[type]) {
-        this.sounds[type]
+      const sound = this._ensureSound(type);
+      if (sound) {
+        sound
           .play()
           .then(() => {
-            this.sounds[type].pause();
-            this.sounds[type].currentTime = 0;
+            sound.pause();
+            sound.currentTime = 0;
           })
           .catch(() => {});
       }
@@ -4206,6 +4347,19 @@ async function runCreateLifecycle() {
     bootTrace("runCreateLifecycle.start");
     loadTheme(); // Charger le thème sauvegardé
 
+    // Charger les CSS non-critiques en arrière-plan (modals/timeline pas visibles au boot)
+    ["css/modals.css", "css/timeline.css"].forEach((href) => {
+      const link = document.createElement("link");
+      link.rel = "stylesheet";
+      link.href = href;
+      document.head.appendChild(link);
+    });
+
+    // Retirer le blocage des transitions après le 1er paint (évite le flash au démarrage)
+    requestAnimationFrame(() => {
+      document.body.classList.remove("no-transitions");
+    });
+
     // Le backup dev est optionnel: on le lance en tâche de fond pour ne pas bloquer le boot.
     queueMicrotask(() => {
       void Promise.resolve()
@@ -4235,12 +4389,39 @@ async function runRuntimeLifecycle() {
     bootTrace("runRuntimeLifecycle.start");
     await runCreateLifecycle();
     bootTrace("runRuntimeLifecycle.afterCreate");
-    // Charger les traductions avant de charger les images
-    await loadTranslations();
-    bootTrace("runRuntimeLifecycle.afterTranslations");
-    await loadImages();
+    // Charger traductions et images en parallèle
+    await Promise.all([
+      loadTranslations().then(() =>
+        bootTrace("runRuntimeLifecycle.afterTranslations"),
+      ),
+      loadImages().then(() =>
+        bootTrace("runRuntimeLifecycle.afterLoadImages.inner"),
+      ),
+    ]);
     bootTrace("runRuntimeLifecycle.afterLoadImages");
     schedulePostBootPreloads();
+
+    // Handler précoce : si l'utilisateur clique sur le toggle timeline
+    // avant que initTimeline() ait attaché son propre handler, on lance
+    // l'init puis on re-déclenche le clic pour ouvrir le panneau.
+    // stopImmediatePropagation empêche le handler timeline (enregistré
+    // après celui-ci par initTimeline) de traiter ce même clic, évitant
+    // le double-toggle open→close quand le preload a déjà initialisé.
+    const _earlyTimelineToggle =
+      document.getElementById("timeline-toggle-btn");
+    if (_earlyTimelineToggle) {
+      const _earlyHandler = (event) => {
+        event.stopImmediatePropagation();
+        _earlyTimelineToggle.removeEventListener("click", _earlyHandler);
+        ensureTimelineInitialized("user-click-early")
+          .then(() => _earlyTimelineToggle.click())
+          .catch(() => {
+            _earlyTimelineToggle.addEventListener("click", _earlyHandler);
+          });
+      };
+      _earlyTimelineToggle.addEventListener("click", _earlyHandler);
+    }
+
     runtimeLifecycleCompleted = true;
   })();
   return runLifecyclePromise;
@@ -4273,9 +4454,8 @@ function setupTitlebarControls() {
     document.body.classList.add("sync-no-public");
   }
 
-  if (syncEnabled) {
-    setupSyncSessionModalBindings();
-  }
+  // setupSyncSessionModalBindings() est désormais appelé dans openSyncSessionModal()
+  // après le chargement lazy du module syncro.
 
   if (settingsBtn) {
     settingsBtn.innerHTML = ICONS.SETTINGS;
@@ -6349,22 +6529,23 @@ function openGlobalSettingsModal() {
       document.body.style.userSelect = "none";
     });
 
-    document.addEventListener("mousemove", (e) => {
+    const _gsMouseMove = (e) => {
       if (!isDragging) return;
       e.preventDefault();
       offsetX = e.clientX - startX;
       offsetY = e.clientY - startY;
       modalContent.style.transform = `translate(${offsetX}px, ${offsetY}px)`;
-    });
-
-    document.addEventListener("mouseup", () => {
+    };
+    const _gsMouseUp = () => {
       if (!isDragging) return;
       isDragging = false;
       modalContent.style.transition = "";
       document.body.style.userSelect = "";
-    });
+    };
+    document.addEventListener("mousemove", _gsMouseMove);
+    document.addEventListener("mouseup", _gsMouseUp);
 
-    new MutationObserver((mutations) => {
+    const _gsObserver = new MutationObserver((mutations) => {
       mutations.forEach((mutation) => {
         if (
           mutation.type === "attributes" &&
@@ -6377,7 +6558,16 @@ function openGlobalSettingsModal() {
           }
         }
       });
-    }).observe(modal, { attributes: true });
+    });
+    _gsObserver.observe(modal, { attributes: true });
+
+    // Enregistrer le cleanup (listeners persistants, nettoyables si nécessaire)
+    registerCleanup("global-settings", () => {
+      document.removeEventListener("mousemove", _gsMouseMove);
+      document.removeEventListener("mouseup", _gsMouseUp);
+      _gsObserver.disconnect();
+      delete modalHeader.dataset.dragInitialized;
+    });
   }
 }
 
@@ -6422,6 +6612,35 @@ async function syncHashPassword(plainText) {
 let syncSessionService = null;
 let syncSessionServiceState = null;
 let syncSessionServiceUnsubscribe = null;
+let syncModalElements = null;
+
+function cacheSyncModalElements(modal) {
+  if (!modal) { syncModalElements = null; return; }
+  syncModalElements = {
+    modal,
+    roleToggle: modal.querySelector(".sync-session-role-toggle"),
+    hostPanel: modal.querySelector("#sync-session-host-panel"),
+    joinPanel: modal.querySelector("#sync-session-join-panel"),
+    connectedPanel: modal.querySelector("#sync-session-connected-panel"),
+    packPanel: modal.querySelector("#sync-session-pack-panel"),
+    publishOnlinePackBtn: modal.querySelector("#sync-session-publish-online-pack-btn"),
+    downloadOnlinePackBtn: modal.querySelector("#sync-session-download-online-pack-btn"),
+    leaveBtn: modal.querySelector("#sync-session-leave-btn"),
+    copyServerAddressHostBtn: modal.querySelector("#sync-session-copy-server-address-host-btn"),
+    copyServerAddressConnectedBtn: modal.querySelector("#sync-session-copy-server-address-connected-btn"),
+    connTypeRow: modal.querySelector(".sync-session-connection-type-row"),
+  };
+  syncModalElements.leaveBtnLabel = syncModalElements.leaveBtn?.querySelector(".sync-session-leave-label") || null;
+}
+
+function getSyncModalEl(key) {
+  return syncModalElements?.[key] || null;
+}
+
+// Expose getters for draw.bundle.js which is loaded as a separate dynamic script
+// and cannot reliably access `let`-declared variables from this script scope.
+window._getSyncSessionService = () => syncSessionService;
+window._getSyncSessionServiceState = () => syncSessionServiceState;
 let syncSessionTransportMode = "mock";
 let syncSessionTransportUrl = "";
 let syncSessionSuggestedLocalRelayUrl = "";
@@ -6465,6 +6684,11 @@ const SYNC_SESSION_MEDIA_TRANSFER_MAX_RETRIES = 4;
 const SYNC_SESSION_MEDIA_TRANSFER_BASE_DELAY_MS = 140;
 const SYNC_SESSION_MEDIA_TRANSFER_MAX_DELAY_MS = 1400;
 const SYNC_SESSION_MEDIA_TRANSFER_REQUEST_INTERVAL_MS = 35;
+const SYNC_TOAST_THROTTLE_MS = 1200;
+const SYNC_INPUT_SHAKE_MS = 420;
+const SYNC_COPY_FEEDBACK_MS = 1400;
+const SYNC_HEALTH_CHECK_MS = 5000;
+const SYNC_CONNECT_TIMEOUT_MS = 45000;
 const SYNC_SESSION_MEDIA_ALLOWED_EXTENSIONS = new Set([
   "jpg",
   "jpeg",
@@ -6580,61 +6804,7 @@ function isSyncSessionCodeFormatValid(code) {
 }
 
 function isSyncGuestActionNotificationsEnabled() {
-  if (SYNCRO_MODULE && typeof SYNCRO_MODULE.readPreference === "function") {
-    return !!SYNCRO_MODULE.readPreference(UIPreferences, true);
-  }
-  return (
-    UIPreferences.get(PREF_KEY_SYNC_GUEST_ACTION_NOTIFICATIONS, true) !== false
-  );
-}
-
-function setSyncGuestActionNotificationsEnabled(enabled) {
-  if (SYNCRO_MODULE && typeof SYNCRO_MODULE.writePreference === "function") {
-    return !!SYNCRO_MODULE.writePreference(UIPreferences, !!enabled);
-  }
-  return (
-    UIPreferences.set(PREF_KEY_SYNC_GUEST_ACTION_NOTIFICATIONS, !!enabled) !==
-    false
-  );
-}
-
-function updateSyncSessionGuestActionNotificationsUi(modal) {
-  if (!modal) return;
-  const inputEl = modal.querySelector(
-    "#sync-session-guest-action-notifications-btn",
-  );
-  const labelEl = modal.querySelector(
-    "#sync-session-guest-action-notifications-label",
-  );
-  const hintEl = modal.querySelector(
-    "#sync-session-guest-action-notifications-hint",
-  );
-  if (labelEl) {
-    const fallbackLabel =
-      getCurrentI18nLanguage() === "fr"
-        ? "Notifier les actions de l'hôte"
-        : "Notify me about host actions";
-    labelEl.textContent = getI18nText(
-      "sync.showHostActionsNotifications",
-      fallbackLabel,
-    );
-  }
-  if (hintEl) {
-    const fallbackHint =
-      getCurrentI18nLanguage() === "fr"
-        ? "Pause, reprise et changements de poses/images."
-        : "Pause, resume and pose/image changes.";
-    hintEl.textContent = getI18nText(
-      "sync.showHostActionsNotificationsHint",
-      fallbackHint,
-    );
-  }
-  if (!inputEl) return;
-  if (SYNCRO_MODULE && typeof SYNCRO_MODULE.syncCheckbox === "function") {
-    SYNCRO_MODULE.syncCheckbox(inputEl, UIPreferences, true);
-    return;
-  }
-  inputEl.checked = isSyncGuestActionNotificationsEnabled();
+  return true;
 }
 
 function resolveSyncQueryParam(key) {
@@ -6650,6 +6820,7 @@ function resolveSyncQueryParam(key) {
 
 function isSyncFeatureEnabled() {
   try {
+    _resolveSyncroModule();
     if (!CONFIG?.SYNC || typeof CONFIG.SYNC !== "object") return true;
     if (CONFIG.SYNC.enabled === false) return false;
     return UIPreferences.get("syncEnabled", true);
@@ -7009,11 +7180,24 @@ function setSyncSessionNetworkStatus(
   networkEl.removeAttribute("title");
 }
 
+function isLoopbackHostname(hostname) {
+  const h = String(hostname || "").trim().toLowerCase();
+  return h === "localhost" || h === "127.0.0.1" || h === "::1";
+}
+
+function isPrivateNetworkHostname(hostname) {
+  const h = String(hostname || "").trim().toLowerCase();
+  if (isLoopbackHostname(h)) return true;
+  if (h === "0.0.0.0" || h === "::") return true;
+  if (h.startsWith("192.168.") || h.startsWith("10.")) return true;
+  const m = h.match(/^172\.(\d+)\./);
+  if (m) { const n = parseInt(m[1], 10); if (n >= 16 && n <= 31) return true; }
+  return false;
+}
+
 function isLoopbackSyncEndpoint(endpointUrl) {
   try {
-    const parsed = new URL(String(endpointUrl || "").trim());
-    const host = String(parsed.hostname || "").trim().toLowerCase();
-    return host === "localhost" || host === "127.0.0.1" || host === "::1";
+    return isLoopbackHostname(new URL(String(endpointUrl || "").trim()).hostname);
   } catch (_) {
     return false;
   }
@@ -7212,9 +7396,7 @@ function updateSyncSessionCodeUi(modal, sessionCode = "") {
   if (!modal) return;
   const rowEl = modal.querySelector("#sync-session-code-row");
   const valueEl = modal.querySelector("#sync-session-code-value");
-  const copyBtn =
-    modal.querySelector("#sync-session-code-row") ||
-    modal.querySelector("#sync-session-copy-code-btn");
+  const copyBtn = rowEl || modal.querySelector("#sync-session-copy-code-btn");
   if (!rowEl || !valueEl) return;
 
   const normalizedCode = normalizeSyncSessionCode(sessionCode);
@@ -7248,6 +7430,10 @@ function updateSyncSessionInvitePanelVisibility(modal, snapshot = null) {
     "sync-session-invite-panel--plain",
     !isLocalConnectionType,
   );
+  const codeRow = invitePanel.querySelector("#sync-session-code-row");
+  if (codeRow) {
+    codeRow.classList.toggle("sync-session-code-row--public", !isLocalConnectionType);
+  }
 }
 
 function setSyncSessionStatus(modal, message = "", tone = "", options = {}) {
@@ -7464,10 +7650,23 @@ function renderSyncSessionParticipantsTooltip(tooltipEl, guests = []) {
       guest && typeof guest === "object"
         ? String(guest.name || "").trim()
         : String(guest || "").trim();
-    if (!guestName) return;
+    const isHost = guest && typeof guest === "object" && !!guest.isHost;
+    const hostLabel = getI18nText("sync.hostParticipantLabel", "host");
+
+    let displayName;
+    if (isHost) {
+      const hasCustomName = guestName && guestName.toLowerCase() !== hostLabel.toLowerCase();
+      displayName = hasCustomName
+        ? `${guestName} (${hostLabel})`
+        : hostLabel.charAt(0).toUpperCase() + hostLabel.slice(1);
+    } else {
+      if (!guestName) return; // invité sans nom : skip
+      displayName = guestName;
+    }
+
     const itemEl = document.createElement("div");
     itemEl.className = "custom-step pose";
-    itemEl.textContent = `• ${guestName}`;
+    itemEl.textContent = `• ${displayName}`;
     tooltipEl.appendChild(itemEl);
   });
 }
@@ -7502,6 +7701,7 @@ function showSyncSessionParticipantsTooltip(triggerEl) {
         documentRef: typeof document !== "undefined" ? document : null,
         title: getI18nText("sync.guestsConnectedTitle", "Connected guests"),
         emptyLabel: getI18nText("sync.noGuestsConnected", "No guests connected"),
+        getText: (key, fallback, vars = undefined) => getI18nText(key, fallback, vars),
       }) || syncSessionParticipantsTooltipEl;
     return;
   }
@@ -7515,6 +7715,20 @@ function showSyncSessionParticipantsTooltip(triggerEl) {
 }
 
 function setSyncSessionHostingStatus(modal, state) {
+  // Calculer la liste complète (hôte en tête + invités) une seule fois,
+  // avant la délégation vers SYNC_SESSION_STATUS_UI et le fallback.
+  const guests = getSyncSessionGuestParticipants(state);
+  const _hostId = String(state?.hostClientId || "").trim();
+  if (_hostId) {
+    const _hostProfiles = getSyncParticipantProfiles(state);
+    guests.unshift({
+      id: _hostId,
+      name: getSyncParticipantDisplayName(_hostId, _hostProfiles),
+      isHost: true,
+      syncState: "ready",
+    });
+  }
+
   if (
     SYNC_SESSION_STATUS_UI &&
     typeof SYNC_SESSION_STATUS_UI.setHostingStatus === "function"
@@ -7522,7 +7736,7 @@ function setSyncSessionHostingStatus(modal, state) {
     const handled = SYNC_SESSION_STATUS_UI.setHostingStatus({
       modal,
       state,
-      guests: getSyncSessionGuestParticipants(state),
+      guests,
       getText: (key, fallback, vars = undefined) =>
         getI18nText(key, fallback, vars),
     });
@@ -7544,12 +7758,12 @@ function setSyncSessionHostingStatus(modal, state) {
     statusEl.textContent = "";
   }
 
-  const guests = getSyncSessionGuestParticipants(state);
+  // `guests` est déjà calculé ci-dessus (hôte en tête)
   const participants = Math.max(0, guests.length);
   const sessionCode = String(state?.sessionCode || "").trim();
-  const participantsLabel = `(${participants} participant${participants === 1 ? "" : "s"})`;
+  const participantsLabel = getI18nText("sync.participantsCount", "({{count}} participant(s))", { count: participants });
 
-  const prefixText = `Hosting ${sessionCode} `;
+  const prefixText = getI18nText("sync.statusHosting", "Hosting {{code}} ", { code: sessionCode });
   statusEl.appendChild(document.createTextNode(prefixText));
 
   const triggerEl = document.createElement("span");
@@ -7561,6 +7775,7 @@ function setSyncSessionHostingStatus(modal, state) {
     guests.map((guest) => ({
       id: String(guest?.id || "").trim(),
       name: String(guest?.name || "").trim(),
+      isHost: !!guest?.isHost,
       syncState: normalizeSyncParticipantSyncState(guest?.syncState),
     })),
   );
@@ -7568,6 +7783,21 @@ function setSyncSessionHostingStatus(modal, state) {
 }
 
 function setSyncSessionJoinedStatus(modal, state) {
+  // Calculer la liste complète UNE FOIS, avec soi-même en tête
+  const _selfId = String(state?.clientId || "").trim();
+  const _selfProfiles = getSyncParticipantProfiles(state);
+  const _selfName = getSyncParticipantDisplayName(_selfId, _selfProfiles);
+  const others = getSyncSessionJoinedRemoteParticipants(state);
+  if (_selfId) {
+    others.unshift({
+      id: _selfId,
+      name: _selfName,
+      isSelf: true,
+      isHost: false,
+      syncState: "ready",
+    });
+  }
+
   if (
     SYNC_SESSION_STATUS_UI &&
     typeof SYNC_SESSION_STATUS_UI.setJoinedStatus === "function"
@@ -7575,7 +7805,7 @@ function setSyncSessionJoinedStatus(modal, state) {
     const handled = SYNC_SESSION_STATUS_UI.setJoinedStatus({
       modal,
       state,
-      others: getSyncSessionJoinedRemoteParticipants(state),
+      others,
       getText: (key, fallback, vars = undefined) =>
         getI18nText(key, fallback, vars),
     });
@@ -7597,12 +7827,11 @@ function setSyncSessionJoinedStatus(modal, state) {
     statusEl.textContent = "";
   }
 
-  const others = getSyncSessionJoinedRemoteParticipants(state);
   const participants = Math.max(0, others.length);
   const sessionCode = String(state?.sessionCode || "").trim();
-  const participantsLabel = `(${participants} participant${participants === 1 ? "" : "s"})`;
+  const participantsLabel = getI18nText("sync.participantsCount", "({{count}} participant(s))", { count: participants });
 
-  const prefixText = `Connected to ${sessionCode} `;
+  const prefixText = getI18nText("sync.statusConnected", "Connected to {{code}} ", { code: sessionCode });
   statusEl.appendChild(document.createTextNode(prefixText));
 
   const triggerEl = document.createElement("span");
@@ -7616,12 +7845,16 @@ function setSyncSessionJoinedStatus(modal, state) {
         return {
           id: String(guest.id || "").trim(),
           name: String(guest.name || "").trim(),
+          isHost: !!guest.isHost,
+          isSelf: !!guest.isSelf,
           syncState: normalizeSyncParticipantSyncState(guest.syncState),
         };
       }
       return {
         id: "",
         name: String(guest || "").trim(),
+        isHost: false,
+        isSelf: false,
         syncState: "missing",
       };
     }),
@@ -7642,11 +7875,13 @@ function flashSyncSessionInputError(inputEl) {
   if (typeof inputEl.focus === "function") {
     inputEl.focus();
   }
+  inputEl.setAttribute("aria-invalid", "true");
   void inputEl.offsetWidth;
   inputEl.classList.add("shake", "input-border-error");
   setTimeout(() => {
     inputEl.classList.remove("shake", "input-border-error");
-  }, 420);
+    inputEl.removeAttribute("aria-invalid");
+  }, SYNC_INPUT_SHAKE_MS);
 }
 
 function flashSyncSessionCodeInputError(inputEl) {
@@ -7662,10 +7897,7 @@ function isSyncGuestPseudoCharAllowed(char) {
   }
   const symbol = String(char || "");
   if (!symbol) return false;
-  if (symbol === " ") return true;
-  const lower = symbol.toLocaleLowerCase();
-  const upper = symbol.toLocaleUpperCase();
-  return lower !== upper;
+  return /^[\p{L}\p{N} ]$/u.test(symbol);
 }
 
 function sanitizeSyncGuestPseudoInputValue(input) {
@@ -7697,7 +7929,7 @@ function notifySyncGuestPseudoValidationError(inputEl = null) {
     flashSyncSessionInputError(inputEl);
   }
   const nowMs = Date.now();
-  if (nowMs - syncSessionLastPseudoValidationToastAt < 1200) {
+  if (nowMs - syncSessionLastPseudoValidationToastAt < SYNC_TOAST_THROTTLE_MS) {
     return;
   }
   syncSessionLastPseudoValidationToastAt = nowMs;
@@ -7808,7 +8040,6 @@ function renderSyncSessionStatus(modal, snapshot = null) {
   updateSyncSessionModalPanelsVisibility(modal, state);
   updateSyncSessionCodeUi(modal, state?.sessionCode);
   updateSyncSessionNetworkStatus(modal, state);
-  updateSyncSessionGuestActionNotificationsUi(modal);
   // Barre d'info pack : nb de fichiers uploadés (hôte) / disponibles (invité)
   if (
     SYNC_SESSION_STATUS_UI &&
@@ -7834,13 +8065,13 @@ function renderSyncSessionStatus(modal, snapshot = null) {
   if (state.status === "connecting") {
     if (!syncConnectingStartedAt) syncConnectingStartedAt = Date.now();
     const elapsedMs = Date.now() - syncConnectingStartedAt;
-    if (elapsedMs > 45000) {
+    if (elapsedMs > SYNC_CONNECT_TIMEOUT_MS) {
       setSyncSessionStatus(
         modal,
         getI18nText("sync.errorConnectTimeout", "Unable to reach the server. Check the relay URL."),
         "error",
       );
-    } else if (elapsedMs > 5000) {
+    } else if (elapsedMs > SYNC_HEALTH_CHECK_MS) {
       setSyncSessionStatus(
         modal,
         getI18nText("sync.statusServerWaking", "The server is waking up, please wait up to 30 seconds..."),
@@ -7935,20 +8166,15 @@ function isSyncSessionOnlineForHistory(snapshot = null) {
 function updateSyncSessionModalPanelsVisibility(modal, snapshot = null) {
   if (!modal) return;
   const state = snapshot || syncSessionServiceState;
-  const roleToggle = modal.querySelector(".sync-session-role-toggle");
-  const noteEl = modal.querySelector(".sync-session-note");
-  const hostPanel = modal.querySelector("#sync-session-host-panel");
-  const joinPanel = modal.querySelector("#sync-session-join-panel");
-  const connectedPanel = modal.querySelector("#sync-session-connected-panel");
-  const packPanel = modal.querySelector("#sync-session-pack-panel");
-  const exportPackBtn = modal.querySelector("#sync-session-export-pack-btn");
-  const importPackBtn = modal.querySelector("#sync-session-import-pack-btn");
-  const publishOnlinePackBtn = modal.querySelector(
-    "#sync-session-publish-online-pack-btn",
-  );
-  const downloadOnlinePackBtn = modal.querySelector(
-    "#sync-session-download-online-pack-btn",
-  );
+  // Use cached elements if available and modal matches, otherwise query
+  const c = (syncModalElements && syncModalElements.modal === modal) ? syncModalElements : null;
+  const roleToggle = c?.roleToggle || modal.querySelector(".sync-session-role-toggle");
+  const hostPanel = c?.hostPanel || modal.querySelector("#sync-session-host-panel");
+  const joinPanel = c?.joinPanel || modal.querySelector("#sync-session-join-panel");
+  const connectedPanel = c?.connectedPanel || modal.querySelector("#sync-session-connected-panel");
+  const packPanel = c?.packPanel || modal.querySelector("#sync-session-pack-panel");
+  const publishOnlinePackBtn = c?.publishOnlinePackBtn || modal.querySelector("#sync-session-publish-online-pack-btn");
+  const downloadOnlinePackBtn = c?.downloadOnlinePackBtn || modal.querySelector("#sync-session-download-online-pack-btn");
   const connectedAsParticipant = isSyncSessionConnectedAsParticipant(state);
   const connectedAsHost = isSyncSessionConnectedAsHost(state);
   const isActive = connectedAsParticipant || connectedAsHost;
@@ -7956,14 +8182,10 @@ function updateSyncSessionModalPanelsVisibility(modal, snapshot = null) {
   const showHostSettingsPanel =
     connectedAsHost || (!isActive && hostRoleSelected);
   const showParticipantOnlineDownload = connectedAsParticipant;
-  const leaveBtn = modal.querySelector("#sync-session-leave-btn");
-  const leaveBtnLabel = leaveBtn?.querySelector(".sync-session-leave-label");
-  const copyServerAddressHostBtn = modal.querySelector(
-    "#sync-session-copy-server-address-host-btn",
-  );
-  const copyServerAddressConnectedBtn = modal.querySelector(
-    "#sync-session-copy-server-address-connected-btn",
-  );
+  const leaveBtn = c?.leaveBtn || modal.querySelector("#sync-session-leave-btn");
+  const leaveBtnLabel = c?.leaveBtnLabel || leaveBtn?.querySelector(".sync-session-leave-label");
+  const copyServerAddressHostBtn = c?.copyServerAddressHostBtn || modal.querySelector("#sync-session-copy-server-address-host-btn");
+  const copyServerAddressConnectedBtn = c?.copyServerAddressConnectedBtn || modal.querySelector("#sync-session-copy-server-address-connected-btn");
   const isLocalConnectionType =
     UIPreferences.get("syncConnectionType", "local") === "local";
   const hasActiveSessionCode = !!String(state?.sessionCode || "").trim();
@@ -7971,10 +8193,9 @@ function updateSyncSessionModalPanelsVisibility(modal, snapshot = null) {
     isActive && connectedAsHost && hasActiveSessionCode && isLocalConnectionType;
 
   // Connection type section toggle
-  const connTypeRow = modal.querySelector(".sync-session-connection-type-row");
+  const connTypeRow = c?.connTypeRow || modal.querySelector(".sync-session-connection-type-row");
 
   if (roleToggle) roleToggle.classList.toggle("hidden", isActive);
-  if (noteEl) noteEl.classList.toggle("hidden", isActive);
   if (connTypeRow) connTypeRow.classList.toggle("hidden", isActive);
   if (connectedPanel) connectedPanel.classList.toggle("hidden", !isActive);
   if (copyServerAddressHostBtn) {
@@ -8043,6 +8264,29 @@ function updateSyncSessionModalPanelsVisibility(modal, snapshot = null) {
     );
     if (notifyToggle) {
       notifyToggle.classList.toggle("hidden", !connectedAsParticipant);
+    }
+
+    // --- Populate connected pseudo input with current display name ---
+    const pseudoInput = connectedPanel?.querySelector(
+      "#sync-session-connected-pseudo",
+    );
+    if (pseudoInput && document.activeElement !== pseudoInput) {
+      const clientId = state?.clientId || "";
+      const profiles = state?.participantProfiles;
+      const currentName =
+        (profiles &&
+          typeof profiles === "object" &&
+          (profiles instanceof Map
+            ? profiles.get(clientId)
+            : profiles[clientId])) ||
+        "";
+      if (currentName) {
+        pseudoInput.value = currentName;
+      }
+      const saveBtn = connectedPanel.querySelector(
+        "#sync-session-connected-pseudo-save-btn",
+      );
+      if (saveBtn) saveBtn.disabled = true;
     }
 
     // --- Live control mode: move selector into connected panel when hosting ---
@@ -8162,12 +8406,6 @@ function updateSyncSessionModalPanelsVisibility(modal, snapshot = null) {
     packPanel.classList.toggle("hidden", !showPackPanel);
   }
 
-  if (exportPackBtn) {
-    exportPackBtn.classList.toggle("hidden", !showHostSettingsPanel);
-  }
-  if (importPackBtn) {
-    importPackBtn.classList.toggle("hidden", !showHostSettingsPanel);
-  }
   if (publishOnlinePackBtn) {
     publishOnlinePackBtn.classList.toggle(
       "hidden",
@@ -8179,6 +8417,31 @@ function updateSyncSessionModalPanelsVisibility(modal, snapshot = null) {
       "hidden",
       !showParticipantOnlineDownload || !syncSessionMediaTransferEnabled,
     );
+  }
+
+  // Save-to-library / save-to-folder checkbox (guest only, visible when download is visible)
+  const savePackRow = modal
+    ? modal.querySelector("#sync-session-save-pack-row")
+    : document.getElementById("sync-session-save-pack-row");
+  if (savePackRow) {
+    const showSaveRow =
+      showParticipantOnlineDownload && syncSessionMediaTransferEnabled;
+    savePackRow.classList.toggle("hidden", !showSaveRow);
+    if (showSaveRow) {
+      const labelSpan = savePackRow.querySelector("[data-i18n]");
+      if (labelSpan) {
+        const key = isDesktopStandaloneRuntime()
+          ? "sync.savePackToFolder"
+          : "sync.savePackToLibrary";
+        labelSpan.setAttribute("data-i18n", key);
+        labelSpan.textContent = getI18nText(
+          key,
+          isDesktopStandaloneRuntime()
+            ? "Save images to folder"
+            : "Save images to library",
+        );
+      }
+    }
   }
 
   updateSyncSessionInvitePanelVisibility(modal, state);
@@ -8273,7 +8536,7 @@ function getSyncParticipantDisplayName(clientId, profiles = {}) {
   if (!normalizedId) return "";
   const name = String(profiles?.[normalizedId] || "").trim();
   if (name) return name;
-  return "Un participant";
+  return getI18nText("sync.unknownParticipant", "A participant");
 }
 
 function getSyncParticipantSelfSyncState(snapshot = null) {
@@ -8630,6 +8893,41 @@ function ensureSyncSessionService(modal) {
           clearSyncParticipantPackValidation();
         }
         updateSyncSessionVisualIndicators(nextState);
+        // Update drawing share button visibility when session state changes
+        if (typeof updateRemoteDrawShareButtonVisibility === "function") {
+          updateRemoteDrawShareButtonVisibility();
+        }
+        // Désenregistrer le listener de sync dessin quand on quitte une session
+        {
+          const wasConnected = previousStateSnapshot &&
+            (previousStateSnapshot.status === "hosting" || previousStateSnapshot.status === "joined");
+          const isNowConnected = nextState &&
+            (nextState.status === "hosting" || nextState.status === "joined");
+          if (wasConnected && !isNowConnected && typeof unregisterRemoteDrawSyncListener === "function") {
+            unregisterRemoteDrawSyncListener();
+          }
+        }
+
+        // --- Toast on session disconnect or connection drop ---
+        const _wasActive = previousStateSnapshot &&
+          (previousStateSnapshot.status === "hosting" || previousStateSnapshot.status === "joined");
+        const _isNowIdle = nextState?.status === "idle";
+        const _isNowConnecting = nextState?.status === "connecting";
+        if (_wasActive && _isNowIdle && typeof window.showPoseChronoToast === "function") {
+          const lastError = String(nextState?.lastError || "").trim();
+          const disconnectMsg = (lastError === "session-closed" || lastError === "host-left")
+            ? getI18nText("sync.sessionClosedByHost", "The host closed the session.")
+            : getI18nText("sync.sessionDisconnected", "Session disconnected.");
+          window.showPoseChronoToast({ type: "warning", message: disconnectMsg, duration: 3000 });
+        }
+        if (_wasActive && _isNowConnecting && typeof window.showPoseChronoToast === "function") {
+          window.showPoseChronoToast({
+            type: "warning",
+            message: getI18nText("sync.connectionLost", "Connection lost. Reconnecting..."),
+            duration: 3000,
+          });
+        }
+
         syncSessionLastParticipantsCount = nextParticipantsCount;
         const activeModal = document.getElementById("sync-session-modal");
         if (activeModal) {
@@ -8730,12 +9028,12 @@ function ensureSyncSessionService(modal) {
             if (joinedNonHostCount > 0) {
               const message =
                 joinedParticipants.length === 1
-                  ? `${joinedParticipants[0]} a rejoint la session.`
+                  ? getI18nText("sync.participantJoined", "{{name}} joined the session.", { name: joinedParticipants[0] })
                   : joinedParticipants.length > 1
-                    ? `${joinedParticipants.join(", ")} ont rejoint la session.`
+                    ? getI18nText("sync.participantsJoined", "{{names}} joined the session.", { names: joinedParticipants.join(", ") })
                     : joinedNonHostCount > 1
-                      ? `${joinedNonHostCount} participants ont rejoint la session en ligne.`
-                      : "Un participant a rejoint la session en ligne.";
+                      ? getI18nText("sync.participantJoinedCount", "{{count}} participants joined.", { count: joinedNonHostCount })
+                      : getI18nText("sync.unknownParticipantJoined", "A participant joined.");
               window.showPoseChronoToast({
                 type: "success",
                 message,
@@ -8762,12 +9060,12 @@ function ensureSyncSessionService(modal) {
             if (leftCount > 0) {
               const message =
                 leftParticipants.length === 1
-                  ? `${leftParticipants[0]} a quitté la session.`
+                  ? getI18nText("sync.participantLeft", "{{name}} left the session.", { name: leftParticipants[0] })
                   : leftParticipants.length > 1
-                    ? `${leftParticipants.join(", ")} ont quitté la session.`
+                    ? getI18nText("sync.participantsLeft", "{{names}} left the session.", { names: leftParticipants.join(", ") })
                     : leftCount > 1
-                      ? `${leftCount} participants ont quitté la session en ligne.`
-                      : "Un participant a quitté la session en ligne.";
+                      ? getI18nText("sync.participantLeftCount", "{{count}} participants left.", { count: leftCount })
+                      : getI18nText("sync.unknownParticipantLeft", "A participant left.");
               window.showPoseChronoToast({
                 type: "warning",
                 message,
@@ -9433,12 +9731,23 @@ function buildSyncSessionPackMediaRefs() {
     const ext = String(item.ext || "")
       .trim()
       .toLowerCase();
-    refs.push({
+    const ref = {
       identity,
       index: i,
       name: name || "unknown",
       ext,
-    });
+    };
+    // Eagle metadata (optional — ignored by non-Eagle clients)
+    if (Array.isArray(item.tags) && item.tags.length > 0) {
+      ref.tags = item.tags.slice(0, 50);
+    }
+    if (typeof item.annotation === "string" && item.annotation.trim()) {
+      ref.annotation = item.annotation.slice(0, 2000);
+    }
+    if (typeof item.star === "number" && item.star >= 0 && item.star <= 5) {
+      ref.star = item.star;
+    }
+    refs.push(ref);
   }
   return refs;
 }
@@ -10518,7 +10827,7 @@ function applySyncDownloadedMediaPackToState(pack, downloadResult) {
     folderInfoEl.innerHTML = `
       <div style="display: flex; align-items: baseline; justify-content: left; gap: 8px;">
         <span class="source-message-text">${getI18nText("sync.onlineMediaSourceLabel", "Online media")}</span>
-        <span class="image-count-text">${countMessage}</span>
+        <span class="image-count-text">${escapeHtml(countMessage)}</span>
       </div>
     `;
   }
@@ -10814,7 +11123,7 @@ async function emitSyncRuntimeState(reason, options = {}) {
   if (
     !force &&
     fingerprint === syncRuntimeLastSentFingerprint &&
-    nowMs - syncRuntimeLastSentAt < 1200
+    nowMs - syncRuntimeLastSentAt < SYNC_TOAST_THROTTLE_MS
   ) {
     return false;
   }
@@ -11761,10 +12070,12 @@ function setSyncSessionModalRole(nextRole) {
   renderSyncSessionStatus(modal);
 }
 
-function openSyncSessionModal() {
+async function openSyncSessionModal() {
   if (!isSyncFeatureEnabled()) {
     return;
   }
+  await _ensureSyncroModuleLoaded();
+  setupSyncSessionModalBindings();
   const modal = document.getElementById("sync-session-modal");
   if (!modal) return;
   syncSessionLastFocusedElement = document.activeElement;
@@ -11841,17 +12152,21 @@ function setupSyncSessionModalBindings() {
   const modal = document.getElementById("sync-session-modal");
   if (!modal) return;
 
+  cacheSyncModalElements(modal);
+
   const closeBtn = modal.querySelector("#close-sync-session-modal");
   const createBtn = modal.querySelector("#sync-session-create-btn");
   const joinBtn = modal.querySelector("#sync-session-join-btn");
   const leaveBtn = modal.querySelector("#sync-session-leave-btn");
   const hostPasswordInput = modal.querySelector("#sync-session-host-password");
+  const hostPseudoInput = modal.querySelector("#sync-session-host-pseudo");
   const joinCodeInput = modal.querySelector("#sync-session-code");
   const joinPseudoInput = modal.querySelector("#sync-session-guest-pseudo");
+
+  // Pré-remplir les pseudos mémorisés
+  if (hostPseudoInput) hostPseudoInput.value = UIPreferences.get("syncHostPseudo", "");
+  if (joinPseudoInput) joinPseudoInput.value = UIPreferences.get("syncGuestPseudo", "");
   const joinPasswordInput = modal.querySelector("#sync-session-password");
-  const guestActionNotificationsInput = modal.querySelector(
-    "#sync-session-guest-action-notifications-btn",
-  );
   const invitePanel = modal.querySelector("#sync-session-invite-panel");
   const copyCodeBtn =
     modal.querySelector("#sync-session-code-row") ||
@@ -11862,8 +12177,6 @@ function setupSyncSessionModalBindings() {
   const copyServerAddressConnectedBtn = modal.querySelector(
     "#sync-session-copy-server-address-connected-btn",
   );
-  const exportPackBtn = modal.querySelector("#sync-session-export-pack-btn");
-  const importPackBtn = modal.querySelector("#sync-session-import-pack-btn");
   const publishOnlinePackBtn = modal.querySelector(
     "#sync-session-publish-online-pack-btn",
   );
@@ -11888,26 +12201,14 @@ function setupSyncSessionModalBindings() {
   );
   const relayUrlRow = relayUrlInput ? relayUrlInput.closest(".sync-session-relay-url-row") || relayUrlInput.parentElement : null;
   const isLoopbackRelayUrl = (url) => {
-    try {
-      const parsed = new URL(String(url || "").trim());
-      const host = String(parsed.hostname || "").trim().toLowerCase();
-      return host === "localhost" || host === "127.0.0.1" || host === "::1";
-    } catch (_) {
-      return false;
-    }
+    try { return isLoopbackHostname(new URL(String(url || "").trim()).hostname); }
+    catch (_) { return false; }
   };
   const isUnshareableRelayUrl = (url) => {
-    try {
-      const parsed = new URL(String(url || "").trim());
-      const host = String(parsed.hostname || "").trim().toLowerCase();
-      return (
-        host === "0.0.0.0" ||
-        host === "::" ||
-        isLoopbackRelayUrl(url)
-      );
-    } catch (_) {
-      return true;
-    }
+    // Only loopback addresses (127.0.0.1, ::1, localhost) are truly unshareable.
+    // LAN IPs (192.168.x.x, 10.x.x.x) ARE shareable with peers on the same network.
+    try { return isLoopbackHostname(new URL(String(url || "").trim()).hostname); }
+    catch (_) { return true; }
   };
   const extractRelayUrlFromText = (text) => {
     const raw = String(text || "").trim();
@@ -11959,7 +12260,7 @@ function setupSyncSessionModalBindings() {
     const timer = setTimeout(() => {
       buttonEl.classList.remove("is-copied");
       copyActionFeedbackTimers.delete(buttonEl);
-    }, 1400);
+    }, SYNC_COPY_FEEDBACK_MS);
     copyActionFeedbackTimers.set(buttonEl, timer);
   };
   const handleCopyServerAddressClick = async (event) => {
@@ -12094,35 +12395,36 @@ function setupSyncSessionModalBindings() {
         return "";
       }
     })();
-    relayUrlInput.value = savedUrl || configUrl || "";
+    // In local mode, always start with the local relay URL even if localStorage
+    // still holds a public URL from a previous "Publique" session.
+    const isLocalMode = UIPreferences.get("syncConnectionType", "local") === "local";
+    if (isLocalMode) {
+      const localDefault = configUrl || "ws://127.0.0.1:8787";
+      // Use saved URL only if it is actually a local address
+      const isLocalRelayUrlSaved = savedUrl && (() => {
+        try { return isPrivateNetworkHostname(new URL(savedUrl).hostname); }
+        catch (_) { return false; }
+      })();
+      relayUrlInput.value = isLocalRelayUrlSaved ? savedUrl : localDefault;
+    } else {
+      relayUrlInput.value = savedUrl || configUrl || "";
+    }
     rememberSuggestedLocalRelayUrl(relayUrlInput.value);
 
     const isLocalRelayUrl = (url) => {
-      try {
-        const parsed = new URL(url);
-        const h = parsed.hostname;
-        return (
-          h === "localhost" ||
-          h === "127.0.0.1" ||
-          h.startsWith("192.168.") ||
-          h.startsWith("10.") ||
-          h.startsWith("172.16.") ||
-          h.startsWith("172.17.") ||
-          h.startsWith("172.18.") ||
-          h.startsWith("172.19.") ||
-          h.startsWith("172.2") ||
-          h.startsWith("172.30.") ||
-          h.startsWith("172.31.")
-        );
-      } catch (_) {
-        return false;
-      }
+      try { return isPrivateNetworkHostname(new URL(url).hostname); }
+      catch (_) { return false; }
     };
 
     const saveRelayUrl = () => {
       const value = relayUrlInput.value.trim();
+      // Compare against both the initial saved URL and the active transport URL
+      // to detect changes even when the modal was opened with a different mode.
       const currentEffectiveUrl = savedUrl || configUrl || "";
-      const urlChanged = value !== currentEffectiveUrl;
+      const activeTransportUrl = syncSessionTransportUrl || "";
+      const urlChanged =
+        value !== currentEffectiveUrl ||
+        (activeTransportUrl && value !== activeTransportUrl);
 
       // Reject non-local URLs that don't use wss://
       if (value && value.startsWith("ws://") && !isLocalRelayUrl(value)) {
@@ -12154,15 +12456,35 @@ function setupSyncSessionModalBindings() {
       } catch (_) {}
       rememberSuggestedLocalRelayUrl(value);
       if (urlChanged) {
-        // Transport is created at startup — reload immediately to apply the new URL.
-        localStorage.setItem('posechrono-reopen-sync-modal', 'true');
-        localStorage.setItem('posechrono-reopen-sync-modal-role', syncSessionModalRole || 'host');
-        location.reload();
-        return;
+        // Invalidate current service so it's recreated with the new URL on next use
+        if (syncSessionService && typeof syncSessionService.getState === "function") {
+          const svcState = syncSessionService.getState();
+          if (svcState && (svcState.status === "hosting" || svcState.status === "joined")) {
+            showSyncSessionToast({
+              type: "error",
+              message: getI18nText("sync.disconnectBeforeUrlChange", "Disconnect before changing the relay URL."),
+              duration: 3000,
+            });
+            return;
+          }
+        }
+        syncSessionService = null;
+        syncSessionTransportUrl = value;
+        syncSessionTransportMode = resolveSyncTransportMode();
+        if (syncSessionServiceUnsubscribe) {
+          syncSessionServiceUnsubscribe();
+          syncSessionServiceUnsubscribe = null;
+        }
+        showSyncSessionToast({
+          type: "success",
+          message: getI18nText("sync.relayUrlUpdated", "Relay URL updated."),
+          duration: 2000,
+        });
+        updateSyncSessionNetworkStatus(modal);
       }
       if (relayUrlSaveBtn) {
         relayUrlSaveBtn.classList.add("saved");
-        setTimeout(() => relayUrlSaveBtn.classList.remove("saved"), 1200);
+        setTimeout(() => relayUrlSaveBtn.classList.remove("saved"), SYNC_TOAST_THROTTLE_MS);
       }
     };
 
@@ -12332,6 +12654,15 @@ function setupSyncSessionModalBindings() {
     };
 
     let localServerStoppedManually = false;
+    // Track active polling timers so they can be cleaned up on re-click or modal close
+    let _activeStartPollTimer = null;
+    let _activeClipboardPollTimer = null;
+    let _activeClipboardFocusHandler = null;
+    const cleanupStartPolling = () => {
+      if (_activeStartPollTimer) { clearInterval(_activeStartPollTimer); _activeStartPollTimer = null; }
+      if (_activeClipboardPollTimer) { clearInterval(_activeClipboardPollTimer); _activeClipboardPollTimer = null; }
+      if (_activeClipboardFocusHandler) { window.removeEventListener("focus", _activeClipboardFocusHandler); _activeClipboardFocusHandler = null; }
+    };
 
     if (connType === "local") {
       runHealthCheck();
@@ -12345,12 +12676,13 @@ function setupSyncSessionModalBindings() {
         return;
       }
       runHealthCheck();
-    }, 5000);
+    }, SYNC_HEALTH_CHECK_MS);
 
     // Clean up interval when modal closes
     const observer = new MutationObserver(() => {
       if (modal.classList.contains("hidden")) {
         clearInterval(healthInterval);
+        cleanupStartPolling();
         observer.disconnect();
       }
     });
@@ -12360,6 +12692,7 @@ function setupSyncSessionModalBindings() {
       // Toggle : si le serveur est pret, on l'arrete
       if (startLocalServerBtn.classList.contains("is-ready")) {
         localServerStoppedManually = true;
+        cleanupStartPolling();
         killEagleLocalSyncServer();
         markServerPending();
         showSyncSessionToast({
@@ -12370,7 +12703,18 @@ function setupSyncSessionModalBindings() {
         return;
       }
 
+      // Clean up any stale polling from a previous attempt before starting fresh
+      cleanupStartPolling();
       localServerStoppedManually = false;
+
+      // Afficher immédiatement l'animation de chargement (avant les await)
+      const _loadingBaseText = escapeHtml(getI18nText("sync.localServerStarting", "Lancement…").replace(/(\.\.\.|…)$/, ""));
+      startLocalServerBtn.innerHTML = _loadingBaseText +
+        '<span class="sync-session-status-loading-dots" aria-hidden="true">' +
+        '<span class="sync-session-status-loading-dot">.</span>' +
+        '<span class="sync-session-status-loading-dot">.</span>' +
+        '<span class="sync-session-status-loading-dot">.</span>' +
+        '</span>';
 
       // Mode Desktop Electron : lancement via IPC.
       if (window.poseChronoDesktop?.sync?.startLocalServer) {
@@ -12415,11 +12759,26 @@ function setupSyncSessionModalBindings() {
 
           // Priorite 1 : require() direct (Eagle a Node.js integre, comme Desktop)
           try {
-            const resolvedPath = require.resolve(normalizePathForPlatform(serverScript));
-            if (!require.cache[resolvedPath]) {
-              require(resolvedPath);
+            const scriptPath = normalizePathForPlatform(serverScript);
+            // Clear stale require.cache entries for the server script.
+            // After a kill or crash the cache may still reference the dead module,
+            // blocking a fresh require().
+            const staleCacheKeys = Object.keys(require.cache || {}).filter(
+              (k) => k === scriptPath || k.replace(/\\/g, '/') === serverScript
+            );
+            for (const k of staleCacheKeys) {
+              try { delete require.cache[k]; } catch (_) {}
             }
-            _eagleLocalSyncProcess = { inProcess: true, script: resolvedPath };
+            // Kill any orphaned process on the port before starting fresh
+            try {
+              const shutRes = await fetch("http://127.0.0.1:8787/shutdown", { method: "POST" });
+              if (shutRes.ok) {
+                console.log("[Sync] killed orphaned relay server on port 8787");
+                await new Promise((r) => setTimeout(r, 600));
+              }
+            } catch (_noServer) {}
+            require(scriptPath);
+            _eagleLocalSyncProcess = { inProcess: true, script: scriptPath };
             launched = true;
           } catch (requireErr) {
             console.warn("[Sync] require() relay server failed:", requireErr);
@@ -12472,24 +12831,29 @@ function setupSyncSessionModalBindings() {
         }
       }
 
-      startLocalServerBtn.textContent = getI18nText("sync.localServerStarting", "Lancement…");
-
-      // Poll until server is reachable
+      // Poll until server is reachable — always use the local loopback address,
+      // not the relay input (which may still hold the public URL after switching mode).
+      const LOCAL_SERVER_POLL_URL = "ws://127.0.0.1:8787";
       let pollAttempts = 0;
-      const pollUrl = relayUrlInput?.value?.trim() || "ws://127.0.0.1:8787";
-      const pollTimer = setInterval(async () => {
+      _activeStartPollTimer = setInterval(async () => {
         pollAttempts++;
-        if (pollAttempts > 15) { clearInterval(pollTimer); markServerPending(); return; }
-        const health = await pingLocalServer(pollUrl);
+        if (pollAttempts > 15) { cleanupStartPolling(); markServerPending(); return; }
+        const health = await pingLocalServer(LOCAL_SERVER_POLL_URL);
         if (health.suggestedUrl) {
           rememberSuggestedLocalRelayUrl(health.suggestedUrl);
         }
         if (health.ok) {
-          clearInterval(pollTimer);
+          cleanupStartPolling();
           markServerReady();
+          // Prefer the LAN-shareable URL from the server, then the cached suggestion
           const startedAddress =
-            health.suggestedUrl || (await resolveShareableRelayUrl());
-          const startedAddressLabel = String(startedAddress || pollUrl).trim();
+            health.suggestedUrl || syncSessionSuggestedLocalRelayUrl || LOCAL_SERVER_POLL_URL;
+          // Update the relay input to the actual local address
+          if (relayUrlInput && String(relayUrlInput.value || "").trim() !== startedAddress) {
+            relayUrlInput.value = startedAddress;
+            if (relayUrlSaveBtn) relayUrlSaveBtn.click();
+          }
+          const startedAddressLabel = String(startedAddress).trim();
           showSyncSessionToast({
             type: "success",
             message:
@@ -12525,14 +12889,15 @@ function setupSyncSessionModalBindings() {
         } catch(e) {}
       };
 
+      _activeClipboardFocusHandler = checkClipboard;
       window.addEventListener('focus', checkClipboard);
 
       let attempts = 0;
-      const pollInterval = setInterval(() => {
+      _activeClipboardPollTimer = setInterval(() => {
         attempts++;
         if (attempts > 30 || autoFillDone) {
-          clearInterval(pollInterval);
-          window.removeEventListener('focus', checkClipboard);
+          if (_activeClipboardPollTimer) { clearInterval(_activeClipboardPollTimer); _activeClipboardPollTimer = null; }
+          if (_activeClipboardFocusHandler) { window.removeEventListener('focus', _activeClipboardFocusHandler); _activeClipboardFocusHandler = null; }
           return;
         }
         checkClipboard();
@@ -12542,7 +12907,6 @@ function setupSyncSessionModalBindings() {
 
   updateSyncSessionControlModeSelect(modal);
   ensureSyncSessionService(modal);
-  updateSyncSessionGuestActionNotificationsUi(modal);
   let syncControlModeUpdateInFlight = false;
 
   const handleCreateClick = async () => {
@@ -12559,14 +12923,19 @@ function setupSyncSessionModalBindings() {
     const controlMode = getSyncSessionControlModeValue(modal);
     const passwordRaw = String(hostPasswordInput?.value || "");
     const password = await syncHashPassword(passwordRaw);
+    const hostPseudoRaw = String(hostPseudoInput?.value || "");
+    const hostPseudoSanitized = sanitizeSyncGuestPseudoInputValue(hostPseudoRaw);
+    const hostParticipantName = normalizeSyncGuestPseudoValue(hostPseudoSanitized);
 
     if (createBtn) createBtn.disabled = true;
     try {
       const result = await service.hostSession({
         controlMode,
         password,
+        participantName: hostParticipantName,
       });
       if (hostPasswordInput) hostPasswordInput.value = "";
+      UIPreferences.set("syncHostPseudo", hostParticipantName);
 
       const sessionCode = result?.sessionCode || "";
       if (joinCodeInput && sessionCode) {
@@ -12676,6 +13045,7 @@ function setupSyncSessionModalBindings() {
     const participantName = normalizeSyncGuestPseudoValue(
       participantSanitizedInput,
     );
+    UIPreferences.set("syncGuestPseudo", participantName);
     try {
       const result = await service.joinSession({
         sessionCode,
@@ -12706,7 +13076,7 @@ function setupSyncSessionModalBindings() {
       if (errorCode === "invalid-password") {
         flashSyncSessionInputError(joinPasswordInput);
         const nowMs = Date.now();
-        if (nowMs - syncSessionLastInvalidPasswordToastAt >= 1200) {
+        if (nowMs - syncSessionLastInvalidPasswordToastAt >= SYNC_TOAST_THROTTLE_MS) {
           syncSessionLastInvalidPasswordToastAt = nowMs;
           showSyncSessionToast({
             type: "error",
@@ -12849,7 +13219,7 @@ function setupSyncSessionModalBindings() {
       });
       return;
     }
-    if (importPackBtn) importPackBtn.disabled = true;
+    // importPackBtn removed (element absent from HTML)
     try {
       const text = await pickJsonFileText();
       if (!text) {
@@ -12916,7 +13286,7 @@ function setupSyncSessionModalBindings() {
         duration: 2600,
       });
     } finally {
-      if (importPackBtn) importPackBtn.disabled = false;
+      // importPackBtn removed (element absent from HTML)
     }
   };
 
@@ -13197,7 +13567,7 @@ function setupSyncSessionModalBindings() {
           total: 1,
           meta: getI18nText("sync.uploadRelayNoMediaMeta", "Relay does not support media transfer yet."),
         });
-        closeSyncTransferModal({ delayMs: 1200 });
+        closeSyncTransferModal({ delayMs: SYNC_TOAST_THROTTLE_MS });
         showSyncSessionToast({
           type: "warning",
           message: getI18nText("sync.uploadRelayNoMediaToast", "Relay does not support media transfer yet. Settings pack was published, media upload skipped."),
@@ -13247,7 +13617,7 @@ function setupSyncSessionModalBindings() {
         tone: "error",
         meta: message,
       });
-      closeSyncTransferModal({ delayMs: 1200 });
+      closeSyncTransferModal({ delayMs: SYNC_TOAST_THROTTLE_MS });
       showSyncSessionToast({
         type: "error",
         message,
@@ -13257,6 +13627,128 @@ function setupSyncSessionModalBindings() {
       if (publishOnlinePackBtn) publishOnlinePackBtn.disabled = false;
     }
   };
+
+  // ─── Convert blob URL to raw base64 string ───
+  async function blobUrlToBase64(blobUrl) {
+    const response = await fetch(blobUrl);
+    const arrayBuffer = await response.arrayBuffer();
+    const bytes = new Uint8Array(arrayBuffer);
+    // Use chunks to avoid call stack overflow on large files
+    const chunkSize = 8192;
+    let binary = "";
+    for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+      const slice = bytes.subarray(offset, Math.min(offset + chunkSize, bytes.length));
+      binary += String.fromCharCode.apply(null, slice);
+    }
+    return btoa(binary);
+  }
+
+  // ─── Save downloaded media to Eagle library ───
+  async function saveSyncDownloadedMediaToEagleLibrary(downloadResult, mediaRefs, onProgress) {
+    const adapter = getPlatformAdapter();
+    if (
+      !adapter?.capabilities?.itemAdd ||
+      !adapter?.capabilities?.folderCreate
+    ) {
+      return { saved: 0 };
+    }
+
+    // 1. Find or create the "PoseChrono" folder at library root
+    const allFolders = await platformFolderGetAll();
+    let pcFolder = Array.isArray(allFolders)
+      ? allFolders.find(
+          (f) => f && f.name === "PoseChrono" && (!f.parent || !f.parentId),
+        )
+      : null;
+    if (!pcFolder) {
+      pcFolder = await platformFolderCreate({ name: "PoseChrono" });
+    }
+    const folderId = pcFolder?.id;
+    if (!folderId) return { saved: 0 };
+
+    // 2. Build metadata lookup by identity
+    const metaByIdentity = new Map();
+    if (Array.isArray(mediaRefs)) {
+      mediaRefs.forEach((ref) => {
+        if (ref?.identity) metaByIdentity.set(ref.identity, ref);
+      });
+    }
+
+    // 3. Import each downloaded file into Eagle
+    let saved = 0;
+    const entries = downloadResult?.entries || [];
+    const total = entries.length;
+    for (let idx = 0; idx < total; idx++) {
+      const entry = entries[idx];
+      try {
+        const base64 = await blobUrlToBase64(entry.source);
+        const mime = entry.mime || "image/jpeg";
+        const dataUrl = "data:" + mime + ";base64," + base64;
+
+        // Eagle metadata from pack (if host was on Eagle)
+        const meta = metaByIdentity.get(entry.identity) || {};
+        const options = {
+          name: entry.name || "pose",
+          folders: [folderId],
+        };
+        if (Array.isArray(meta.tags) && meta.tags.length > 0) {
+          options.tags = meta.tags;
+        }
+        if (meta.annotation) {
+          options.annotation = meta.annotation;
+        }
+
+        await platformItemAddFromURL(dataUrl, options);
+        saved++;
+      } catch (err) {
+        console.warn(
+          "[Sync] Failed to save media to Eagle:",
+          entry.identity,
+          err,
+        );
+      }
+      if (typeof onProgress === "function") {
+        onProgress({ done: idx + 1, total, saved });
+      }
+    }
+    return { saved };
+  }
+
+  // ─── Save downloaded media to a local folder (Desktop) ───
+  async function saveSyncDownloadedMediaToFolder(downloadResult, onProgress) {
+    // 1. Show directory picker
+    const result = await platformDialogShowOpenDialog({
+      properties: ["openDirectory", "createDirectory"],
+      title: getI18nText("sync.savePackToFolder", "Save images to folder"),
+    });
+    if (result?.canceled || !result?.filePaths?.[0]) return { saved: 0 };
+
+    const destDir = result.filePaths[0];
+    let saved = 0;
+    const entries = downloadResult?.entries || [];
+    const total = entries.length;
+    for (let idx = 0; idx < total; idx++) {
+      const entry = entries[idx];
+      try {
+        const base64 = await blobUrlToBase64(entry.source);
+        const ext = entry.ext || "jpg";
+        const name = entry.name || ("pose-" + idx);
+        const filePath = destDir + "/" + name + "." + ext;
+        await platformFileSaveBuffer(filePath, base64);
+        saved++;
+      } catch (err) {
+        console.warn(
+          "[Sync] Failed to save media to folder:",
+          entry.identity,
+          err,
+        );
+      }
+      if (typeof onProgress === "function") {
+        onProgress({ done: idx + 1, total, saved });
+      }
+    }
+    return { saved, path: destDir };
+  }
 
   const handleDownloadOnlinePackClick = async () => {
     const service = ensureSyncSessionService(modal);
@@ -13380,6 +13872,63 @@ function setupSyncSessionModalBindings() {
       );
       const applyResult = applySyncSessionPackManifest(pack);
 
+      // ─── Persistent save (if checkbox is checked) ───
+      const saveToggle = document.getElementById("sync-session-save-pack-toggle");
+      const shouldSave = saveToggle?.checked === true;
+      if (shouldSave && downloadResult?.entries?.length > 0) {
+        const saveProgressCb = ({ done, total }) => {
+          updateSyncTransferModalState({
+            status: getI18nText("sync.downloadStatusSaving", "Saving to library..."),
+            tone: "warning",
+            done: Math.max(0, done),
+            total: Math.max(1, total),
+            loading: true,
+          });
+        };
+        try {
+          updateSyncTransferModalState({
+            status: getI18nText("sync.downloadStatusSaving", "Saving to library..."),
+            tone: "warning",
+            done: 0,
+            total: Math.max(1, downloadResult.entries.length),
+            loading: true,
+          });
+          if (isDesktopStandaloneRuntime()) {
+            const saveResult = await saveSyncDownloadedMediaToFolder(downloadResult, saveProgressCb);
+            if (saveResult.saved > 0) {
+              showSyncSessionToast({
+                type: "success",
+                message: getI18nText(
+                  "sync.savedToFolderToast",
+                  "{{count}} images saved to {{path}}",
+                  { count: saveResult.saved, path: saveResult.path || "" },
+                ),
+                duration: 2800,
+              });
+            }
+          } else {
+            const saveResult = await saveSyncDownloadedMediaToEagleLibrary(
+              downloadResult,
+              pack.mediaRefs,
+              saveProgressCb,
+            );
+            if (saveResult.saved > 0) {
+              showSyncSessionToast({
+                type: "success",
+                message: getI18nText(
+                  "sync.savedToLibraryToast",
+                  "{{count}} images saved to library",
+                  { count: saveResult.saved },
+                ),
+                duration: 2800,
+              });
+            }
+          }
+        } catch (saveErr) {
+          console.warn("[Sync] Save to library/folder failed:", saveErr);
+        }
+      }
+
       if (applyResult.pendingMedia) {
         clearSyncParticipantPackValidation();
         syncParticipantTransferInProgress = false;
@@ -13398,7 +13947,7 @@ function setupSyncSessionModalBindings() {
           tone: "warning",
           meta: "Local media still required for full media order.",
         });
-        closeSyncTransferModal({ delayMs: 1200 });
+        closeSyncTransferModal({ delayMs: SYNC_TOAST_THROTTLE_MS });
         return;
       }
 
@@ -13518,7 +14067,7 @@ function setupSyncSessionModalBindings() {
           total: 1,
           meta: getI18nText("sync.downloadRelayNoMediaMeta", "Relay does not support media transfer yet."),
         });
-        closeSyncTransferModal({ delayMs: 1200 });
+        closeSyncTransferModal({ delayMs: SYNC_TOAST_THROTTLE_MS });
         showSyncSessionToast({
           type: "warning",
           message: getI18nText("sync.downloadRelayNoMediaToast", "Relay does not support media transfer yet. Settings pack was applied without media files."),
@@ -13585,7 +14134,7 @@ function setupSyncSessionModalBindings() {
         tone: "error",
         meta: message,
       });
-      closeSyncTransferModal({ delayMs: 1200 });
+      closeSyncTransferModal({ delayMs: SYNC_TOAST_THROTTLE_MS });
       showSyncSessionToast({
         type: "error",
         message,
@@ -13615,7 +14164,6 @@ function setupSyncSessionModalBindings() {
       controlModeTrigger,
       controlModeMenu,
       joinPseudoInput,
-      guestActionNotificationsInput,
       onCloseRequested: () => closeSyncSessionModal(),
       onCloseControlModeMenu: () => closeSyncSessionControlModeMenu(modal),
       onToggleControlModeMenu: () => toggleSyncSessionControlModeMenu(modal),
@@ -13660,12 +14208,6 @@ function setupSyncSessionModalBindings() {
           if (updated === false) {
             throw new Error("request-failed");
           }
-          if (syncSessionServiceState && typeof syncSessionServiceState === "object") {
-            syncSessionServiceState = {
-              ...syncSessionServiceState,
-              controlMode: nextControlMode,
-            };
-          }
           renderSyncSessionStatus(modal);
         } catch (error) {
           updateSyncSessionControlModeSelect(modal, previousControlMode);
@@ -13690,10 +14232,6 @@ function setupSyncSessionModalBindings() {
         sanitizeSyncGuestPseudoInputValue(value),
       onPseudoValidationError: (inputEl) =>
         notifySyncGuestPseudoValidationError(inputEl),
-      onGuestActionNotificationsChanged: (checked) => {
-        setSyncGuestActionNotificationsEnabled(!!checked);
-        updateSyncSessionGuestActionNotificationsUi(modal);
-      },
       onRoleButtonClicked: (role) => setSyncSessionModalRole(role),
       onCreateClicked: handleCreateClick,
       onJoinClicked: handleJoinClick,
@@ -13708,21 +14246,99 @@ function setupSyncSessionModalBindings() {
     if (joinBtn) joinBtn.addEventListener("click", handleJoinClick);
     if (leaveBtn) leaveBtn.addEventListener("click", handleLeaveClick);
     if (copyCodeBtn) copyCodeBtn.addEventListener("click", handleCopyClick);
-    if (guestActionNotificationsInput) {
-      guestActionNotificationsInput.addEventListener("change", () => {
-        setSyncGuestActionNotificationsEnabled(
-          !!guestActionNotificationsInput.checked,
+  }
+
+  // --- Connected pseudo change ---
+  {
+    const connectedPseudoInput = modal.querySelector(
+      "#sync-session-connected-pseudo",
+    );
+    const connectedPseudoSaveBtn = modal.querySelector(
+      "#sync-session-connected-pseudo-save-btn",
+    );
+    if (connectedPseudoInput) {
+      connectedPseudoInput.addEventListener("input", () => {
+        const sanitized = sanitizeSyncGuestPseudoInputValue(
+          connectedPseudoInput.value,
         );
-        updateSyncSessionGuestActionNotificationsUi(modal);
+        if (connectedPseudoInput.value !== sanitized) {
+          connectedPseudoInput.value = sanitized;
+        }
+        if (connectedPseudoSaveBtn) {
+          const state = syncSessionServiceState;
+          const clientId = state?.clientId || "";
+          const profiles = state?.participantProfiles;
+          const currentName =
+            (profiles &&
+              typeof profiles === "object" &&
+              (profiles instanceof Map
+                ? profiles.get(clientId)
+                : profiles[clientId])) ||
+            "";
+          const newName = normalizeSyncGuestPseudoValue(sanitized);
+          connectedPseudoSaveBtn.disabled = !newName || newName === currentName;
+        }
+      });
+
+      const doSaveConnectedPseudo = async () => {
+        const service = syncSessionService;
+        if (
+          !service ||
+          typeof service.updateParticipantProfile !== "function"
+        ) {
+          return;
+        }
+        const raw = connectedPseudoInput.value;
+        const displayName = normalizeSyncGuestPseudoValue(raw);
+        if (!displayName) {
+          notifySyncGuestPseudoValidationError(connectedPseudoInput);
+          return;
+        }
+        try {
+          const ok = await service.updateParticipantProfile({ displayName });
+          if (ok) {
+            // Persist to prefs so next session pre-fills with this name
+            const state = syncSessionServiceState;
+            const isHost =
+              state?.role === "host" ||
+              (state?.clientId && state.clientId === state?.hostClientId);
+            UIPreferences.set(
+              isHost ? "syncHostPseudo" : "syncGuestPseudo",
+              displayName,
+            );
+            if (connectedPseudoSaveBtn) connectedPseudoSaveBtn.disabled = true;
+            showSyncSessionToast({
+              type: "success",
+              message: getI18nText(
+                "sync.pseudoUpdated",
+                "Display name updated.",
+              ),
+              duration: 2000,
+            });
+          }
+        } catch (err) {
+          showSyncSessionToast({
+            type: "error",
+            message: String(err?.message || err || "Error"),
+            duration: 3000,
+          });
+        }
+      };
+
+      if (connectedPseudoSaveBtn) {
+        connectedPseudoSaveBtn.addEventListener("click", doSaveConnectedPseudo);
+      }
+      connectedPseudoInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          if (connectedPseudoSaveBtn && !connectedPseudoSaveBtn.disabled) {
+            doSaveConnectedPseudo();
+          }
+        }
       });
     }
   }
-  if (exportPackBtn) {
-    exportPackBtn.addEventListener("click", handleExportPackClick);
-  }
-  if (importPackBtn) {
-    importPackBtn.addEventListener("click", handleImportPackClick);
-  }
+
   if (publishOnlinePackBtn) {
     publishOnlinePackBtn.addEventListener(
       "click",
@@ -13757,7 +14373,7 @@ platformRuntimeOnRun(async () => {
 window.addEventListener("load", () => {
   setTimeout(() => {
     void runRuntimeLifecycle();
-  }, 250);
+  }, 50);
 });
 
 // Desktop: listen for update notifications from main process
@@ -13812,7 +14428,13 @@ if (window.poseChronoDesktop && typeof window.poseChronoDesktop.onUpdateAvailabl
 
 platformRuntimeOnHide(() => {
   stopTimer();
-  killEagleLocalSyncServer();
+  // Ne pas tuer le serveur local si une session sync est encore en cours
+  const _hideSt = syncSessionService?.getState?.();
+  const _sessionActive = _hideSt &&
+    (_hideSt.status === "hosting" || _hideSt.status === "joined");
+  if (!_sessionActive) {
+    killEagleLocalSyncServer();
+  }
   if (typeof window.flushTimelineStorage === "function") {
     void window.flushTimelineStorage();
   }
@@ -14636,7 +15258,13 @@ async function initPlugin() {
   if (!window.__posechronoTimelineFlushBound) {
     window.__posechronoTimelineFlushBound = true;
     window.addEventListener("beforeunload", () => {
-      killEagleLocalSyncServer();
+      // Ne pas tuer le serveur si on est un invité (on ne l'a pas lancé).
+      // Un refresh invité ne doit pas couper la session de l'hôte.
+      const _unloadSt = syncSessionService?.getState?.();
+      const _isJoinedAsGuest = _unloadSt?.status === "joined";
+      if (!_isJoinedAsGuest) {
+        killEagleLocalSyncServer();
+      }
       if (typeof window.flushTimelineStorage === "function") {
         void window.flushTimelineStorage();
       }
@@ -17177,7 +17805,7 @@ async function loadImages() {
         folderInfoEl.innerHTML = `
       <div class="folder-info-count">
         <span class="source-message-text">${sourceMessage}:</span>
-        <span class="image-count-text">${countMessage}</span>
+        <span class="image-count-text">${escapeHtml(countMessage)}</span>
       </div>
     `;
       }
@@ -17298,7 +17926,8 @@ async function loadImages() {
         if (isVideoFile(img)) perFolderStats[img.folderId].videos++;
         else perFolderStats[img.folderId].images++;
       }
-      renderDesktopFolderSources(folders, perFolderStats);
+      const individualFiles = await platformFilesGetSelected();
+      renderDesktopFolderSources(folders, perFolderStats, individualFiles);
     }
 
     if (isSyncSessionHostActive()) {
@@ -18688,17 +19317,17 @@ function updateDisplay(shouldAnimateFlip = false) {
           <div class="session-info-container">
           ${
             showGlobal
-              ? `<div class="global-progress">SESSION : ${globalPoseIndex} / ${totalPosesInSession}</div>`
+              ? `<div class="global-progress">SESSION : ${escapeHtml(globalPoseIndex)} / ${escapeHtml(totalPosesInSession)}</div>`
               : ""
           }
-            <div class="group-info">Série ${
+            <div class="group-info">Série ${escapeHtml(
               state.currentStepIndex + 1
-            }<span> / ${state.customQueue.length}</span></div>
+            )}<span> / ${escapeHtml(state.customQueue.length)}</span></div>
             <div class="pose-info">
-              <span class="current-pose">${state.currentPoseInStep || 1}</span>
-              <span class="total-poses"> / ${currentStep.count}</span>
+              <span class="current-pose">${escapeHtml(state.currentPoseInStep || 1)}</span>
+              <span class="total-poses"> / ${escapeHtml(currentStep.count)}</span>
             </div>
-            
+
           </div>
         `;
       }
@@ -19758,6 +20387,7 @@ function refreshGuidesListInModal(popup) {
 
 function showGridConfig() {
   closeAllContextMenus();
+  runCleanup("grid-config");
 
   // Fermer si déjà ouvert
   const existing = document.getElementById("grid-config-popup");
@@ -19797,7 +20427,7 @@ function showGridConfig() {
     <div id="grid-config-header" style="padding: 15px 20px; border-bottom: 1px solid rgba(255, 255, 255, 0.1); cursor: move; user-select: none;">
       <h3 style="margin: 0; color: var(--color-primary); font-size: 18px; text-align: center;">
         ${i18next.t("filters.gridConfig")}
-        <span style="color: #888; font-size: 11px; font-weight: normal; margin-left: 8px;">Shift+${CONFIG.HOTKEYS.GRID.toUpperCase()}</span>
+        <span style="color: #888; font-size: 11px; font-weight: normal; margin-left: 8px;">Shift+${escapeHtml(CONFIG.HOTKEYS.GRID.toUpperCase())}</span>
       </h3>
     </div>
     <div style="padding: 20px;">
@@ -19833,9 +20463,9 @@ function showGridConfig() {
       <div style="margin-bottom: 15px;">
         <label style="display: flex; justify-content: space-between; align-items: center; color: #ccc; font-size: 13px; margin-bottom: 5px;">
           <span>${i18next.t("grid.cols")}</span>
-          <span id="grid-cols-value" style="color: var(--color-primary); font-weight: bold;">${
+          <span id="grid-cols-value" style="color: var(--color-primary); font-weight: bold;">${escapeHtml(
             state.gridCols
-          }</span>
+          )}</span>
         </label>
         <input type="range" id="grid-cols-slider" min="1" max="10" value="${
           state.gridCols
@@ -19845,9 +20475,9 @@ function showGridConfig() {
       <div style="margin-bottom: 15px;">
         <label style="display: flex; justify-content: space-between; align-items: center; color: #ccc; font-size: 13px; margin-bottom: 5px;">
           <span>${i18next.t("grid.rows")}</span>
-          <span id="grid-rows-value" style="color: var(--color-primary); font-weight: bold;">${
+          <span id="grid-rows-value" style="color: var(--color-primary); font-weight: bold;">${escapeHtml(
             state.gridRows
-          }</span>
+          )}</span>
         </label>
         <input type="range" id="grid-rows-slider" min="1" max="10" value="${
           state.gridRows
@@ -19902,22 +20532,25 @@ function showGridConfig() {
     header.style.cursor = "grabbing";
   });
 
-  document.addEventListener("mousemove", (e) => {
+  const _gcMouseMove = (e) => {
     if (!isDragging) return;
-
     e.preventDefault();
     currentX = e.clientX - initialX;
     currentY = e.clientY - initialY;
-
     popup.style.left = currentX + "px";
     popup.style.top = currentY + "px";
-  });
-
-  document.addEventListener("mouseup", () => {
+  };
+  const _gcMouseUp = () => {
     if (isDragging) {
       isDragging = false;
       header.style.cursor = "move";
     }
+  };
+  document.addEventListener("mousemove", _gcMouseMove);
+  document.addEventListener("mouseup", _gcMouseUp);
+  registerCleanup("grid-config", () => {
+    document.removeEventListener("mousemove", _gcMouseMove);
+    document.removeEventListener("mouseup", _gcMouseUp);
   });
 
   // Event listeners
@@ -20028,6 +20661,7 @@ function showGridConfig() {
         }
 
         popup.remove();
+        runCleanup("grid-config");
         document.removeEventListener("click", closeHandler, true);
         document.removeEventListener("keydown", escapeHandler);
       }
@@ -20038,6 +20672,7 @@ function showGridConfig() {
     const escapeHandler = (e) => {
       if (e.key === "Escape") {
         popup.remove();
+        runCleanup("grid-config");
         document.removeEventListener("click", closeHandler, true);
         document.removeEventListener("keydown", escapeHandler);
       }
@@ -20320,7 +20955,7 @@ function showSilhouetteContextMenu(x, y) {
     <div class="silhouette-ctx-section">
       <div class="silhouette-ctx-row">
         <span>${i18next.t("filters.brightness")}</span>
-        <span class="silhouette-ctx-brightness-val">${state.silhouetteBrightness.toFixed(2)}</span>
+        <span class="silhouette-ctx-brightness-val">${escapeHtml(state.silhouetteBrightness.toFixed(2))}</span>
       </div>
       <input type="range" class="threshold-slider silhouette-ctx-slider" min="0" max="6" step="0.01" value="${state.silhouetteBrightness}">
       <div class="silhouette-ctx-markers">
@@ -20391,6 +21026,7 @@ function showSilhouetteContextMenu(x, y) {
  */
 function showSilhouetteConfig() {
   closeAllContextMenus();
+  runCleanup("silhouette-config");
 
   // Fermer si déjà ouvert
   const existing = document.getElementById("silhouette-config-popup");
@@ -20431,7 +21067,7 @@ function showSilhouetteConfig() {
     <div class="threshold-container">
       <label class="threshold-header">
         <span>${i18next.t("filters.brightness")}</span>
-        <span id="brightness-value" class="threshold-value">${state.silhouetteBrightness.toFixed(2)}</span>
+        <span id="brightness-value" class="threshold-value">${escapeHtml(state.silhouetteBrightness.toFixed(2))}</span>
       </label>
       <input type="range" id="brightness-slider" class="threshold-slider" min="0" max="6" step="0.01" value="${state.silhouetteBrightness}">
       <div class="threshold-markers">
@@ -20475,20 +21111,25 @@ function showSilhouetteConfig() {
     header.style.cursor = "grabbing";
   });
 
-  document.addEventListener("mousemove", (e) => {
+  const _scMouseMove = (e) => {
     if (!isDragging) return;
     e.preventDefault();
     currentX = e.clientX - initialX;
     currentY = e.clientY - initialY;
     popup.style.left = currentX + "px";
     popup.style.top = currentY + "px";
-  });
-
-  document.addEventListener("mouseup", () => {
+  };
+  const _scMouseUp = () => {
     if (isDragging) {
       isDragging = false;
       header.style.cursor = "move";
     }
+  };
+  document.addEventListener("mousemove", _scMouseMove);
+  document.addEventListener("mouseup", _scMouseUp);
+  registerCleanup("silhouette-config", () => {
+    document.removeEventListener("mousemove", _scMouseMove);
+    document.removeEventListener("mouseup", _scMouseUp);
   });
 
   // Event listeners
@@ -20553,6 +21194,7 @@ function showSilhouetteConfig() {
         }
 
         popup.remove();
+        runCleanup("silhouette-config");
         document.removeEventListener("click", closeHandler, true);
         document.removeEventListener("keydown", escapeHandler);
       }
@@ -20563,6 +21205,7 @@ function showSilhouetteConfig() {
     const escapeHandler = (e) => {
       if (e.key === "Escape") {
         popup.remove();
+        runCleanup("silhouette-config");
         document.removeEventListener("click", closeHandler, true);
         document.removeEventListener("keydown", escapeHandler);
       }
@@ -20679,11 +21322,16 @@ function showFlipAnimationMenu(x, y) {
 
 let desktopSourcesExpanded = false;
 
-function renderDesktopFolderSources(folders, perFolderStats) {
+function renderDesktopFolderSources(folders, perFolderStats, individualFiles) {
   const widget = document.getElementById("desktop-sources-widget");
   const folderInfoRow = document.getElementById("folder-info-row");
   const chooseBtn = document.getElementById("choose-media-folder-btn");
   if (!widget) return;
+
+  const hasFiles =
+    Array.isArray(individualFiles) && individualFiles.length > 0;
+  const hasFolders = Array.isArray(folders) && folders.length > 0;
+  const hasSources = hasFolders || hasFiles;
 
   // Afficher le widget, masquer la ligne classique
   widget.classList.remove("hidden");
@@ -20696,7 +21344,7 @@ function renderDesktopFolderSources(folders, perFolderStats) {
 
   // ---- Résumé ----
   if (summaryEl) {
-    if (!folders || folders.length === 0) {
+    if (!hasSources) {
       summaryEl.textContent = i18next.t(
         "controls.selectMediaFolder",
         "Choisir un dossier source",
@@ -20706,11 +21354,21 @@ function renderDesktopFolderSources(folders, perFolderStats) {
         (img) => !isVideoFile(img),
       ).length;
       const totalVideos = state.images.filter((img) => isVideoFile(img)).length;
-      const folderWord =
-        folders.length > 1
-          ? i18next.t("settings.foldersLabel", { defaultValue: "dossiers" })
-          : i18next.t("settings.folderLabel", { defaultValue: "dossier" });
-      const parts = [`${folders.length} ${folderWord}`];
+      const parts = [];
+      if (hasFolders) {
+        const folderWord =
+          folders.length > 1
+            ? i18next.t("settings.foldersLabel", { defaultValue: "dossiers" })
+            : i18next.t("settings.folderLabel", { defaultValue: "dossier" });
+        parts.push(`${folders.length} ${folderWord}`);
+      }
+      if (hasFiles) {
+        const fileWord =
+          individualFiles.length > 1
+            ? i18next.t("settings.filesLabel", { defaultValue: "fichiers" })
+            : i18next.t("settings.fileLabel", { defaultValue: "fichier" });
+        parts.push(`${individualFiles.length} ${fileWord}`);
+      }
       if (totalImages > 0) parts.push(`${totalImages} img`);
       if (totalVideos > 0) parts.push(`${totalVideos} vid`);
       summaryEl.textContent = parts.join(" • ");
@@ -20719,10 +21377,11 @@ function renderDesktopFolderSources(folders, perFolderStats) {
 
   // ---- Liste déroulante ----
   if (listEl) {
-    if (!folders || folders.length === 0) {
-      listEl.innerHTML = `<div class="desktop-sources-empty">${i18next.t("settings.noFoldersConfigured", { defaultValue: "Aucun dossier configuré" })}</div>`;
+    if (!hasSources) {
+      listEl.innerHTML = `<div class="desktop-sources-empty">${i18next.t("settings.noSourcesConfigured", { defaultValue: "Aucune source configurée" })}</div>`;
     } else {
-      listEl.innerHTML = folders
+      // Lignes dossiers
+      const folderRows = (folders || [])
         .map((folder) => {
           const stats = perFolderStats?.[folder.id] || { images: 0, videos: 0 };
           const countParts = [];
@@ -20759,14 +21418,78 @@ function renderDesktopFolderSources(folders, perFolderStats) {
         })
         .join("");
 
-      // Attacher les handlers de suppression
-      listEl.querySelectorAll(".desktop-source-remove-btn").forEach((btn) => {
-        btn.addEventListener("click", (e) => {
-          e.stopPropagation();
-          const fid = btn.dataset.folderId;
-          if (fid) removeDesktopMediaFolder(fid);
+      // Ligne fichiers individuels
+      let filesRow = "";
+      if (hasFiles) {
+        const filesVirtualId = "desktop-files:individual";
+        const fStats = perFolderStats?.[filesVirtualId] || {
+          images: 0,
+          videos: 0,
+        };
+        const fCountParts = [];
+        if (fStats.images > 0) fCountParts.push(`${fStats.images} img`);
+        if (fStats.videos > 0) fCountParts.push(`${fStats.videos} vid`);
+        if (fCountParts.length === 0)
+          fCountParts.push(
+            i18next.t("settings.zeroMedia", { defaultValue: "0 média" }),
+          );
+        const fCountStr = fCountParts.join(", ");
+        const filesLabel = i18next.t("settings.individualFiles", {
+          defaultValue: "Fichiers individuels",
         });
-      });
+        const filesSubLabel =
+          individualFiles.length > 1
+            ? i18next.t("settings.nFilesSelected", {
+                defaultValue: `${individualFiles.length} fichiers sélectionnés`,
+                count: individualFiles.length,
+              })
+            : i18next.t("settings.oneFileSelected", {
+                defaultValue: "1 fichier sélectionné",
+              });
+        filesRow = `
+          <div class="desktop-source-item">
+            <span class="desktop-source-item-icon desktop-source-item-icon--files">
+              <svg xmlns="http://www.w3.org/2000/svg" height="14px" viewBox="0 -960 960 960" width="14px" fill="currentColor"><path d="M360-460h240v-60H360v60Zm0-120h240v-60H360v60ZM260-200q-24.75 0-42.37-17.63Q200-235.25 200-260v-440q0-24.75 17.63-42.38Q235.25-760 260-760h280l220 220v280q0 24.75-17.63 42.37Q724.75-200 700-200H260Zm260-440v-60H260v440h440v-280H580v-100H260Zm-260 0v60-60 440-440Z"/></svg>
+            </span>
+            <div class="desktop-source-item-info">
+              <span class="desktop-source-item-name">${escapeHtml(filesLabel)}</span>
+              <span class="desktop-source-item-path">${escapeHtml(filesSubLabel)}</span>
+            </div>
+            <span class="desktop-source-item-count">${escapeHtml(fCountStr)}</span>
+            <button
+              type="button"
+              class="desktop-source-remove-btn desktop-source-remove-files-btn"
+              aria-label="${i18next.t("settings.removeSourceFiles", { defaultValue: "Supprimer les fichiers" })}"
+              data-tooltip="${i18next.t("settings.removeSourceFiles", { defaultValue: "Supprimer les fichiers" })}"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" height="14px" viewBox="0 -960 960 960" width="14px" fill="currentColor"><path d="m256-200-56-56 224-224-224-224 56-56 224 224 224-224 56 56-224 224 224 224-56 56-224-224-224 224Z"/></svg>
+            </button>
+          </div>`;
+      }
+
+      listEl.innerHTML = folderRows + filesRow;
+
+      // Attacher les handlers de suppression — dossiers
+      listEl
+        .querySelectorAll(".desktop-source-remove-btn:not(.desktop-source-remove-files-btn)")
+        .forEach((btn) => {
+          btn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            const fid = btn.dataset.folderId;
+            if (fid) removeDesktopMediaFolder(fid);
+          });
+        });
+
+      // Attacher le handler de suppression — fichiers individuels
+      const removeFilesBtn = listEl.querySelector(
+        ".desktop-source-remove-files-btn",
+      );
+      if (removeFilesBtn) {
+        removeFilesBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          removeDesktopMediaFiles();
+        });
+      }
     }
 
     // Appliquer l'état expand/collapse
@@ -20792,13 +21515,39 @@ function renderDesktopFolderSources(folders, perFolderStats) {
     });
   }
 
-  // Attacher le bouton Ajouter (une seule fois)
+  // Attacher le bouton Ajouter (une seule fois) — dropdown dossier / fichiers
   const addBtn = document.getElementById("desktop-sources-add-btn");
   if (addBtn && !addBtn.dataset.sourcesAddBound) {
     addBtn.dataset.sourcesAddBound = "1";
     addBtn.addEventListener("click", (e) => {
       e.stopPropagation();
-      selectDesktopMediaFolders();
+      const rect = addBtn.getBoundingClientRect();
+      const folderSvg =
+        '<svg xmlns="http://www.w3.org/2000/svg" height="16px" viewBox="0 -960 960 960" width="16px" fill="currentColor"><path d="M160-160q-33 0-56.5-23.5T80-240v-480q0-33 23.5-56.5T160-800h240l80 80h320q33 0 56.5 23.5T880-640v400q0 33-23.5 56.5T800-160H160Z"/></svg>';
+      const fileSvg =
+        '<svg xmlns="http://www.w3.org/2000/svg" height="16px" viewBox="0 -960 960 960" width="16px" fill="currentColor"><path d="M360-460h240v-60H360v60Zm0-120h240v-60H360v60ZM260-200q-24.75 0-42.37-17.63Q200-235.25 200-260v-440q0-24.75 17.63-42.38Q235.25-760 260-760h280l220 220v280q0 24.75-17.63 42.37Q724.75-200 700-200H260Zm260-440v-60H260v440h440v-280H580v-100H260Zm-260 0v60-60 440-440Z"/></svg>';
+      buildContextMenu(
+        "desktop-sources-add-menu",
+        [
+          {
+            text: i18next.t("settings.addSourceFolder", {
+              defaultValue: "Ajouter un dossier",
+            }),
+            icon: folderSvg,
+            onClick: () => selectDesktopMediaFolders(),
+          },
+          {
+            text: i18next.t("settings.addSourceFiles", {
+              defaultValue: "Ajouter des fichiers",
+            }),
+            icon: fileSvg,
+            onClick: () => selectDesktopMediaFiles(),
+          },
+        ],
+        rect.left,
+        rect.bottom + 4,
+        { size: "sm" },
+      );
     });
   }
 }
@@ -20814,6 +21563,20 @@ async function selectDesktopMediaFolders() {
 async function removeDesktopMediaFolder(folderId) {
   if (!isDesktopStandaloneRuntime()) return;
   await platformFolderRemove(folderId);
+  await loadImages();
+}
+
+async function selectDesktopMediaFiles() {
+  if (!isDesktopStandaloneRuntime()) return false;
+  const files = await platformFilesBrowseAndAdd();
+  if (!files) return false;
+  await loadImages();
+  return true;
+}
+
+async function removeDesktopMediaFiles() {
+  if (!isDesktopStandaloneRuntime()) return;
+  await platformFilesRemoveAll();
   await loadImages();
 }
 
@@ -26498,9 +27261,9 @@ function updateRelaxDisplay() {
 
   // Afficher le temps total dans le timer et le temps de la pose en dessous
   timerDisplay.innerHTML = `
-    ${tMins}:${tSecs}
+    ${escapeHtml(tMins)}:${escapeHtml(tSecs)}
     <div style="font-size: 11px; opacity: 0.7; margin-top: 4px;">
-      ${i18next.t("misc.poseLabel")} : ${pMins}:${pSecs}
+      ${i18next.t("misc.poseLabel")} : ${escapeHtml(pMins)}:${escapeHtml(pSecs)}
     </div>
   `;
 }
@@ -26749,7 +27512,7 @@ function renderCustomQueue() {
                   </div>
               </div>
               <div class="step-item-right">
-                  <span class="step-item-total">TOTAL: ${formatTime(groupTotalSeconds)}</span>
+                  <span class="step-item-total">TOTAL: ${escapeHtml(formatTime(groupTotalSeconds))}</span>
                   <button data-remove-step="${index}" class="step-item-remove">✕</button>
               </div>
           </div>`;
@@ -26921,7 +27684,7 @@ async function loadSessionImages(imageIds, options = {}) {
         videoCount,
       });
 
-      folderInfo.innerHTML = `<span class="success-text">${i18next.t("settings.loadedFromSession", { count: countMessage })}</span>`;
+      folderInfo.innerHTML = `<span class="success-text">${i18next.t("settings.loadedFromSession", { count: escapeHtml(countMessage) })}</span>`;
     }
 
     // Mettre à jour l'état du bouton start
@@ -27003,9 +27766,9 @@ function updateTotalDisplay(totalSeconds) {
   }
 
   totalDiv.style.display = "";
-  totalDiv.innerHTML = `${i18next.t("modes.custom.totalDuration")} : <b>${formatTime(
+  totalDiv.innerHTML = `${i18next.t("modes.custom.totalDuration")} : <b>${escapeHtml(formatTime(
     totalSeconds,
-  )}</b>`;
+  ))}</b>`;
 }
 
 window.removeStepFromQueue = function (index) {
@@ -27199,6 +27962,38 @@ function syncMemoryDurationButtons() {
   toggleDurationButtonsForValue(memoryProgressiveBtns, target.duration);
 }
 
+const MODE_INDEX = { classique: 0, custom: 1, relax: 2, memory: 3 };
+
+const SLIDE_CLASSES = [
+  "slide-active",
+  "slide-out-left",
+  "slide-out-right",
+  "slide-ready-left",
+  "slide-ready-right",
+  "fade-in",
+  "fade-out",
+];
+
+function clearSlideClasses(el) {
+  if (el) el.classList.remove(...SLIDE_CLASSES);
+}
+
+function resolveSlideDirection(fromMode, toMode) {
+  const fromIdx = MODE_INDEX[fromMode] ?? 0;
+  const toIdx = MODE_INDEX[toMode] ?? 0;
+  return toIdx > fromIdx ? "left" : "right";
+}
+
+function updateModeIndicator(mode) {
+  const indicator = document.querySelector(".mode-indicator");
+  if (!indicator) return;
+  const idx = MODE_INDEX[mode] ?? 0;
+  const animate =
+    CONFIG.enableAnimations && CONFIG.enableModeIndicatorAnimation;
+  indicator.style.transition = animate ? "" : "none";
+  indicator.style.transform = "translateX(" + idx * 100 + "%)";
+}
+
 function resolveModeTransitionPlan(mode, previousMode) {
   if (!SESSION_MODE_UI_UTILS?.resolveModeTransition) {
     logMissingShared("SESSION_MODE_UI_UTILS.resolveModeTransition");
@@ -27242,18 +28037,19 @@ function switchMode(mode) {
   document.querySelectorAll(".mode-btn").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.mode === mode);
   });
-
-  classicPanel.classList.remove("mode-frozen");
-  customPanel.classList.remove("mode-frozen");
-  memoryPanel.classList.remove("mode-frozen");
+  updateModeIndicator(mode);
 
   if (transitionPlan.isRelax) {
+    // Entrée relax : retirer frozen des autres, geler le panel actif
+    classicPanel.classList.remove("mode-frozen");
+    customPanel.classList.remove("mode-frozen");
+    memoryPanel.classList.remove("mode-frozen");
     const activePanel =
       panelByKey[transitionPlan.relaxFrozenPanelKey] || classicPanel;
     activePanel.classList.add("mode-frozen");
     activePanel.style.display = "block";
-    activePanel.classList.add("fade-in");
-    activePanel.classList.remove("fade-out");
+    clearSlideClasses(activePanel);
+    activePanel.classList.add("slide-active");
   } else {
     let incoming = panelByKey[transitionPlan.incomingPanelKey] || null;
     let outgoing = panelByKey[transitionPlan.outgoingPanelKey] || null;
@@ -27268,28 +28064,61 @@ function switchMode(mode) {
     syncMemoryDurationButtons();
 
     if (transitionPlan.hideAllPanelsFirst) {
+      // Sortie relax ou état initial — récupérer le panel gelé pour
+      // l'utiliser comme outgoing au lieu de tout cacher brutalement
+      const frozenPanel = [classicPanel, customPanel, memoryPanel].find(
+        (p) => p.classList.contains("mode-frozen")
+      );
+
+      // Cacher silencieusement les panels qui ne sont ni frozen ni incoming
       [classicPanel, customPanel, memoryPanel].forEach((panel) => {
-        panel.classList.remove("mode-frozen");
-        panel.style.display = "none";
-        panel.classList.add("fade-out");
+        if (panel !== frozenPanel && panel !== incoming) {
+          panel.style.display = "none";
+          panel.classList.remove("mode-frozen");
+          clearSlideClasses(panel);
+          panel.classList.add("slide-out-left");
+        }
       });
-      outgoing = null;
+
+      if (frozenPanel && frozenPanel === incoming) {
+        // Retour au même mode qu'avant relax : dé-geler sur place (pas de slide)
+        frozenPanel.classList.remove("mode-frozen");
+        clearSlideClasses(frozenPanel);
+        frozenPanel.style.display = "block";
+        frozenPanel.classList.add("slide-active");
+        incoming = null;
+        outgoing = null;
+      } else if (frozenPanel) {
+        // Vers un mode différent : le panel gelé glisse dehors
+        clearSlideClasses(frozenPanel);
+        frozenPanel.style.display = "block";
+        frozenPanel.classList.add("slide-active");
+        // mode-frozen reste — sera retiré dans le rAF au moment du slide-out
+        outgoing = frozenPanel;
+      } else {
+        // État initial (previousMode === "") : pas de panel gelé
+        outgoing = null;
+      }
+    } else {
+      classicPanel.classList.remove("mode-frozen");
+      customPanel.classList.remove("mode-frozen");
+      memoryPanel.classList.remove("mode-frozen");
     }
 
     if (!CONFIG.enableAnimations) {
       if (incoming) {
+        clearSlideClasses(incoming);
         incoming.style.display = "block";
-        incoming.classList.add("fade-in");
-        incoming.classList.remove("fade-out");
+        incoming.classList.add("slide-active");
       }
 
       if (outgoing && outgoing !== incoming) {
+        clearSlideClasses(outgoing);
         outgoing.style.display = "none";
-        outgoing.classList.remove("fade-in");
-        outgoing.classList.add("fade-out");
+        outgoing.classList.add("slide-out-left");
       }
 
-      if (container) container.style.minHeight = "";
+      if (container) container.style.height = "";
       applyScrubbableBehavior(document);
       updateStartButtonState();
       // scheduleSyncRuntimeState doit être appelé même sans animations
@@ -27298,36 +28127,62 @@ function switchMode(mode) {
       return;
     }
 
-    if (outgoing && outgoing !== incoming && container) {
-      container.style.minHeight = outgoing.offsetHeight + "px";
+    // Direction du slide contextuelle (suit la position des onglets)
+    const direction = resolveSlideDirection(previousMode, mode);
+    const outClass =
+      direction === "left" ? "slide-out-left" : "slide-out-right";
+    const readyClass =
+      direction === "left" ? "slide-ready-right" : "slide-ready-left";
+
+    // 1. Verrouiller la hauteur du container (height, pas min-height,
+    //    pour empêcher à la fois le saut vers le haut ET vers le bas)
+    if (container) {
+      container.style.height = container.offsetHeight + "px";
     }
 
+    // 2. Placer le panel entrant hors-écran (transition: none via CSS)
     if (incoming) {
+      clearSlideClasses(incoming);
       incoming.style.display = "block";
-      incoming.style.visibility = "hidden";
-      incoming.classList.add("fade-out");
+      incoming.classList.add(readyClass);
     }
 
+    // 3. Double rAF : commit position ready, puis déclencher la transition
     requestAnimationFrame(() => {
-      if (incoming) {
-        incoming.style.visibility = "visible";
-        const newHeight = incoming.offsetHeight;
-        if (container) container.style.minHeight = newHeight + "px";
-        incoming.classList.replace("fade-out", "fade-in");
-      }
-
-      if (outgoing && outgoing !== incoming) {
-        outgoing.classList.replace("fade-in", "fade-out");
-      }
-
-      setTimeout(() => {
-        if (state.sessionMode === mode) {
-          if (outgoing && outgoing !== incoming) {
-            outgoing.style.display = "none";
-          }
-          if (container) container.style.minHeight = "";
+      requestAnimationFrame(() => {
+        // D'abord appliquer tous les changements de classes
+        if (incoming) {
+          incoming.classList.replace(readyClass, "slide-active");
         }
-      }, CONFIG.animationDuration);
+        if (outgoing && outgoing !== incoming) {
+          outgoing.classList.remove("mode-frozen");
+          clearSlideClasses(outgoing);
+          outgoing.classList.add(outClass);
+        }
+
+        // Mesurer la vraie hauteur cible en layout final pour
+        // éviter un micro-saut au moment de relâcher height
+        if (container) {
+          const lockedHeight = container.style.height;
+          container.style.transition = "none";
+          container.style.height = "";
+          const targetHeight = container.offsetHeight;
+          container.style.height = lockedHeight;
+          container.offsetHeight; // force reflow — commit l'état "from"
+          container.style.transition = "";
+          container.style.height = targetHeight + "px";
+        }
+
+        // 4. Nettoyage après fin de transition
+        setTimeout(() => {
+          if (state.sessionMode === mode) {
+            if (outgoing && outgoing !== incoming) {
+              outgoing.style.display = "none";
+            }
+            if (container) container.style.height = "";
+          }
+        }, CONFIG.animationDuration);
+      });
     });
   }
 

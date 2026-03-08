@@ -26,6 +26,8 @@ function finalizeDrawingModeActivation(toolName = "pencil", contextType = null) 
     drawingManager.normal.measuresCtx = drawingManager.normal.measures?.getContext("2d", { willReadFrequently: true }) || null;
     drawingManager.normal.lightbox = document.getElementById("drawing-lightbox");
     drawingManager.normal.lightboxCtx = drawingManager.normal.lightbox?.getContext("2d", { willReadFrequently: true }) || null;
+    drawingManager.normal.remote = document.getElementById("drawing-remote");
+    drawingManager.normal.remoteCtx = drawingManager.normal.remote?.getContext("2d", { willReadFrequently: true }) || null;
     drawingManager.normal.toolbar = document.getElementById("drawing-toolbar");
     drawingManager.normal.targetImage = document.getElementById("current-image");
   }
@@ -69,6 +71,7 @@ async function openDrawingMode() {
   drawingMeasures = document.getElementById("drawing-measures");
   drawingPreview = document.getElementById("drawing-preview");
   drawingLightboxCanvas = document.getElementById("drawing-lightbox");
+  drawingRemoteCanvas = document.getElementById("drawing-remote");
   drawingToolbar = document.getElementById("drawing-toolbar");
 
   if (!drawingOverlay || !drawingCanvas || !drawingPreview) {
@@ -149,6 +152,9 @@ async function openDrawingMode() {
     updateDrawingTotalDistance();
   }
 
+  // Effacer le canvas remote (les dessins distants ne sont pas pertinents pour une autre image)
+  clearRemoteDrawCanvas();
+
   finalizeDrawingModeActivation("pencil");
 
   // Configurer les outils et événements
@@ -208,6 +214,11 @@ async function openDrawingMode() {
   }
 
   isDrawingModeActive = true;
+
+  // Sync en ligne : enregistrer le listener et mettre à jour le bouton
+  registerRemoteDrawSyncListener();
+  updateRemoteDrawShareButtonVisibility();
+
   debugLog("Drawing mode: activé");
 }
 
@@ -236,6 +247,16 @@ function closeDrawingMode() {
 
   if (saved) {
     debugLog("Drawing mode: état sauvegardé pour", currentDrawingImageSrc);
+  }
+
+  // Arrêter le partage si actif et terminer tout stroke en cours
+  if (remoteDrawState.sharingEnabled) {
+    setRemoteDrawSharing(false);
+  }
+  remoteDrawSyncEndStroke();
+  // Désenregistrer le listener pour éviter des accès aux canvases détruits
+  if (typeof unregisterRemoteDrawSyncListener === "function") {
+    unregisterRemoteDrawSyncListener();
   }
 
   // Masquer l'overlay et la toolbar

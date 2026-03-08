@@ -85,6 +85,8 @@
         getById: async (id) => eagleApi.item?.getById?.(id),
         get: async (query) => eagleApi.item?.get?.(query),
         showInFolder: async (id) => eagleApi.item?.showInFolder?.(id),
+        addFromURL: async (url, options) => eagleApi.item?.addFromURL?.(url, options),
+        addFromBase64: async (base64, options) => eagleApi.item?.addFromBase64?.(base64, options),
       },
       media: {
         getSelected: async () => eagleApi.item?.getSelected?.(),
@@ -132,6 +134,21 @@
         getAll: async () => eagleApi.folder?.getAll?.(),
         browseAndAdd: async () => eagleApi.folder?.browseAndAdd?.(),
         removeFolder: async (id) => eagleApi.folder?.removeFolder?.(id),
+        create: async (options) => eagleApi.folder?.create?.(options),
+        getById: async (id) => eagleApi.folder?.getById?.(id),
+      },
+      files: {
+        browseAndAdd: async () => eagleApi.files?.browseAndAdd?.(),
+        removeAll: async () => eagleApi.files?.removeAll?.(),
+        getSelected: async () => eagleApi.files?.getSelected?.(),
+      },
+      library: {
+        get path() { return eagleApi.library?.path || ""; },
+        get name() { return eagleApi.library?.name || ""; },
+      },
+      file: {
+        saveBuffer: async (filePath, base64Data) =>
+          eagleApi.file?.saveBuffer?.(filePath, base64Data),
       },
       clipboard: {
         copyFiles: async (paths) => eagleApi.clipboard?.copyFiles?.(paths),
@@ -165,6 +182,9 @@
           !!(eagleApi.item?.showInFolder || eagleApi.shell?.showItemInFolder),
         ),
         pinWindow: resolveCapability("pinWindow", !!eagleApi.window?.setAlwaysOnTop),
+        itemAdd: resolveCapability("itemAdd", typeof eagleApi.item?.addFromURL === "function"),
+        folderCreate: resolveCapability("folderCreate", typeof eagleApi.folder?.create === "function"),
+        libraryInfo: resolveCapability("libraryInfo", !!eagleApi.library),
       },
     };
 

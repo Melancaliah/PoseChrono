@@ -259,15 +259,31 @@
     tooltipEl.classList.remove("visible");
   }
 
-  function readGuestsFromStatusTrigger(triggerEl) {
+  function readGuestsFromStatusTrigger(triggerEl, getText) {
     if (!triggerEl) return [];
     const raw = String(triggerEl.dataset.syncGuests || "[]");
     try {
       const parsed = JSON.parse(raw);
       if (!Array.isArray(parsed)) return [];
       return parsed
-        .map((value) => String(value || "").trim())
-        .filter((value) => !!value);
+        .map((value) => {
+          if (value && typeof value === "object") {
+            const name = String(value.name || "").trim();
+            const isHost = !!value.isHost;
+            if (isHost) {
+              const label =
+                typeof getText === "function"
+                  ? getText("sync.hostParticipantLabel", "hôte")
+                  : "hôte";
+              const hasCustomName = name && name.toLowerCase() !== label.toLowerCase();
+              if (!hasCustomName) return label.charAt(0).toUpperCase() + label.slice(1);
+              return `${name} (${label})`;
+            }
+            return name || null;
+          }
+          return String(value || "").trim() || null;
+        })
+        .filter((v) => !!v);
     } catch (_) {
       return [];
     }
@@ -334,7 +350,7 @@
       existingTooltipEl: input.existingTooltipEl || null,
     });
     if (!tooltipEl) return null;
-    const guests = readGuestsFromStatusTrigger(triggerEl);
+    const guests = readGuestsFromStatusTrigger(triggerEl, input.getText);
     renderParticipantsTooltip({
       tooltipEl,
       documentRef,
@@ -400,8 +416,8 @@
     triggerEl.dataset.syncGuests = JSON.stringify(
       guests.map((guest) =>
         guest && typeof guest === "object"
-          ? String(guest.name || "").trim()
-          : String(guest || "").trim(),
+          ? { name: String(guest.name || "").trim(), isHost: !!guest.isHost }
+          : { name: String(guest || "").trim(), isHost: false },
       ),
     );
     statusEl.appendChild(triggerEl);
@@ -458,7 +474,16 @@
     triggerEl.setAttribute("tabindex", "0");
     triggerEl.textContent = participantsLabel;
     triggerEl.dataset.syncGuests = JSON.stringify(
-      others.map((name) => String(name || "").trim()).filter((name) => !!name),
+      others
+        .map((item) => {
+          if (item && typeof item === "object") {
+            const name = String(item.name || "").trim();
+            return name ? { name, isHost: !!item.isHost } : null;
+          }
+          const name = String(item || "").trim();
+          return name ? { name, isHost: false } : null;
+        })
+        .filter(Boolean),
     );
     statusEl.appendChild(triggerEl);
     return true;

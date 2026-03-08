@@ -1,10 +1,12 @@
 {
   "name": "posechrono-tooling",
-  "version": "1.0.7",
+  "version": "1.1.0",
   "private": true,
   "description": "Tooling scripts for PoseChrono release and verification",
   "scripts": {
     "build:shared-bundle": "node scripts/build-shared-bundle.js",
+    "build:minify": "node scripts/minify-bundles.js",
+    "build:minify:dry": "node scripts/minify-bundles.js --dry-run",
     "baseline:tag": "git tag -f v-eagle-baseline",
     "baseline:rollback": "git switch --detach v-eagle-baseline",
     "version:bump": "node scripts/bump-version.js",
@@ -40,9 +42,15 @@
     "verify:builds": "node scripts/verify-builds.js",
     "verify:sync-security": "node scripts/verify-sync-security.js",
     "verify:sync-integration": "node scripts/verify-sync-integration.js",
-    "start": "node scripts/sync-relay-server.js"
+    "start": "node scripts/sync-relay-server.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "terser": "^5.46.0",
+    "vitest": "^4.1.0"
   }
 }

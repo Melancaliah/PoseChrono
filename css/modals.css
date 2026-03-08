@@ -119,18 +119,30 @@
   border-color: var(--color-primary);
 }
 
-/* Focus clavier explicite dans les modaux (override du reset global) */
+/* Focus clavier explicite dans les modaux (override du reset global).
+   Les inputs texte (.modal-input) ont déjà un border-color au :focus,
+   donc on ne leur ajoute pas d'outline pour éviter le double-cadre. */
 .modal button:focus-visible,
-.modal input:focus-visible,
 .modal [tabindex]:focus-visible,
 .modal-overlay button:focus-visible,
-.modal-overlay input:focus-visible,
 .modal-overlay [tabindex]:focus-visible,
 .timeline-day-modal button:focus-visible,
 .timeline-day-modal [tabindex]:focus-visible {
   outline: 2px solid rgba(80, 142, 230, 0.85) !important;
   outline-offset: 2px;
   box-shadow: 0 0 0 2px rgba(80, 142, 230, 0.25) !important;
+}
+
+/* Les inputs/select dans les modaux : pas d'outline, le border-color :focus suffit */
+.modal input:focus-visible,
+.modal select:focus-visible,
+.modal textarea:focus-visible,
+.modal-overlay input:focus-visible,
+.modal-overlay select:focus-visible,
+.modal-overlay textarea:focus-visible {
+  outline: none !important;
+  outline-offset: 0 !important;
+  box-shadow: none !important;
 }
 
 .modal-important-btn {
@@ -1133,7 +1145,7 @@
 }
 
 .sync-session-participant-icon.is-missing {
-  color: #f48d8d;
+  color: #f1c085;
 }
 
 .sync-session-participant-label {
@@ -1183,6 +1195,11 @@
   padding: 5px 0;
 }
 
+/* Participant courant (soi-même) : label plus clair */
+.sync-session-participant-item.is-self .sync-session-participant-label {
+  color: #ffffff;
+}
+
 /* Badge rôle hôte dans la liste des participants */
 .sync-session-participant-host-badge {
   flex-shrink: 0;
@@ -1227,7 +1244,7 @@
   gap: 8px;
   width: fit-content;
   max-width: 100%;
-  margin: 0 auto;
+  margin: 7px auto;
   padding: 8px 12px 8px 16px;
   border-radius: 12px;
   border: 1px solid rgb(141 141 141 / 33%);
@@ -1262,15 +1279,19 @@
   pointer-events: none;
 }
 
+.sync-session-code-row.sync-session-code-row--public {
+  border: 2px dashed rgb(141 141 141 / 33%);
+}
+
 .sync-session-invite-panel {
   display: flex;
   flex-direction: column;
   gap: 12px;
   width: min(100%, 420px);
-  margin: 15px auto 0px auto;
+  margin: 0 auto;
   padding: 12px;
   border-radius: 14px;
-  border: 2px dashed #66666633;
+  border: 2px dashed rgb(141 141 141 / 33%);
   background: rgb(97 97 97 / 12%);
   transition:
     border-color 0.2s ease,
@@ -1300,7 +1321,7 @@
 .sync-session-invite-panel.sync-session-invite-panel--plain {
   width: fit-content;
   max-width: 100%;
-  margin: 2px auto 4px auto;
+  margin: 0 auto;
   padding: 0;
   border: 0;
   background: transparent;
@@ -1443,8 +1464,9 @@ body.sync-no-public .sync-session-conn-btn:not(:last-child) {
 }
 
 #sync-session-modal .sync-session-conn-btn:focus-visible {
-  outline: none !important;
-  box-shadow: none !important;
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+  box-shadow: none;
 }
 
 .sync-session-actions-divider {
@@ -1575,10 +1597,6 @@ body.sync-no-public .sync-session-conn-btn:not(:last-child) {
     color 0.16s ease;
 }
 
-.modal-important-btn .sync-session-cta-btn {
-  margin-top: 15px;
-}
-
 .sync-session-copy-code-btn {
   width: 24px;
   height: 24px;
@@ -1707,8 +1725,9 @@ body.sync-no-public .sync-session-conn-btn:not(:last-child) {
 #sync-session-modal
   .sync-session-inline-toggle
   input[type="checkbox"]:focus-visible {
-  outline: none !important;
-  box-shadow: none !important;
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+  box-shadow: none;
 }
 
 .sync-session-role-btn {
@@ -1757,8 +1776,9 @@ body.sync-no-public .sync-session-conn-btn:not(:last-child) {
 }
 
 #sync-session-modal .sync-session-role-btn:focus-visible {
-  outline: none !important;
-  box-shadow: none !important;
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+  box-shadow: none;
 }
 
 .sync-session-panel {
@@ -1803,14 +1823,15 @@ body.sync-no-public .sync-session-conn-btn:not(:last-child) {
 
 /* Eviter la double bordure focus (modal-input + focus-visible global) */
 #sync-session-modal .sync-session-panel .modal-input:focus-visible {
-  outline: none !important;
-  outline-offset: 0 !important;
-  box-shadow: none !important;
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+  box-shadow: none;
 }
 
 #sync-session-modal .sync-session-control-mode-trigger:focus-visible {
-  outline: none !important;
-  box-shadow: none !important;
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+  box-shadow: none;
   border-color: rgba(255, 255, 255, 0.18) !important;
 }
 
@@ -1840,8 +1861,8 @@ body.sync-no-public .sync-session-conn-btn:not(:last-child) {
 }
 
 .sync-session-pack-panel {
-  margin-top: 2px;
-  padding-top: 4px;
+  margin-top: 0;
+  padding-top: 0;
 }
 
 .sync-session-pack-actions {
@@ -1851,11 +1872,12 @@ body.sync-no-public .sync-session-conn-btn:not(:last-child) {
   align-items: center;
 }
 
-.sync-session-pack-actions .modal-important-btn {
+.sync-session-pack-actions .modal-important-btn.sync-session-cta-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
+  margin: 0 auto;
 }
 
 .sync-session-pack-actions .modal-important-btn svg {
@@ -1935,6 +1957,58 @@ body.sync-no-public .sync-session-conn-btn:not(:last-child) {
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.sync-session-connected-pseudo-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sync-session-connected-pseudo-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.sync-session-connected-pseudo-input-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sync-session-connected-pseudo-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.sync-session-connected-pseudo-save-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.6);
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    color 0.15s,
+    border-color 0.15s;
+  flex-shrink: 0;
+}
+
+.sync-session-connected-pseudo-save-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.sync-session-connected-pseudo-save-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
 }
 
 /* ============================================
@@ -2778,8 +2852,8 @@ body.sync-no-public .sync-session-conn-btn:not(:last-child) {
 }
 
 .checkbox-simple:checked {
-  border-color: rgba(102, 126, 234, 0.9);
-  background: rgba(102, 126, 234, 0.88);
+  border-color: var(--color-primary, rgba(102, 126, 234, 0.9));
+  background: var(--color-primary, rgba(102, 126, 234, 0.88));
 }
 
 .checkbox-simple:checked::after {

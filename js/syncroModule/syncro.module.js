@@ -6,42 +6,6 @@
 
   const existing = globalObj.PoseChronoSyncroModule || {};
 
-  const PREF_KEYS = {
-    syncGuestActionNotificationsEnabled: "syncGuestActionNotificationsEnabled",
-  };
-
-  function readPreference(preferencesApi, fallback = true) {
-    if (!preferencesApi || typeof preferencesApi.get !== "function") {
-      return !!fallback;
-    }
-    return (
-      preferencesApi.get(PREF_KEYS.syncGuestActionNotificationsEnabled, fallback) !==
-      false
-    );
-  }
-
-  function writePreference(preferencesApi, enabled) {
-    if (!preferencesApi || typeof preferencesApi.set !== "function") {
-      return !!enabled;
-    }
-    return (
-      preferencesApi.set(
-        PREF_KEYS.syncGuestActionNotificationsEnabled,
-        !!enabled,
-      ) !== false
-    );
-  }
-
-  function syncCheckbox(inputEl, preferencesApi, fallback = true) {
-    if (!inputEl) return false;
-    const isCheckbox =
-      inputEl.tagName === "INPUT" &&
-      String(inputEl.type || "").toLowerCase() === "checkbox";
-    if (!isCheckbox) return false;
-    inputEl.checked = readPreference(preferencesApi, fallback);
-    return true;
-  }
-
   const CONTROL_MODE_OPTIONS = Object.freeze([
     {
       value: "host-only",
@@ -627,6 +591,7 @@
         id: String(value.id || "").trim(),
         name,
         isHost: !!value.isHost,
+        isSelf: !!value.isSelf,
         syncState: normalizeParticipantSyncState(value.syncState),
       };
     }
@@ -636,6 +601,7 @@
       id: "",
       name,
       isHost: false,
+      isSelf: false,
       syncState: "missing",
     };
   }
@@ -707,7 +673,18 @@
 
       const labelEl = documentRef.createElement("span");
       labelEl.className = "sync-session-participant-label";
-      labelEl.textContent = safeGuest.name;
+      if (safeGuest.isHost) {
+        const hostLabel = getText("sync.hostParticipantLabel", "hôte");
+        const hasCustomName = safeGuest.name && safeGuest.name.toLowerCase() !== hostLabel.toLowerCase();
+        labelEl.textContent = hasCustomName
+          ? `${safeGuest.name} (${hostLabel})`
+          : hostLabel.charAt(0).toUpperCase() + hostLabel.slice(1);
+      } else {
+        labelEl.textContent = safeGuest.name;
+      }
+      if (safeGuest.isSelf) {
+        itemEl.classList.add("is-self");
+      }
 
       const sublabelEl = documentRef.createElement("span");
       sublabelEl.className = "sync-session-participant-sublabel";
@@ -721,9 +698,8 @@
 
       textGroupEl.appendChild(labelEl);
 
-      // Pour l'hôte, le nom suffit à l'identifier : pas de badge ni de sublabel
-      // (le sublabel "Poses téléchargées ✓" n'aurait pas de sens pour l'entrée de l'hôte)
-      if (!safeGuest.isHost) {
+      // Pour l'hôte et soi-même, pas de sublabel de statut de sync
+      if (!safeGuest.isHost && !safeGuest.isSelf) {
         textGroupEl.appendChild(sublabelEl);
       }
       itemEl.appendChild(iconEl);
@@ -1111,7 +1087,6 @@
     const controlModeTrigger = input.controlModeTrigger || null;
     const controlModeMenu = input.controlModeMenu || null;
     const joinPseudoInput = input.joinPseudoInput || null;
-    const guestActionNotificationsInput = input.guestActionNotificationsInput || null;
 
     const onCloseRequested =
       typeof input.onCloseRequested === "function" ? input.onCloseRequested : null;
@@ -1146,10 +1121,6 @@
     const onPseudoValidationError =
       typeof input.onPseudoValidationError === "function"
         ? input.onPseudoValidationError
-        : null;
-    const onGuestActionNotificationsChanged =
-      typeof input.onGuestActionNotificationsChanged === "function"
-        ? input.onGuestActionNotificationsChanged
         : null;
     const onRoleButtonClicked =
       typeof input.onRoleButtonClicked === "function"
@@ -1292,12 +1263,6 @@
         if (sanitizedValue === currentValue) return;
         joinPseudoInput.value = sanitizedValue;
         onPseudoValidationError(joinPseudoInput);
-      });
-    }
-
-    if (guestActionNotificationsInput && onGuestActionNotificationsChanged) {
-      guestActionNotificationsInput.addEventListener("change", () => {
-        onGuestActionNotificationsChanged(!!guestActionNotificationsInput.checked);
       });
     }
 
@@ -1461,10 +1426,6 @@
 
   globalObj.PoseChronoSyncroModule = {
     ...existing,
-    PREF_KEYS,
-    readPreference,
-    writePreference,
-    syncCheckbox,
     syncSessionModalHelpers: {
       CONTROL_MODE_OPTIONS,
       getControlModeConfig,

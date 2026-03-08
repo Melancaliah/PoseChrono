@@ -120,6 +120,7 @@
     let localMediaUploadedBy = "";
     let localMediaTotalBytes = 0;
     const latencySamples = [];
+    let latencyHead = 0;
 
     function normalizeSessionCode(input) {
       const normalized = String(input || "")
@@ -186,6 +187,7 @@
 
     function clearLatencySamples() {
       latencySamples.length = 0;
+      latencyHead = 0;
     }
 
     function computePercentile(values, percentile) {
@@ -202,9 +204,11 @@
     function recordLatencySample(ms) {
       const value = Number(ms);
       if (!Number.isFinite(value) || value < 0) return;
-      latencySamples.push(value);
-      if (latencySamples.length > latencyWindowSize) {
-        latencySamples.splice(0, latencySamples.length - latencyWindowSize);
+      if (latencySamples.length < latencyWindowSize) {
+        latencySamples.push(value);
+      } else {
+        latencySamples[latencyHead] = value;
+        latencyHead = (latencyHead + 1) % latencyWindowSize;
       }
       if (!enableLatencyLogs) return;
       if (latencySamples.length % latencyLogEvery !== 0) return;
@@ -840,6 +844,7 @@
 
       channel.onopen = () => {
         entry.open = true;
+        peerReconnectAttempts.delete(peerId);
         emitConnectionState("connected");
         emitTransportDiagnostic("relay-fallback", {
           active: false,
@@ -879,6 +884,9 @@
         logger("[SyncWebRTC] create offer failed", error);
       }
     }
+
+    const peerReconnectAttempts = new Map();
+    const MAX_PEER_RECONNECT_ATTEMPTS = 5;
 
     function ensurePeer(peerClientId, initiator = false) {
       const peerId = normalizeClientId(peerClientId);
@@ -925,7 +933,12 @@
           });
           closePeer(peerId);
           if (role === "host") {
-            void ensurePeer(peerId, true);
+            const attempts = (peerReconnectAttempts.get(peerId) || 0) + 1;
+            peerReconnectAttempts.set(peerId, attempts);
+            if (attempts <= MAX_PEER_RECONNECT_ATTEMPTS) {
+              const delay = Math.min(1000 * Math.pow(2, attempts - 1), 30000);
+              setTimeoutFn(() => { void ensurePeer(peerId, true); }, delay);
+            }
           } else if (role === "participant" && peerId === hostClientId) {
             void sendRtcSignal(peerId, "peer-reset", {}).catch(() => {});
           }
@@ -978,13 +991,18 @@
         if (!entry || !entry.pc) return;
         const remote = toSessionDescription(signalPayload);
         if (!remote) return;
-        await entry.pc.setRemoteDescription(remote);
-        const answer = await entry.pc.createAnswer();
-        await entry.pc.setLocalDescription(answer);
-        await sendRtcSignal(sourceClientId, "answer", {
-          type: answer.type,
-          sdp: answer.sdp,
-        });
+        try {
+          await entry.pc.setRemoteDescription(remote);
+          const answer = await entry.pc.createAnswer();
+          await entry.pc.setLocalDescription(answer);
+          await sendRtcSignal(sourceClientId, "answer", {
+            type: answer.type,
+            sdp: answer.sdp,
+          });
+        } catch (err) {
+          logger("[SyncWebRTC] offer handling failed", err);
+          closePeer(sourceClientId);
+        }
         return;
       }
 
@@ -993,7 +1011,12 @@
         if (!entry || !entry.pc) return;
         const remote = toSessionDescription(signalPayload);
         if (!remote) return;
-        await entry.pc.setRemoteDescription(remote);
+        try {
+          await entry.pc.setRemoteDescription(remote);
+        } catch (err) {
+          logger("[SyncWebRTC] answer handling failed", err);
+          closePeer(sourceClientId);
+        }
         return;
       }
 
@@ -1284,6 +1307,9 @@
       updateParticipantState(payload) {
         return signalingTransport.updateParticipantState(payload || {});
       },
+      updateParticipantProfile(payload) {
+        return signalingTransport.updateParticipantProfile(payload || {});
+      },
       uploadSessionPack(payload) {
         return signalingTransport.uploadSessionPack(payload || {});
       },
@@ -1343,6 +1369,9 @@
           }
         }
         return signalingTransport.getSessionMediaFile(safePayload);
+      },
+      sendDrawingSync(payload) {
+        return signalingTransport.sendDrawingSync(payload || {});
       },
       sendRtcSignal(payload) {
         return sendRtcSignal(

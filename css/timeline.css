@@ -109,17 +109,39 @@
    CONTENEURS TIMELINE
    ================================================================ */
 
-/* Conteneur parent (après .screen, dans settings-screen) */
+/* Conteneur parent — défaut = display:none (aucun flash au chargement).
+   Bascule en display:grid via .timeline-open (JS).
+   Fermeture animée via .timeline-closing (grid 1fr→0fr + opacity). */
 #timeline-container {
+  display: none;
+  grid-template-rows: 1fr;
   width: 100%;
   max-width: 900px;
   margin: 0 auto;
-  padding: 0 20px 60px;
+  padding: 0 20px;
   box-sizing: border-box;
+  opacity: 1;
+  transition:
+    grid-template-rows 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 0.35s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-#timeline-container.collapsed {
-  display: none;
+#timeline-container.timeline-open {
+  display: grid;
+}
+
+#timeline-container.timeline-closing {
+  grid-template-rows: 0fr;
+  opacity: 0;
+}
+
+/* Enfant direct créé par render() — overflow hidden pour le clip grid 0fr.
+   Le min-height: 0 permet au grid 0fr de réduire la hauteur sous le contenu naturel.
+   margin-bottom: 60px reproduit l'ancien padding-bottom du container (espace sous le module). */
+#timeline-container > .timeline-module {
+  overflow: hidden;
+  min-height: 0;
+  margin-bottom: 60px;
 }
 
 /* Conteneur dans l'écran review */

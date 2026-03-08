@@ -54,6 +54,8 @@
       getById: async () => null,
       get: async () => [],
       showInFolder: async () => {},
+      addFromURL: async () => null,
+      addFromBase64: async () => null,
     };
   }
 
@@ -87,6 +89,8 @@
     return {
       getSelected: async () => [],
       getAll: async () => [],
+      create: async () => null,
+      getById: async () => null,
     };
   }
 
@@ -108,6 +112,19 @@
     };
   }
 
+  function createNoopLibraryApi() {
+    return {
+      get path() { return ""; },
+      get name() { return ""; },
+    };
+  }
+
+  function createNoopFileApi() {
+    return {
+      saveBuffer: async () => false,
+    };
+  }
+
   function createFallbackAdapter() {
     return {
       name: "fallback",
@@ -121,6 +138,8 @@
       storage: createNoopStorageApi(),
       system: createNoopSystemApi(),
       folder: createNoopFoldersApi(),
+      library: createNoopLibraryApi(),
+      file: createNoopFileApi(),
       clipboard: createNoopClipboardApi(),
       shell: createNoopShellApi(),
       tag: createNoopTagsApi(),
@@ -141,6 +160,9 @@
         shell: false,
         revealEagle: false,
         pinWindow: false,
+        itemAdd: false,
+        folderCreate: false,
+        libraryInfo: false,
       },
     };
   }

@@ -3920,20 +3920,30 @@ async function initTimeline(forceShow = false) {
 
     if (isVisible) {
       container.classList.remove("collapsed");
+      container.classList.add("timeline-open");
       toggleBtn.classList.add("expanded");
       timelineRendererSettings.render();
     } else {
       container.classList.add("collapsed");
+      container.classList.remove("timeline-open");
       toggleBtn.classList.remove("expanded");
     }
 
     toggleBtn.addEventListener("click", () => {
-      const isCollapsed = container.classList.contains("collapsed");
+      const isClosed = !container.classList.contains("timeline-open") ||
+        container.classList.contains("timeline-closing");
 
-      if (isCollapsed) {
+      if (isClosed) {
+        // EXPAND — instantané (pas d'animation) + scroll vers le bas
+        container.style.transition = "none";
+        container.classList.remove("collapsed", "timeline-closing");
+        container.classList.add("timeline-open");
         timelineRendererSettings.render();
-        container.classList.remove("collapsed");
         toggleBtn.classList.add("expanded");
+
+        // Forcer le layout puis réactiver la transition (pour la fermeture)
+        container.offsetHeight;
+        container.style.transition = "";
 
         const settingsScreen = document.getElementById("settings-screen");
         if (settingsScreen) {
@@ -3943,8 +3953,22 @@ async function initTimeline(forceShow = false) {
           });
         }
       } else {
-        container.classList.add("collapsed");
+        // COLLAPSE — instantané (symétrique avec l'ouverture) + compensation scroll
+        container.style.transition = "none";
         toggleBtn.classList.remove("expanded");
+        const settingsScreen = document.getElementById("settings-screen");
+        const prevScrollH = settingsScreen ? settingsScreen.scrollHeight : 0;
+        container.classList.remove("timeline-open", "timeline-closing");
+        container.classList.add("collapsed");
+        if (settingsScreen) {
+          const delta = prevScrollH - settingsScreen.scrollHeight;
+          if (delta > 0) {
+            settingsScreen.scrollTop = Math.max(0, settingsScreen.scrollTop - delta);
+          }
+        }
+        // Forcer le layout puis réactiver la transition (pour la prochaine ouverture)
+        container.offsetHeight;
+        container.style.transition = "";
       }
     });
   }

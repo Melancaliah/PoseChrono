@@ -219,6 +219,7 @@ async function main() {
   const shouldSyncLatestAlias = args.has("--update-latest");
 
   runNodeScriptOrThrow("scripts/build-shared-bundle.js");
+  runNodeScriptOrThrow("scripts/minify-bundles.js");
 
   const missing = REQUIRED_ENTRIES.filter(
     (entry) => !existsSyncSafe(path.join(ROOT, entry)),
@@ -256,6 +257,32 @@ async function main() {
     const dest = path.join(outDir, entry);
     await copyRecursive(src, dest);
     copied.push(entry);
+  }
+
+  // Replace bundles with their minified versions in the dist
+  const MINIFIED_OVERRIDES = [
+    {
+      min: path.join(ROOT, "packages", "shared", "shared.bundle.min.js"),
+      dest: path.join(outDir, "packages", "shared", "shared.bundle.js"),
+    },
+    {
+      min: path.join(ROOT, "js", "syncroModule", "syncro.module.min.js"),
+      dest: path.join(outDir, "js", "syncroModule", "syncro.module.js"),
+    },
+    {
+      min: path.join(ROOT, "js", "plugin.min.js"),
+      dest: path.join(outDir, "js", "plugin.js"),
+    },
+  ];
+  let minifiedCount = 0;
+  for (const { min, dest } of MINIFIED_OVERRIDES) {
+    if (existsSyncSafe(min)) {
+      await fsp.copyFile(min, dest);
+      minifiedCount++;
+    }
+  }
+  if (minifiedCount > 0) {
+    console.log(`[release:eagle] Replaced ${minifiedCount} bundle(s) with minified versions`);
   }
 
   let latestAliasSynced = false;
