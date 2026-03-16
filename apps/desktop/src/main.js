@@ -151,7 +151,9 @@ function resolveLocalSyncRelayScript() {
 
 function getLocalSyncRelayScriptCandidates() {
   return [
-    // Packaged app: script inside app.asar
+    // Packaged app: relay copié dans web/scripts/ par sync-desktop-web.js
+    path.join(__dirname, "..", "web", "scripts", "sync-relay-server.js"),
+    // Packaged app: script inside app.asar (legacy path)
     path.join(__dirname, "..", "web", "js", "syncroModule", "sync-server-deploy", "server.js"),
     // Packaged app: explicit asar path fallback
     path.join(

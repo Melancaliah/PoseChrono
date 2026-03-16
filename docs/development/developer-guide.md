@@ -129,7 +129,7 @@ Updates `manifest.json`, `apps/desktop/package.json`, and root `package.json`:
 ```bash
 npm run version:bump -- patch
 # or
-npm run version:bump -- 1.0.3
+npm
 ```
 
 ## BootTrace debug switch

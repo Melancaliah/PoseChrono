@@ -95,6 +95,14 @@ async function main() {
     await copyRecursive(src, dest);
   }
 
+  // Copier le relay server pour qu'il soit inclus dans le package Electron.
+  // electron-builder inclut web/**/* → web/scripts/sync-relay-server.js sera packagé.
+  const relaySrc = path.join(ROOT, "scripts", "sync-relay-server.js");
+  const relayDestDir = path.join(DESKTOP_WEB_DIR, "scripts");
+  const relayDest = path.join(relayDestDir, "sync-relay-server.js");
+  await fsp.mkdir(relayDestDir, { recursive: true });
+  await fsp.copyFile(relaySrc, relayDest);
+
   // Runtime now loads shared modules from packages/shared.
   // Ensure legacy js/shared does not persist from previous syncs.
   const legacySharedDir = path.join(DESKTOP_WEB_DIR, "js", "shared");
