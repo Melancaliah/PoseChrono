@@ -384,7 +384,8 @@
     "packInfoUploading": "Waiting for the host to share images…",
     "packInfoDownloaded": "{{count}} files downloaded{{size}}",
     "packInfoNewAvailable": "New pack · {{count}} files{{size}}",
-    "packInfoLimitHint": "Only {{max}} images will be shared (out of {{total}} loaded)"
+    "packInfoLimitHint": "Only {{max}} images will be shared (out of {{total}} loaded)",
+    "statusServerWaking": "The server is waking up, please wait up to 30 seconds..."
   },
   "modes": {
     "classic": {
@@ -634,7 +635,9 @@
     "readError": "Read error",
     "undo": "Undo",
     "undoApplied": "Action undone.",
-    "deleteQueued": "Deleted. Undo available for 10 seconds."
+    "deleteQueued": "Deleted. Undo available for 10 seconds.",
+    "deleteCancel": "Cancel",
+    "deleteConfirm": "Confirm"
   },
   "errors": {
     "loadError": "Error loading",
@@ -841,6 +844,7 @@
     "skipConfirm": "Don't ask again",
     "sessionDeleted": "Session deleted",
     "sessionDeletedBody": "The session has been deleted",
+    "reuseSessionAllMissing": "Files not found",
     "reuseError": "Cannot replay",
     "reuseErrorOldSession": "This session is too old and doesn't contain image IDs.",
     "reuseSuccess": "Session restored successfully",

@@ -384,7 +384,8 @@
     "packInfoUploading": "Esperando que el anfitrión comparta sus imágenes…",
     "packInfoDownloaded": "{{count}} archivos descargados{{size}}",
     "packInfoNewAvailable": "Nuevo pack · {{count}} archivos{{size}}",
-    "packInfoLimitHint": "Solo se compartirán {{max}} imágenes (de {{total}} cargadas)"
+    "packInfoLimitHint": "Solo se compartirán {{max}} imágenes (de {{total}} cargadas)",
+    "statusServerWaking": "El servidor se está iniciando, espere hasta 30 segundos..."
   },
   "modes": {
     "classic": {
@@ -634,7 +635,9 @@
     "readError": "Error de lectura",
     "undo": "Deshacer",
     "undoApplied": "Accion deshecha.",
-    "deleteQueued": "Eliminado. Deshacer disponible durante 10 segundos."
+    "deleteQueued": "Eliminado. Deshacer disponible durante 10 segundos.",
+    "deleteCancel": "Cancelar",
+    "deleteConfirm": "Confirmar"
   },
   "errors": {
     "loadError": "Error de carga",
@@ -840,6 +843,7 @@
     "skipConfirm": "No volver a preguntar",
     "sessionDeleted": "Sesión eliminada",
     "sessionDeletedBody": "La sesión ha sido eliminada",
+    "reuseSessionAllMissing": "Archivos no encontrados",
     "reuseError": "No se puede repetir",
     "reuseErrorOldSession": "Esta sesión es demasiado antigua y no contiene los IDs de las imágenes.",
     "reuseSuccess": "Sesión restaurada con éxito",

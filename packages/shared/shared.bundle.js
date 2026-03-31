@@ -575,22 +575,12 @@
     function getPreferredLocaleLang() {
       const candidates = [];
 
+      // 1. Stored user preference (highest priority — via localeGetter callback)
       if (typeof localeGetter === "function") {
         candidates.push(localeGetter());
       }
 
-      if (i18nextInstance && typeof i18nextInstance.language === "string") {
-        candidates.push(i18nextInstance.language);
-      }
-
-      if (
-        documentObj &&
-        documentObj.documentElement &&
-        typeof documentObj.documentElement.lang === "string"
-      ) {
-        candidates.push(documentObj.documentElement.lang);
-      }
-
+      // 2. Browser / OS language preferences
       if (navigatorObj) {
         if (Array.isArray(navigatorObj.languages)) {
           candidates.push(...navigatorObj.languages);
@@ -600,9 +590,25 @@
         }
       }
 
+      // 3. Platform-specific locale getter (e.g. Eagle / Electron)
       if (windowObj && typeof windowObj.getLocale === "function") {
         candidates.push(windowObj.getLocale());
       }
+
+      // 4. i18next current language — only if already initialized
+      //    (e.g. after a changeLanguage() call in the same session)
+      if (
+        i18nextInstance &&
+        typeof i18nextInstance.language === "string" &&
+        i18nextInstance.isInitialized
+      ) {
+        candidates.push(i18nextInstance.language);
+      }
+
+      // NOTE: document.documentElement.lang is NOT included here because
+      // it is a static HTML attribute (e.g. "en") that does not reflect
+      // the user's preference. It is *updated* by translateStaticHTML()
+      // after language detection — not before.
 
       for (const candidate of candidates) {
         const lang = resolveLocaleLang(candidate, localeAliases, localeFileByLang);

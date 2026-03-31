@@ -384,7 +384,8 @@
     "packInfoUploading": "ホストが画像を共有するのを待っています…",
     "packInfoDownloaded": "{{count}} ファイルをダウンロード済み{{size}}",
     "packInfoNewAvailable": "新しいパック · {{count}} ファイル{{size}}",
-    "packInfoLimitHint": "共有されるのは {{max}} 枚のみです（{{total}} 枚読み込み済み）"
+    "packInfoLimitHint": "共有されるのは {{max}} 枚のみです（{{total}} 枚読み込み済み）",
+    "statusServerWaking": "サーバーが起動中です。最大30秒お待ちください..."
   },
   "modes": {
     "classic": {
@@ -634,7 +635,9 @@
     "readError": "読み込みエラー",
     "undo": "元に戻す",
     "undoApplied": "操作を元に戻しました。",
-    "deleteQueued": "削除しました。10秒以内なら元に戻せます。"
+    "deleteQueued": "削除しました。10秒以内なら元に戻せます。",
+    "deleteCancel": "キャンセル",
+    "deleteConfirm": "確認"
   },
   "errors": {
     "loadError": "読み込みエラー",
@@ -840,6 +843,7 @@
     "skipConfirm": "次回から確認しない",
     "sessionDeleted": "練習を削除しました",
     "sessionDeletedBody": "練習が削除されました",
+    "reuseSessionAllMissing": "ファイルが見つかりません",
     "reuseError": "再開できません",
     "reuseErrorOldSession": "この練習は古すぎて画像IDが含まれていません。",
     "reuseSuccess": "練習を復元しました",

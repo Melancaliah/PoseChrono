@@ -384,7 +384,8 @@
     "packInfoUploading": "等待主持人分享图片…",
     "packInfoDownloaded": "已下载 {{count}} 个文件{{size}}",
     "packInfoNewAvailable": "新包 · {{count}} 个文件{{size}}",
-    "packInfoLimitHint": "只会分享 {{max}} 张图片（共加载了 {{total}} 张）"
+    "packInfoLimitHint": "只会分享 {{max}} 张图片（共加载了 {{total}} 张）",
+    "statusServerWaking": "服务器正在启动，请等待最多30秒..."
   },
   "modes": {
     "classic": {
@@ -634,7 +635,9 @@
     "readError": "读取错误",
     "undo": "撤销",
     "undoApplied": "操作已撤销。",
-    "deleteQueued": "已删除。10 秒内可撤销。"
+    "deleteQueued": "已删除。10 秒内可撤销。",
+    "deleteCancel": "取消",
+    "deleteConfirm": "确认"
   },
   "errors": {
     "loadError": "加载错误",
@@ -840,6 +843,7 @@
     "skipConfirm": "不再询问",
     "sessionDeleted": "练习已删除",
     "sessionDeletedBody": "练习已被删除",
+    "reuseSessionAllMissing": "未找到文件",
     "reuseError": "无法重播",
     "reuseErrorOldSession": "此练习太旧，不包含图片ID。",
     "reuseSuccess": "练习恢复成功",

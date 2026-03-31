@@ -122,16 +122,6 @@ npm run verify:windows-dist
 npm run verify:linux-dist
 ```
 
-## Version bump
-
-Updates `manifest.json`, `apps/desktop/package.json`, and root `package.json`:
-
-```bash
-npm run version:bump -- patch
-# or
-npm
-```
-
 ## BootTrace debug switch
 
 BootTrace is disabled by default.
@@ -195,4 +185,14 @@ Object.keys(localStorage)
   .filter((k) => k.startsWith("posechrono-i18n-cache"))
   .forEach((k) => localStorage.removeItem(k));
 location.reload();
+```
+
+## Version bump
+
+Updates `manifest.json`, `apps/desktop/package.json`, and root `package.json`:
+
+```bash
+npm run version:bump -- patch
+# or
+npm run version:bump -- x.x.x
 ```

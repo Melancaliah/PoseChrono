@@ -384,7 +384,8 @@
     "packInfoUploading": "호스트가 이미지를 공유할 때까지 기다리는 중…",
     "packInfoDownloaded": "{{count}}개 파일 다운로드됨{{size}}",
     "packInfoNewAvailable": "새 팩 · {{count}}개 파일{{size}}",
-    "packInfoLimitHint": "{{max}}개의 이미지만 공유됩니다（{{total}}개 로드됨）"
+    "packInfoLimitHint": "{{max}}개의 이미지만 공유됩니다（{{total}}개 로드됨）",
+    "statusServerWaking": "서버가 시작 중입니다. 최대 30초간 기다려 주세요..."
   },
   "modes": {
     "classic": {
@@ -634,7 +635,9 @@
     "readError": "읽기 오류",
     "undo": "실행 취소",
     "undoApplied": "작업이 취소되었습니다.",
-    "deleteQueued": "삭제되었습니다. 10초 동안 실행 취소할 수 있습니다."
+    "deleteQueued": "삭제되었습니다. 10초 동안 실행 취소할 수 있습니다.",
+    "deleteCancel": "취소",
+    "deleteConfirm": "확인"
   },
   "errors": {
     "loadError": "로드 오류",
@@ -840,6 +843,7 @@
     "skipConfirm": "다시 묻지 않음",
     "sessionDeleted": "연습 삭제됨",
     "sessionDeletedBody": "연습이 삭제되었습니다",
+    "reuseSessionAllMissing": "파일을 찾을 수 없습니다",
     "reuseError": "다시 할 수 없음",
     "reuseErrorOldSession": "이 연습은 너무 오래되어 이미지 ID가 포함되어 있지 않습니다.",
     "reuseSuccess": "연습 복원 성공",

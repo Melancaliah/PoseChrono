@@ -4330,6 +4330,9 @@ async function refreshSelectionOnRuntimeRunIfNeeded() {
   runtimeRunSettingsRefreshPromise = (async () => {
     bootTrace("runtimeOnRun.settingsRefresh.start");
     await loadImages();
+    if (typeof updateFolderInfo === "function") {
+      updateFolderInfo();
+    }
     bootTrace("runtimeOnRun.settingsRefresh.done");
   })();
 
@@ -4389,16 +4392,14 @@ async function runRuntimeLifecycle() {
     bootTrace("runRuntimeLifecycle.start");
     await runCreateLifecycle();
     bootTrace("runRuntimeLifecycle.afterCreate");
-    // Charger traductions et images en parallèle
-    await Promise.all([
-      loadTranslations().then(() =>
-        bootTrace("runRuntimeLifecycle.afterTranslations"),
-      ),
-      loadImages().then(() =>
-        bootTrace("runRuntimeLifecycle.afterLoadImages.inner"),
-      ),
-    ]);
+    // Charger traductions PUIS images (séquentiel pour garantir que
+    // i18next est pleinement initialisé avant que loadImages() ne
+    // construise le HTML dynamique du folderInfo).
+    await loadTranslations();
+    bootTrace("runRuntimeLifecycle.afterTranslations");
+    await loadImages();
     bootTrace("runRuntimeLifecycle.afterLoadImages");
+
     schedulePostBootPreloads();
 
     // Handler précoce : si l'utilisateur clique sur le toggle timeline
@@ -6178,6 +6179,36 @@ function disableGlobalSettingsFocusTrap(modal) {
   if (!modal || !globalSettingsFocusTrapHandler) return;
   modal.removeEventListener("keydown", globalSettingsFocusTrapHandler, true);
   globalSettingsFocusTrapHandler = null;
+}
+
+/**
+ * Rafraîchit le texte du #folder-info avec les traductions i18n courantes.
+ * Appelé après un changement de langue pour que le compteur d'images
+ * reflète la nouvelle locale.
+ */
+function updateFolderInfo() {
+  const folderInfoEl = folderInfo || document.getElementById("folder-info");
+  if (!folderInfoEl) return;
+
+  // Pas d'images chargées → rien à rafraîchir
+  if (!Array.isArray(state.images) || state.images.length === 0) {
+    folderInfoEl.innerHTML = `<span class="warning-text">${i18next.t("settings.noImagesFound")}</span>`;
+    return;
+  }
+
+  const mediaCounts = countSessionMediaTypes(state.images);
+  const countMessage = formatSessionMediaCountLabel({
+    imageCount: mediaCounts.imageCount,
+    videoCount: mediaCounts.videoCount,
+  });
+  const sourceMessage = i18next.t(
+    getMediaSourceAnalyzedI18nKey(state._mediaSourceAllItems),
+  );
+  folderInfoEl.innerHTML = `
+    <div class="folder-info-count">
+      <span class="source-message-text">${sourceMessage}:</span>
+      <span class="image-count-text">${escapeHtml(countMessage)}</span>
+    </div>`;
 }
 
 function updateGlobalSettingsModalState() {
@@ -14466,6 +14497,11 @@ platformRuntimeOnLibraryChanged(() => {
 let runtimeI18nCacheVersionPromise = null;
 let translationsLoaded = false;
 
+// Sauvegarde des traductions chargées pour pouvoir les ré-injecter après
+// qu'Eagle réinitialise i18next via IPC (ce qui écrase notre state).
+let _savedI18nLang = null;
+let _savedI18nResources = null; // { en: {...}, es: {...} }
+
 async function resolveRuntimeI18nCacheVersion() {
   if (runtimeI18nCacheVersionPromise) {
     return runtimeI18nCacheVersionPromise;
@@ -14643,6 +14679,7 @@ async function loadTranslations() {
     );
     if (loadedByShared) {
       translationsLoaded = true;
+      await saveI18nStateForRestore();
       return true;
     }
 
@@ -14716,9 +14753,77 @@ async function loadTranslations() {
     }
 
     translationsLoaded = true;
+    await saveI18nStateForRestore();
     return true;
   } catch (error) {
     return false;
+  }
+}
+
+/**
+ * Sauvegarde l'état i18n courant (langue + traductions) dans des variables
+ * locales pour pouvoir le restaurer si Eagle réinitialise i18next via IPC.
+ */
+async function saveI18nStateForRestore() {
+  if (typeof i18next === "undefined") return;
+
+  _savedI18nLang = i18next.language || "en";
+
+  // Charger les JSONs bruts pour avoir une copie indépendante d'i18next
+  const resources = {};
+  const enData = await fetchLocaleTranslationsForLanguage("en");
+  if (enData) resources.en = enData;
+
+  if (_savedI18nLang !== "en") {
+    const langData = await fetchLocaleTranslationsForLanguage(_savedI18nLang);
+    if (langData) resources[_savedI18nLang] = langData;
+  }
+
+  _savedI18nResources = resources;
+}
+
+/**
+ * Vérifie si Eagle a corrompu l'état i18next (via un init() IPC)
+ * et restaure nos traductions si nécessaire.
+ * Appeler cette fonction après tout appel async à l'API Eagle.
+ */
+function ensureI18nNotCorrupted() {
+  if (!_savedI18nResources || !_savedI18nLang) return;
+  if (typeof i18next === "undefined") return;
+
+  // Test rapide : si t() retourne la clé brute ou la valeur anglaise
+  // alors que la langue active n'est pas "en", on est corrompu.
+  const testKey = "settings.imagesAnalyzed";
+  const result = typeof i18next.t === "function" ? i18next.t(testKey) : testKey;
+  const enValue = _savedI18nResources.en?.settings?.imagesAnalyzed;
+  const expectedValue = _savedI18nResources[_savedI18nLang]?.settings?.imagesAnalyzed;
+
+  // Pas de corruption si on a la bonne valeur
+  if (expectedValue && result === expectedValue) return;
+
+  // Pas de corruption si on est en anglais et on a la valeur anglaise
+  if (_savedI18nLang === "en" && result === enValue) return;
+
+  // Corruption détectée : ré-injecter nos traductions silencieusement.
+  // (Eagle réinitialise i18next via IPC à chaque appel API — c'est normal.)
+
+  // Ré-injecter via init() (le plus fiable, fonctionne avec tout impl i18next)
+  const initResources = {};
+  Object.entries(_savedI18nResources).forEach(([lang, data]) => {
+    initResources[lang] = { translation: data };
+  });
+
+  if (typeof i18next.init === "function") {
+    i18next.init({
+      lng: _savedI18nLang,
+      fallbackLng: "en",
+      resources: initResources,
+    });
+  }
+
+  // S'assurer que la langue est correcte
+  if (typeof i18next.changeLanguage === "function") {
+    i18next.changeLanguage(_savedI18nLang);
   }
 }
 
@@ -14779,6 +14884,7 @@ async function applyPreferredLanguage(language, options = {}) {
     updateFolderInfo();
   }
   updateSyncSessionVisualIndicators(syncSessionServiceState);
+  refreshTimelineViewsSafely("language-change");
 
   return true;
 }
@@ -15273,6 +15379,28 @@ async function initPlugin() {
 
   // === Charger les traductions manuellement ===
   await loadTranslations();
+
+  // === Garantir que la langue active d'i18next correspond à la préférence ===
+  // (corrige un edge-case où le shared loader finit sans changer la langue)
+  {
+    const expectedLang = getPreferredLanguageFromPreferences()
+      || readPreferredLanguageFromStorage()
+      || (typeof window !== "undefined" && typeof window.getLocale === "function"
+        ? resolveI18nLanguage(window.getLocale(), null)
+        : null)
+      || (typeof navigator !== "undefined" && Array.isArray(navigator.languages)
+        ? resolveI18nLanguage(navigator.languages[0], null)
+        : null);
+    if (
+      expectedLang &&
+      typeof i18next !== "undefined" &&
+      typeof i18next.changeLanguage === "function" &&
+      resolveI18nLanguage(i18next.language, null) !== expectedLang
+    ) {
+      await ensureLocaleResourceLoaded(expectedLang);
+      await i18next.changeLanguage(expectedLang);
+    }
+  }
 
   // === Appliquer les traductions i18n aux éléments HTML statiques ===
   translateStaticHTML();
@@ -17743,6 +17871,9 @@ async function loadImages() {
         ? performance.now()
         : Date.now();
     const selection = await resolveSessionMediaSelection();
+    // Eagle réinitialise i18next via IPC pendant resolveSessionMediaSelection.
+    // On restaure nos traductions si elles ont été écrasées.
+    ensureI18nNotCorrupted();
     bootTrace(`loadImages#${runId}.selectionResolved`, {
       source: selection?.source || "unknown",
       durationMs: Math.round(
@@ -17753,8 +17884,9 @@ async function loadImages() {
       ),
     });
     const items = Array.isArray(selection?.items) ? selection.items : [];
+    state._mediaSourceAllItems = selection?.source === "all-items";
     const sourceMessage = i18next.t(
-      getMediaSourceAnalyzedI18nKey(selection?.source === "all-items"),
+      getMediaSourceAnalyzedI18nKey(state._mediaSourceAllItems),
     );
 
     state.images = filterSessionMediaItems(items);
@@ -26098,7 +26230,7 @@ function updateTimerDisplay() {
       totalTimeParts.push(`${totalSecs}s`);
 
     const totalTimeString = totalTimeParts.join(" ");
-    const tooltipText = `Temps total restant : ${totalTimeString}`;
+    const tooltipText = `${i18next.t("timer.totalRemainingTime")} : ${totalTimeString}`;
 
     timerDisplay.setAttribute("data-tooltip", tooltipText);
 

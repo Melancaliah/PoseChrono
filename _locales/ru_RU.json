@@ -384,7 +384,8 @@
     "packInfoUploading": "Ожидание, пока хост поделится изображениями…",
     "packInfoDownloaded": "{{count}} файлов загружено{{size}}",
     "packInfoNewAvailable": "Новый пак · {{count}} файлов{{size}}",
-    "packInfoLimitHint": "Будет передано только {{max}} изображений (загружено {{total}})"
+    "packInfoLimitHint": "Будет передано только {{max}} изображений (загружено {{total}})",
+    "statusServerWaking": "Сервер запускается, подождите до 30 секунд..."
   },
   "modes": {
     "classic": {
@@ -634,7 +635,9 @@
     "readError": "Ошибка чтения",
     "undo": "Отменить",
     "undoApplied": "Действие отменено.",
-    "deleteQueued": "Удалено. Отмена доступна в течение 10 секунд."
+    "deleteQueued": "Удалено. Отмена доступна в течение 10 секунд.",
+    "deleteCancel": "Отмена",
+    "deleteConfirm": "Подтвердить"
   },
   "errors": {
     "loadError": "Ошибка загрузки",
@@ -840,6 +843,7 @@
     "skipConfirm": "Больше не спрашивать",
     "sessionDeleted": "Занятие удалено",
     "sessionDeletedBody": "Занятие было удалено",
+    "reuseSessionAllMissing": "Файлы не найдены",
     "reuseError": "Невозможно повторить",
     "reuseErrorOldSession": "Это занятие слишком старое и не содержит ID изображений.",
     "reuseSuccess": "Занятие успешно восстановлено",

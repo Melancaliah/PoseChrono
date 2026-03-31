@@ -384,7 +384,8 @@
     "packInfoUploading": "En attente que l'hôte partage ses images…",
     "packInfoDownloaded": "{{count}} fichiers téléchargés{{size}}",
     "packInfoNewAvailable": "Nouveau pack · {{count}} fichiers{{size}}",
-    "packInfoLimitHint": "Seules {{max}} images seront téléversées (sur {{total}} selectionnées)"
+    "packInfoLimitHint": "Seules {{max}} images seront téléversées (sur {{total}} selectionnées)",
+    "statusServerWaking": "Le serveur se réveille, veuillez patienter jusqu'à 30 secondes..."
   },
   "modes": {
     "classic": {
@@ -654,7 +655,9 @@
     "readError": "Erreur de lecture",
     "undo": "Annuler",
     "undoApplied": "Action annulée.",
-    "deleteQueued": "Supprimé. Annulation possible pendant 10 secondes."
+    "deleteQueued": "Supprimé. Annulation possible pendant 10 secondes.",
+    "deleteCancel": "Annuler",
+    "deleteConfirm": "Confirmer"
   },
   "errors": {
     "loadError": "Erreur de chargement",
@@ -841,6 +844,7 @@
     "skipConfirm": "Ne plus demander confirmation",
     "sessionDeleted": "Session supprimée",
     "sessionDeletedBody": "La session a été supprimée",
+    "reuseSessionAllMissing": "Fichiers introuvables",
     "reuseError": "Impossible de rejouer",
     "reuseErrorOldSession": "Cette session est trop ancienne et ne contient pas les IDs des images.",
     "reuseSuccess": "Session restaurée avec succès",

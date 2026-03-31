@@ -384,7 +384,8 @@
     "packInfoUploading": "Warten, bis der Host seine Bilder teilt…",
     "packInfoDownloaded": "{{count}} Dateien heruntergeladen{{size}}",
     "packInfoNewAvailable": "Neues Paket · {{count}} Dateien{{size}}",
-    "packInfoLimitHint": "Nur {{max}} Bilder werden geteilt (von {{total}} geladen)"
+    "packInfoLimitHint": "Nur {{max}} Bilder werden geteilt (von {{total}} geladen)",
+    "statusServerWaking": "Der Server wird gestartet, bitte warten Sie bis zu 30 Sekunden..."
   },
   "modes": {
     "classic": {
@@ -634,7 +635,9 @@
     "readError": "Lesefehler",
     "undo": "Rueckgaengig",
     "undoApplied": "Aktion rueckgaengig gemacht.",
-    "deleteQueued": "Geloescht. Rueckgaengig in den naechsten 10 Sekunden."
+    "deleteQueued": "Geloescht. Rueckgaengig in den naechsten 10 Sekunden.",
+    "deleteCancel": "Abbrechen",
+    "deleteConfirm": "Bestätigen"
   },
   "errors": {
     "loadError": "Ladefehler",
@@ -840,6 +843,7 @@
     "skipConfirm": "Nicht mehr fragen",
     "sessionDeleted": "Übung gelöscht",
     "sessionDeletedBody": "Die Übung wurde gelöscht",
+    "reuseSessionAllMissing": "Dateien nicht gefunden",
     "reuseError": "Kann nicht wiederholt werden",
     "reuseErrorOldSession": "Diese Übung ist zu alt und enthält keine Bild-IDs.",
     "reuseSuccess": "Übung erfolgreich wiederhergestellt",

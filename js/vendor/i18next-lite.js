@@ -81,6 +81,10 @@
       this.isInitialized = true;
       return this;
     },
+    hasResourceBundle(lang, ns) {
+      if (ns && ns !== "translation") return false;
+      return !!store[lang] && Object.keys(store[lang]).length > 0;
+    },
     addResourceBundle(lang, ns, data, deep = true, overwrite = true) {
       if (ns !== "translation" || !isObject(data)) return;
       if (!store[lang]) store[lang] = {};
@@ -132,4 +136,3 @@
       ? globalThis
       : this,
 );
-
