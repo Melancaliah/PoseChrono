@@ -218,6 +218,9 @@ const stateManager = new StateManager({
   silhouetteBrightness: 1, // 0-6 (luminosité)
   silhouetteContrast: 10000, // 1-10000 (contraste)
   silhouetteInvert: false,
+  edgeDetectionEnabled: false,
+  edgeDetectionStrength: 1, // 0.5-3 (multiplicateur de contraste des contours)
+  edgeDetectionInvert: true, // false = contours blancs sur noir, true = contours noirs sur blanc
   gridGuides: [], // Repères personnalisés déplaçables: [{type: 'vertical'|'horizontal', position: number}]
 
   // Modes de session
@@ -3774,6 +3777,7 @@ let sidebar, imageContainer, pauseOverlay, memoryOverlay;
 
 // État de lecture avant ouverture de modal
 let wasPlayingBeforeModal = false;
+let lastVisualEffectsState = { silhouette: true, edgeDetection: false }; // dernier état avant désactivation globale
 
 // Boutons de durée (30s, 1min, 2min, 5min)
 let durationBtns, hoursInput, minutesInput, secondsInput, inputGroups;
@@ -3906,6 +3910,8 @@ const ICONS = {
   GRID: '<svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#e3e3e3"><path d="M200-120q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h560q33 0 56.5 23.5T840-760v560q0 33-23.5 56.5T760-120H200Zm0-80h133v-133H200v133Zm213 0h134v-133H413v133Zm214 0h133v-133H627v133ZM200-413h133v-134H200v134Zm213 0h134v-134H413v134Zm214 0h133v-134H627v134ZM200-627h133v-133H200v133Zm213 0h134v-133H413v133Zm214 0h133v-133H627v133Z"/></svg>',
   SILHOUETTE:
     '<svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#e3e3e3"><path d="M760-120H200q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h560q33 0 56.5 23.5T840-760v560q0 33-23.5 56.5T760-120Zm-560-80h280v-320l280 320v-560H480v240L200-200Z"/></svg>',
+  EDGE_DETECTION:
+    '<svg xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="currentColor"><path d="M280-120v-80h80v80h-80Zm160 0v-80h80v80h-80Zm160 0v-80h80v80h-80Zm160 0v-80h80v80h-80Zm0-160v-80h80v80h-80Zm0-160v-80h80v80h-80Zm0-160v-80h80v80h-80ZM120-120v-720h720v80H200v640h-80Z"/></svg>',
   LINE_VERTICAL:
     '<img src="assets/icones/line-vertical.png" class="btn-icon-img" alt="icone repère vertical">',
   LINE_HORIZONTAL:
@@ -4964,6 +4970,13 @@ const GLOBAL_SETTINGS_SECTIONS = [
         ],
       },
       {
+        columns: 1,
+        align: "start",
+        items: [
+          { type: "action", key: "language", span: "full" },
+        ],
+      },
+      {
         align: "end",
         items: [{ type: "action", key: "openHotkeys" }],
       },
@@ -4984,7 +4997,6 @@ const GLOBAL_SETTINGS_SECTIONS = [
           { type: "action", key: "toggleGrid" },
           { type: "action", key: "toggleAnimations" },
           { type: "action", key: "toggleTheme" },
-          { type: "action", key: "language" },
         ],
       },
     ],
@@ -5052,7 +5064,7 @@ const GLOBAL_SETTINGS_SECTIONS = [
       },
       {
         className: "global-settings-actions-inline",
-        align: "start",
+        align: "center",
         items: [
           {
             type: "label",
@@ -5071,6 +5083,7 @@ const GLOBAL_SETTINGS_SECTIONS = [
       fallback:
         "Maintenance actions may remove local data. Consider exporting a backup first.",
     },
+    footer: "version",
   },
 ];
 
@@ -5693,6 +5706,33 @@ function renderGlobalSettingsSections() {
       statusEl.id = "global-settings-storage-status";
       statusEl.className = "global-settings-storage-status";
       listEl.appendChild(statusEl);
+    }
+
+    if (sectionConfig.footer === "version") {
+      const versionEl = document.createElement("div");
+      versionEl.className = "global-settings-version";
+      versionEl.textContent = "";
+      listEl.appendChild(versionEl);
+
+      // Résoudre la version : desktop (IPC) ou Eagle (manifest.json)
+      const desktopVersion =
+        typeof window !== "undefined" &&
+        window.poseChronoDesktop &&
+        window.poseChronoDesktop.version
+          ? String(window.poseChronoDesktop.version)
+          : "";
+      if (desktopVersion) {
+        versionEl.textContent = "v" + desktopVersion;
+      } else {
+        fetch("./manifest.json")
+          .then((r) => r.ok ? r.json() : null)
+          .then((m) => {
+            if (m?.version) {
+              versionEl.textContent = "v" + m.version;
+            }
+          })
+          .catch(() => {});
+      }
     }
 
     sectionEl.appendChild(listEl);
@@ -8014,6 +8054,7 @@ function getSyncSessionErrorMessage(error) {
   if (code === "invalid-session-media") return getI18nText("sync.errorInvalidSessionMedia", "Invalid session media payload.");
   if (code === "session-media-too-large") return getI18nText("sync.errorSessionMediaTooLarge", "Session media payload is too large.");
   if (code === "session-media-not-found") return getI18nText("sync.errorSessionMediaNotFound", "No online session media available yet.");
+  if (code === "session-media-upload-in-progress") return getI18nText("sync.errorMediaUploadInProgress", "Host is currently uploading media files. Please wait until the upload completes before downloading.");
   if (code === "session-media-incomplete") return getI18nText("sync.errorSessionMediaIncomplete", "Online media download incomplete. Please retry download.");
   if (code.startsWith("session-media-incomplete:")) {
     const details = code.slice("session-media-incomplete:".length).trim();
@@ -8448,6 +8489,61 @@ function updateSyncSessionModalPanelsVisibility(modal, snapshot = null) {
       "hidden",
       !showParticipantOnlineDownload || !syncSessionMediaTransferEnabled,
     );
+    if (showParticipantOnlineDownload) {
+      // Conditions pour activer le bouton download :
+      //  1. L'host a publié un pack effectif (mediaRefsCount > 0) — le 2ème publish
+      //     a eu lieu après les uploads réussis.
+      //  2. Au moins un fichier média est présent côté serveur (filesCount > 0).
+      //  3. L'upload n'est pas en cours (verrou sessionMediaMeta.uploadInProgress).
+      //  4. Aucune download active en cours côté participant.
+      const mediaMeta = state?.sessionMediaMeta || {};
+      const packMeta = state?.sessionPackMeta || {};
+      const uploadInProgress = mediaMeta.uploadInProgress === true;
+      const filesCount = Math.max(0, Number(mediaMeta.filesCount || 0) || 0);
+      const mediaRefsCount = Math.max(
+        0,
+        Number(packMeta.mediaRefsCount || 0) || 0,
+      );
+      const packReady = mediaRefsCount > 0 && filesCount > 0;
+
+      if (syncParticipantTransferInProgress) {
+        // Download déjà en cours → ne pas toucher à l'état (géré par le handler)
+      } else if (uploadInProgress) {
+        const uploadTotal = Math.max(
+          0,
+          Number(mediaMeta.uploadTotal || 0) || 0,
+        );
+        downloadOnlinePackBtn.disabled = true;
+        downloadOnlinePackBtn.setAttribute("aria-busy", "true");
+        const tooltipText = uploadTotal > 0
+          ? getI18nText(
+              "sync.downloadButtonDisabledUploadInProgress",
+              "Host is uploading media files ({{total}})... please wait.",
+              { total: uploadTotal },
+            )
+          : getI18nText(
+              "sync.downloadButtonDisabledUploadInProgress",
+              "Host is uploading media files... please wait.",
+            );
+        downloadOnlinePackBtn.setAttribute("data-tooltip", tooltipText);
+        downloadOnlinePackBtn.setAttribute("title", tooltipText);
+      } else if (!packReady) {
+        // Pas de pack prêt (aucun upload fait encore)
+        downloadOnlinePackBtn.disabled = true;
+        downloadOnlinePackBtn.removeAttribute("aria-busy");
+        const waitingText = getI18nText(
+          "sync.downloadButtonDisabledWaitingPack",
+          "Waiting for the host to share images…",
+        );
+        downloadOnlinePackBtn.setAttribute("data-tooltip", waitingText);
+        downloadOnlinePackBtn.setAttribute("title", waitingText);
+      } else {
+        downloadOnlinePackBtn.disabled = false;
+        downloadOnlinePackBtn.removeAttribute("aria-busy");
+        downloadOnlinePackBtn.removeAttribute("title");
+        downloadOnlinePackBtn.removeAttribute("data-tooltip");
+      }
+    }
   }
 
   // Save-to-library / save-to-folder checkbox (guest only, visible when download is visible)
@@ -12147,6 +12243,14 @@ function closeSyncSessionModal(options = {}) {
   const { restoreFocus = true } = options;
   const modal = document.getElementById("sync-session-modal");
   if (!modal) return;
+  // Si un transfert online est en cours, annuler proprement (signal abort + fermeture
+  // du sous-modal de transfert) pour éviter de laisser une opération orpheline
+  // qui continuerait en arrière-plan après fermeture.
+  if (syncTransferAbortController) {
+    try {
+      cancelSyncTransfer();
+    } catch (_) {}
+  }
   if (
     SYNC_SESSION_CONTROLLER &&
     typeof SYNC_SESSION_CONTROLLER.closeModal === "function"
@@ -12615,16 +12719,41 @@ function setupSyncSessionModalBindings() {
   }
 
   if (startLocalServerBtn) {
+    // Flag anti-flicker : tant qu'un démarrage est en cours, on ne doit pas
+    // laisser le health check périodique écraser l'état "Lancement..." par
+    // "Démarrer mon serveur local" (ce qui donnait l'impression d'un échec).
+    let localServerStarting = false;
+
     // Check if local server is reachable and update button state
     const markServerReady = () => {
+      localServerStarting = false;
       startLocalServerBtn.classList.add("is-ready");
+      startLocalServerBtn.classList.remove("is-starting");
       startLocalServerBtn.textContent = getI18nText("sync.localServerReady", "✓ Serveur local prêt");
       updateSyncSessionNetworkStatus(modal);
     };
-    const markServerPending = () => {
+    const markServerPending = ({ force = false } = {}) => {
+      // Ne pas écraser l'UI "Lancement..." pendant un démarrage actif
+      if (localServerStarting && !force) return;
       startLocalServerBtn.classList.remove("is-ready");
+      startLocalServerBtn.classList.remove("is-starting");
       startLocalServerBtn.textContent = getI18nText("sync.startLocalServer", "Démarrer mon serveur local");
       updateSyncSessionNetworkStatus(modal);
+    };
+    const markServerStarting = () => {
+      localServerStarting = true;
+      startLocalServerBtn.classList.remove("is-ready");
+      startLocalServerBtn.classList.add("is-starting");
+      const loadingBaseText = escapeHtml(
+        getI18nText("sync.localServerStarting", "Lancement…").replace(/(\.\.\.|…)$/, ""),
+      );
+      startLocalServerBtn.innerHTML =
+        loadingBaseText +
+        '<span class="sync-session-status-loading-dots" aria-hidden="true">' +
+        '<span class="sync-session-status-loading-dot">.</span>' +
+        '<span class="sync-session-status-loading-dot">.</span>' +
+        '<span class="sync-session-status-loading-dot">.</span>' +
+        "</span>";
     };
 
     const readSuggestedRelayUrlFromHealth = (payload) => {
@@ -12681,7 +12810,12 @@ function setupSyncSessionModalBindings() {
       if (health.suggestedUrl) {
         rememberSuggestedLocalRelayUrl(health.suggestedUrl);
       }
-      if (health.ok) markServerReady(); else markServerPending();
+      if (health.ok) {
+        markServerReady();
+      } else if (!localServerStarting) {
+        // On laisse passer l'état pending seulement si on n'est pas en démarrage.
+        markServerPending();
+      }
     };
 
     let localServerStoppedManually = false;
@@ -12719,13 +12853,25 @@ function setupSyncSessionModalBindings() {
     });
     observer.observe(modal, { attributes: true, attributeFilter: ["class"] });
 
+    // Anti-spam : cooldown court après chaque transition réussie (start/stop)
+    // pour éviter qu'un clic multiple ne déclenche plusieurs toasts successifs.
+    let _lastLocalServerTransitionAt = 0;
+    const LOCAL_SERVER_CLICK_COOLDOWN_MS = 800;
+
     startLocalServerBtn.addEventListener("click", async () => {
+      // Guard 1 : ignorer les clics pendant un démarrage en cours
+      if (localServerStarting) return;
+      // Guard 2 : ignorer les clics trop rapprochés d'une transition récente
+      const sinceLast = Date.now() - _lastLocalServerTransitionAt;
+      if (sinceLast < LOCAL_SERVER_CLICK_COOLDOWN_MS) return;
+
       // Toggle : si le serveur est pret, on l'arrete
       if (startLocalServerBtn.classList.contains("is-ready")) {
+        _lastLocalServerTransitionAt = Date.now();
         localServerStoppedManually = true;
         cleanupStartPolling();
         killEagleLocalSyncServer();
-        markServerPending();
+        markServerPending({ force: true });
         showSyncSessionToast({
           type: "info",
           message: getI18nText("sync.localServerStopped", "Serveur local arrêté."),
@@ -12739,13 +12885,8 @@ function setupSyncSessionModalBindings() {
       localServerStoppedManually = false;
 
       // Afficher immédiatement l'animation de chargement (avant les await)
-      const _loadingBaseText = escapeHtml(getI18nText("sync.localServerStarting", "Lancement…").replace(/(\.\.\.|…)$/, ""));
-      startLocalServerBtn.innerHTML = _loadingBaseText +
-        '<span class="sync-session-status-loading-dots" aria-hidden="true">' +
-        '<span class="sync-session-status-loading-dot">.</span>' +
-        '<span class="sync-session-status-loading-dot">.</span>' +
-        '<span class="sync-session-status-loading-dot">.</span>' +
-        '</span>';
+      // et lever le flag anti-flicker pour le health check périodique.
+      markServerStarting();
 
       // Mode Desktop Electron : lancement via IPC.
       if (window.poseChronoDesktop?.sync?.startLocalServer) {
@@ -12766,7 +12907,7 @@ function setupSyncSessionModalBindings() {
             ),
             duration: 4500,
           });
-          markServerPending();
+          markServerPending({ force: true });
           return;
         }
       } else {
@@ -12868,7 +13009,7 @@ function setupSyncSessionModalBindings() {
       let pollAttempts = 0;
       _activeStartPollTimer = setInterval(async () => {
         pollAttempts++;
-        if (pollAttempts > 15) { cleanupStartPolling(); markServerPending(); return; }
+        if (pollAttempts > 15) { cleanupStartPolling(); markServerPending({ force: true }); return; }
         const health = await pingLocalServer(LOCAL_SERVER_POLL_URL);
         if (health.suggestedUrl) {
           rememberSuggestedLocalRelayUrl(health.suggestedUrl);
@@ -12876,6 +13017,7 @@ function setupSyncSessionModalBindings() {
         if (health.ok) {
           cleanupStartPolling();
           markServerReady();
+          _lastLocalServerTransitionAt = Date.now();
           // Prefer the LAN-shareable URL from the server, then the cached suggestion
           const startedAddress =
             health.suggestedUrl || syncSessionSuggestedLocalRelayUrl || LOCAL_SERVER_POLL_URL;
@@ -13347,6 +13489,7 @@ function setupSyncSessionModalBindings() {
     }
 
     if (publishOnlinePackBtn) publishOnlinePackBtn.disabled = true;
+    let mediaUploadLockHeld = false;
     try {
       setSyncSessionStatus(modal, getI18nText("sync.uploadStatusPublishing", "Publishing online pack..."), "warning");
       openSyncTransferModal({
@@ -13362,6 +13505,25 @@ function setupSyncSessionModalBindings() {
       let packMeta = await service.publishSessionPack({
         pack: packConfigOnly,
       });
+      // Verrou serveur : empêche les invités de télécharger le pack media tant que l'upload
+      // n'est pas terminé (évite race condition guest-download-before-host-upload-complete).
+      if (typeof service.setSessionMediaUploadStatus === "function") {
+        try {
+          const upperBoundTotal = Array.isArray(pack?.mediaRefs)
+            ? pack.mediaRefs.length
+            : 0;
+          await service.setSessionMediaUploadStatus({
+            inProgress: true,
+            total: upperBoundTotal,
+          });
+          mediaUploadLockHeld = true;
+        } catch (lockError) {
+          console.warn(
+            "[Sync] Failed to acquire media upload lock:",
+            lockError,
+          );
+        }
+      }
       const mediaUploadSummary = await publishSyncSessionMediaPack(
         service,
         pack,
@@ -13655,6 +13817,19 @@ function setupSyncSessionModalBindings() {
         duration: 2600,
       });
     } finally {
+      if (
+        mediaUploadLockHeld &&
+        typeof service.setSessionMediaUploadStatus === "function"
+      ) {
+        try {
+          await service.setSessionMediaUploadStatus({ inProgress: false });
+        } catch (releaseError) {
+          console.warn(
+            "[Sync] Failed to release media upload lock:",
+            releaseError,
+          );
+        }
+      }
       if (publishOnlinePackBtn) publishOnlinePackBtn.disabled = false;
     }
   };
@@ -13807,6 +13982,39 @@ function setupSyncSessionModalBindings() {
         duration: 2400,
       });
       return;
+    }
+
+    // Double-vérification : refuser le download si l'host est en train d'uploader.
+    // Le bouton devrait déjà être disabled via renderSyncSessionModal mais on garde
+    // ce garde-fou pour les éventuels races de re-render.
+    if (syncSessionServiceState?.sessionMediaMeta?.uploadInProgress === true) {
+      showSyncSessionToast({
+        type: "warning",
+        message: getI18nText(
+          "sync.errorMediaUploadInProgress",
+          "Host is currently uploading media files. Please wait until the upload completes before downloading.",
+        ),
+        duration: 3200,
+      });
+      return;
+    }
+    // Double-vérification : refuser le download si aucun pack n'est encore disponible.
+    {
+      const mm = syncSessionServiceState?.sessionMediaMeta || {};
+      const pm = syncSessionServiceState?.sessionPackMeta || {};
+      const fc = Math.max(0, Number(mm.filesCount || 0) || 0);
+      const rc = Math.max(0, Number(pm.mediaRefsCount || 0) || 0);
+      if (rc <= 0 || fc <= 0) {
+        showSyncSessionToast({
+          type: "warning",
+          message: getI18nText(
+            "sync.downloadButtonDisabledWaitingPack",
+            "Waiting for the host to share images…",
+          ),
+          duration: 2600,
+        });
+        return;
+      }
     }
 
     if (downloadOnlinePackBtn) {
@@ -15616,12 +15824,14 @@ function setupStateSubscriptions() {
     }
   });
 
-  // Mise à jour automatique du bouton silhouette
-  stateManager.subscribe("silhouetteEnabled", (enabled) => {
+  // Mise à jour automatique du bouton silhouette (actif si silhouette OU contours)
+  const updateSilhouetteBtnActive = () => {
     if (silhouetteSidebarBtn) {
-      silhouetteSidebarBtn.classList.toggle("active", enabled);
+      silhouetteSidebarBtn.classList.toggle("active", state.silhouetteEnabled || state.edgeDetectionEnabled);
     }
-  });
+  };
+  stateManager.subscribe("silhouetteEnabled", updateSilhouetteBtnActive);
+  stateManager.subscribe("edgeDetectionEnabled", updateSilhouetteBtnActive);
 
   // Désactiver annotation sur médias non supportés (gif/vidéo)
   stateManager.subscribe("isVideoFile", () => {
@@ -17541,10 +17751,24 @@ function registerPrimarySessionControlsBindings() {
   }
   if (silhouetteSidebarBtn) {
     silhouetteSidebarBtn.addEventListener("click", () => {
-      state.silhouetteEnabled = !state.silhouetteEnabled;
+      const anyActive = state.silhouetteEnabled || state.edgeDetectionEnabled;
+      if (anyActive) {
+        // Mémoriser l'état actuel avant de tout couper
+        lastVisualEffectsState = {
+          silhouette: state.silhouetteEnabled,
+          edgeDetection: state.edgeDetectionEnabled,
+        };
+        state.silhouetteEnabled = false;
+        state.edgeDetectionEnabled = false;
+      } else {
+        // Restaurer le dernier état mémorisé
+        state.silhouetteEnabled = lastVisualEffectsState.silhouette;
+        state.edgeDetectionEnabled = lastVisualEffectsState.edgeDetection;
+      }
       applyImageFilters();
       if (window.updateZoomContent && window.zoomFilters) {
         window.zoomFilters.silhouette = state.silhouetteEnabled;
+        window.zoomFilters.edgeDetection = state.edgeDetectionEnabled;
         window.updateZoomContent();
       }
     });
@@ -19728,7 +19952,7 @@ function showImageContextMenu(x, y) {
     {
       text: i18next.t("filters.silhouette"),
       onClick: showSilhouetteConfig,
-      active: state.silhouetteEnabled,
+      active: state.silhouetteEnabled || state.edgeDetectionEnabled,
       icon: ICONS.SILHOUETTE,
       shortcut: CONFIG.HOTKEYS.SILHOUETTE.toUpperCase(),
     },
@@ -21078,30 +21302,64 @@ function drawDraggableGuide(svg, type, position, width, height, guideIndex) {
 }
 
 /**
- * Affiche le menu contextuel de la silhouette (luminosité + inversion)
+ * Affiche le menu contextuel des effets visuels (silhouette + détection de contours)
  */
 function showSilhouetteContextMenu(x, y) {
   const menu = document.createElement("div");
   menu.className = "context-menu silhouette-ctx-menu";
+
+  const invertLabel = i18next.t("filters.invert", { defaultValue: "Invert" });
+
   menu.innerHTML = `
-    <div class="silhouette-ctx-section">
+    <div class="silhouette-ctx-section-header">
+      <span class="silhouette-ctx-icon">${ICONS.SILHOUETTE}</span>
+      <span>${i18next.t("filters.silhouette")}</span>
+      <label class="silhouette-switch silhouette-ctx-switch">
+        <input type="checkbox" class="silhouette-ctx-toggle-silhouette" ${state.silhouetteEnabled ? "checked" : ""}>
+        <span class="silhouette-slider"></span>
+      </label>
+    </div>
+    <div class="silhouette-ctx-sub silhouette-ctx-sub-silhouette">
       <div class="silhouette-ctx-row">
         <span>${i18next.t("filters.brightness")}</span>
         <span class="silhouette-ctx-brightness-val">${escapeHtml(state.silhouetteBrightness.toFixed(2))}</span>
       </div>
-      <input type="range" class="threshold-slider silhouette-ctx-slider" min="0" max="6" step="0.01" value="${state.silhouetteBrightness}">
+      <input type="range" class="silhouette-ctx-slider silhouette-ctx-brightness-slider" min="0" max="6" step="0.01" value="${state.silhouetteBrightness}">
       <div class="silhouette-ctx-markers">
         <span>0</span>
         <span>3</span>
         <span>6</span>
       </div>
+      <label class="silhouette-ctx-checkbox-row">
+        <input type="checkbox" class="checkbox-simple silhouette-ctx-invert-silhouette" ${state.silhouetteInvert ? "checked" : ""}>
+        <span>${invertLabel}</span>
+      </label>
     </div>
+
     <div class="silhouette-ctx-divider"></div>
-    <div class="silhouette-ctx-row silhouette-ctx-invert-row">
-      <span>${i18next.t("filters.invertColors")}</span>
-      <label class="silhouette-switch">
-        <input type="checkbox" class="silhouette-ctx-invert-cb" ${state.silhouetteInvert ? "checked" : ""}>
+
+    <div class="silhouette-ctx-section-header">
+      <span class="silhouette-ctx-icon silhouette-ctx-icon-neutral">${ICONS.EDGE_DETECTION}</span>
+      <span>${i18next.t("filters.edgeDetection", { defaultValue: "Edge detection" })}</span>
+      <label class="silhouette-switch silhouette-ctx-switch">
+        <input type="checkbox" class="silhouette-ctx-toggle-edge" ${state.edgeDetectionEnabled ? "checked" : ""}>
         <span class="silhouette-slider"></span>
+      </label>
+    </div>
+    <div class="silhouette-ctx-sub silhouette-ctx-sub-edge">
+      <div class="silhouette-ctx-row">
+        <span>${i18next.t("edgeDetection.strength", { defaultValue: "Intensity" })}</span>
+        <span class="silhouette-ctx-strength-val">${escapeHtml(state.edgeDetectionStrength.toFixed(1))}</span>
+      </div>
+      <input type="range" class="silhouette-ctx-slider silhouette-ctx-strength-slider" min="0.5" max="3" step="0.1" value="${state.edgeDetectionStrength}">
+      <div class="silhouette-ctx-markers">
+        <span>0.5</span>
+        <span>1.75</span>
+        <span>3</span>
+      </div>
+      <label class="silhouette-ctx-checkbox-row">
+        <input type="checkbox" class="checkbox-simple silhouette-ctx-invert-edge" ${state.edgeDetectionInvert ? "checked" : ""}>
+        <span>${invertLabel}</span>
       </label>
     </div>
   `;
@@ -21111,39 +21369,85 @@ function showSilhouetteContextMenu(x, y) {
   menu.addEventListener("click", (e) => e.stopPropagation());
   menu.addEventListener("mousedown", (e) => e.stopPropagation());
 
-  const slider = menu.querySelector(".silhouette-ctx-slider");
+  // --- Silhouette controls ---
+  const silhouetteToggle = menu.querySelector(".silhouette-ctx-toggle-silhouette");
+  const brightnessSlider = menu.querySelector(".silhouette-ctx-brightness-slider");
   const brightnessVal = menu.querySelector(".silhouette-ctx-brightness-val");
-  const invertCb = menu.querySelector(".silhouette-ctx-invert-cb");
+  const silhouetteInvertCb = menu.querySelector(".silhouette-ctx-invert-silhouette");
+  const silhouetteSub = menu.querySelector(".silhouette-ctx-sub-silhouette");
 
-  initSliderWithGradient(slider);
+  initSliderWithGradient(brightnessSlider);
+  silhouetteSub.classList.toggle("silhouette-ctx-disabled", !state.silhouetteEnabled);
 
-  slider.addEventListener("input", (e) => {
+  silhouetteToggle.addEventListener("change", (e) => {
+    state.silhouetteEnabled = e.target.checked;
+    silhouetteSub.classList.toggle("silhouette-ctx-disabled", !e.target.checked);
+    applyImageFilters();
+    if (window.updateZoomContent && window.zoomFilters) {
+      window.zoomFilters.silhouette = e.target.checked;
+      window.updateZoomContent();
+    }
+  });
+
+  brightnessSlider.addEventListener("input", (e) => {
     const value = parseFloat(e.target.value);
     brightnessVal.textContent = value.toFixed(2);
     state.silhouetteBrightness = value;
-    updateSliderGradient(slider);
+    updateSliderGradient(brightnessSlider);
     applyImageFilters();
     if (window.updateZoomContent && window.zoomFilters?.silhouette) {
       window.updateZoomContent();
     }
   });
 
-  const applyInvertToggle = (checked) => {
-    state.silhouetteInvert = !!checked;
+  silhouetteInvertCb.addEventListener("change", (e) => {
+    state.silhouetteInvert = e.target.checked;
     applyImageFilters();
     if (window.updateZoomContent && window.zoomFilters?.silhouette) {
       window.updateZoomContent();
     }
-  };
-
-  invertCb.addEventListener("input", (e) => {
-    applyInvertToggle(e.target.checked);
   });
 
-  invertCb.addEventListener("change", (e) => {
-    applyInvertToggle(e.target.checked);
+  // --- Edge Detection controls ---
+  const edgeToggle = menu.querySelector(".silhouette-ctx-toggle-edge");
+  const strengthSlider = menu.querySelector(".silhouette-ctx-strength-slider");
+  const strengthVal = menu.querySelector(".silhouette-ctx-strength-val");
+  const edgeInvertCb = menu.querySelector(".silhouette-ctx-invert-edge");
+  const edgeSub = menu.querySelector(".silhouette-ctx-sub-edge");
+
+  initSliderWithGradient(strengthSlider);
+  edgeSub.classList.toggle("silhouette-ctx-disabled", !state.edgeDetectionEnabled);
+
+  edgeToggle.addEventListener("change", (e) => {
+    state.edgeDetectionEnabled = e.target.checked;
+    edgeSub.classList.toggle("silhouette-ctx-disabled", !e.target.checked);
+    applyImageFilters();
+    if (window.updateZoomContent && window.zoomFilters) {
+      window.zoomFilters.edgeDetection = e.target.checked;
+      window.updateZoomContent();
+    }
   });
 
+  strengthSlider.addEventListener("input", (e) => {
+    const value = parseFloat(e.target.value);
+    strengthVal.textContent = value.toFixed(1);
+    state.edgeDetectionStrength = value;
+    updateSliderGradient(strengthSlider);
+    applyImageFilters();
+    if (window.updateZoomContent && window.zoomFilters?.edgeDetection) {
+      window.updateZoomContent();
+    }
+  });
+
+  edgeInvertCb.addEventListener("change", (e) => {
+    state.edgeDetectionInvert = e.target.checked;
+    applyImageFilters();
+    if (window.updateZoomContent && window.zoomFilters?.edgeDetection) {
+      window.updateZoomContent();
+    }
+  });
+
+  // Fermeture au mouseleave
   let leaveTimer;
   menu.addEventListener("mouseleave", () => {
     leaveTimer = setTimeout(() => menu.remove(), 300);
@@ -21182,12 +21486,13 @@ function showSilhouetteConfig() {
 
   popup.innerHTML = `
     <div id="silhouette-config-header">
-      <h3>${i18next.t("filters.silhouetteConfig")} <span style="color: #888; font-size: 11px; font-weight: normal; margin-left: 8px;">Shift+S</span></h3>
+      <h3>${i18next.t("filters.visualEffects", { defaultValue: "Visual effects" })} <span style="color: #888; font-size: 11px; font-weight: normal; margin-left: 8px;">Shift+S</span></h3>
     </div>
     <div class="config-body">
 
-    <div class="config-row">
-      <span class="config-label">${i18next.t("filters.enableSilhouette")}</span>
+    <div class="config-section-title">
+      <span class="config-section-icon">${ICONS.SILHOUETTE}</span>
+      <span>${i18next.t("filters.silhouette")}</span>
       <label class="silhouette-switch">
         <input type="checkbox" id="silhouette-toggle" ${
           state.silhouetteEnabled ? "checked" : ""
@@ -21196,26 +21501,60 @@ function showSilhouetteConfig() {
       </label>
     </div>
 
-    <div class="threshold-container">
-      <label class="threshold-header">
-        <span>${i18next.t("filters.brightness")}</span>
-        <span id="brightness-value" class="threshold-value">${escapeHtml(state.silhouetteBrightness.toFixed(2))}</span>
-      </label>
-      <input type="range" id="brightness-slider" class="threshold-slider" min="0" max="6" step="0.01" value="${state.silhouetteBrightness}">
-      <div class="threshold-markers">
-        <span>0</span>
-        <span>3</span>
-        <span>6</span>
+    <div class="config-sub-options" id="silhouette-settings-container">
+      <div class="threshold-container">
+        <label class="threshold-header">
+          <span>${i18next.t("filters.brightness")}</span>
+          <span id="brightness-value" class="threshold-value">${escapeHtml(state.silhouetteBrightness.toFixed(2))}</span>
+        </label>
+        <input type="range" id="brightness-slider" class="threshold-slider" min="0" max="6" step="0.01" value="${state.silhouetteBrightness}">
+        <div class="threshold-markers">
+          <span>0</span>
+          <span>3</span>
+          <span>6</span>
+        </div>
       </div>
-    </div>
 
-    <div class="config-row">
-      <span class="config-label">${i18next.t("filters.invertColors")}</span>
-      <label class="silhouette-switch">
-        <input type="checkbox" id="silhouette-invert-toggle" ${
+      <label class="config-checkbox-row">
+        <input type="checkbox" class="checkbox-simple" id="silhouette-invert-toggle" ${
           state.silhouetteInvert ? "checked" : ""
         }>
+        <span class="config-label">${i18next.t("filters.invert", { defaultValue: "Invert" })}</span>
+      </label>
+    </div>
+
+    <div class="config-separator"></div>
+
+    <div class="config-section-title">
+      <span class="config-section-icon config-section-icon-neutral">${ICONS.EDGE_DETECTION}</span>
+      <span>${i18next.t("filters.edgeDetection", { defaultValue: "Edge detection" })}</span>
+      <label class="silhouette-switch">
+        <input type="checkbox" id="edge-detection-toggle" ${
+          state.edgeDetectionEnabled ? "checked" : ""
+        }>
         <span class="silhouette-slider"></span>
+      </label>
+    </div>
+
+    <div class="config-sub-options" id="edge-detection-settings-container">
+      <div class="threshold-container">
+        <label class="threshold-header">
+          <span>${i18next.t("edgeDetection.strength", { defaultValue: "Intensity" })}</span>
+          <span id="edge-strength-value" class="threshold-value">${escapeHtml(state.edgeDetectionStrength.toFixed(1))}</span>
+        </label>
+        <input type="range" id="edge-strength-slider" class="threshold-slider" min="0.5" max="3" step="0.1" value="${state.edgeDetectionStrength}">
+        <div class="threshold-markers">
+          <span>0.5</span>
+          <span>1.75</span>
+          <span>3</span>
+        </div>
+      </div>
+
+      <label class="config-checkbox-row">
+        <input type="checkbox" class="checkbox-simple" id="edge-invert-toggle" ${
+          state.edgeDetectionInvert ? "checked" : ""
+        }>
+        <span class="config-label">${i18next.t("filters.invert", { defaultValue: "Invert" })}</span>
       </label>
     </div>
 
@@ -21264,29 +21603,26 @@ function showSilhouetteConfig() {
     document.removeEventListener("mouseup", _scMouseUp);
   });
 
-  // Event listeners
+  // --- Event listeners Silhouette ---
   const silhouetteToggle = popup.querySelector("#silhouette-toggle");
   const brightnessSlider = popup.querySelector("#brightness-slider");
   const brightnessValue = popup.querySelector("#brightness-value");
   const invertToggle = popup.querySelector("#silhouette-invert-toggle");
-  const thresholdContainer = popup.querySelector(".threshold-container");
+  const silhouetteSettingsContainer = popup.querySelector("#silhouette-settings-container");
 
-  // Fonction pour mettre à jour l'état désactivé du threshold-container
-  const updateThresholdContainerState = (enabled) => {
-    if (thresholdContainer) {
-      thresholdContainer.classList.toggle("silhouette-disabled", !enabled);
+  const updateSilhouetteContainerState = (enabled) => {
+    if (silhouetteSettingsContainer) {
+      silhouetteSettingsContainer.classList.toggle("silhouette-disabled", !enabled);
     }
   };
 
-  // Initialiser l'état et le gradient du slider
-  updateThresholdContainerState(state.silhouetteEnabled);
+  updateSilhouetteContainerState(state.silhouetteEnabled);
   initSliderWithGradient(brightnessSlider);
 
   silhouetteToggle.addEventListener("change", (e) => {
     state.silhouetteEnabled = e.target.checked;
-    updateThresholdContainerState(e.target.checked);
+    updateSilhouetteContainerState(e.target.checked);
     applyImageFilters();
-    // Mettre à jour le zoom-overlay
     if (window.updateZoomContent && window.zoomFilters) {
       window.zoomFilters.silhouette = e.target.checked;
       updateZoomContent();
@@ -21299,7 +21635,6 @@ function showSilhouetteConfig() {
     state.silhouetteBrightness = value;
     updateSliderGradient(brightnessSlider);
     applyImageFilters();
-    // Mettre à jour le zoom-overlay si la silhouette est active
     if (window.updateZoomContent && window.zoomFilters?.silhouette) {
       window.updateZoomContent();
     }
@@ -21308,8 +21643,52 @@ function showSilhouetteConfig() {
   invertToggle.addEventListener("change", (e) => {
     state.silhouetteInvert = e.target.checked;
     applyImageFilters();
-    // Mettre à jour le zoom-overlay si la silhouette est active
     if (window.updateZoomContent && window.zoomFilters?.silhouette) {
+      window.updateZoomContent();
+    }
+  });
+
+  // --- Event listeners Edge Detection ---
+  const edgeToggle = popup.querySelector("#edge-detection-toggle");
+  const edgeStrengthSlider = popup.querySelector("#edge-strength-slider");
+  const edgeStrengthValue = popup.querySelector("#edge-strength-value");
+  const edgeInvertToggle = popup.querySelector("#edge-invert-toggle");
+  const edgeSettingsContainer = popup.querySelector("#edge-detection-settings-container");
+
+  const updateEdgeContainerState = (enabled) => {
+    if (edgeSettingsContainer) {
+      edgeSettingsContainer.classList.toggle("silhouette-disabled", !enabled);
+    }
+  };
+
+  updateEdgeContainerState(state.edgeDetectionEnabled);
+  initSliderWithGradient(edgeStrengthSlider);
+
+  edgeToggle.addEventListener("change", (e) => {
+    state.edgeDetectionEnabled = e.target.checked;
+    updateEdgeContainerState(e.target.checked);
+    applyImageFilters();
+    if (window.updateZoomContent && window.zoomFilters) {
+      window.zoomFilters.edgeDetection = e.target.checked;
+      window.updateZoomContent();
+    }
+  });
+
+  edgeStrengthSlider.addEventListener("input", (e) => {
+    const value = parseFloat(e.target.value);
+    edgeStrengthValue.textContent = value.toFixed(1);
+    state.edgeDetectionStrength = value;
+    updateSliderGradient(edgeStrengthSlider);
+    applyImageFilters();
+    if (window.updateZoomContent && window.zoomFilters?.edgeDetection) {
+      window.updateZoomContent();
+    }
+  });
+
+  edgeInvertToggle.addEventListener("change", (e) => {
+    state.edgeDetectionInvert = e.target.checked;
+    applyImageFilters();
+    if (window.updateZoomContent && window.zoomFilters?.edgeDetection) {
       window.updateZoomContent();
     }
   });
@@ -21366,6 +21745,18 @@ function getSilhouetteFilterCSS() {
   }
 
   return filters.join(" ");
+}
+
+/**
+ * Génère le filtre CSS pour l'effet détection de contours (edge detection)
+ * Utilise un filtre SVG Laplacian défini dans index.html
+ */
+function getEdgeDetectionFilterCSS() {
+  const invert = state.edgeDetectionInvert;
+  const strength = state.edgeDetectionStrength;
+  const filterId = invert ? "edge-detect-filter-invert" : "edge-detect-filter";
+  // brightness amplifie les contours faibles, contrast les rend plus nets
+  return `url(#${filterId}) brightness(${strength}) contrast(${1 + strength})`;
 }
 
 function closeAllContextMenus() {
@@ -21819,6 +22210,7 @@ const HOTKEY_CATEGORIES = {
     "INFO",
     "SILHOUETTE",
     "SILHOUETTE_MODAL",
+    "EDGE_DETECTION",
     "THEME",
     "ANNOTATE",
     "TAGS",
@@ -22016,6 +22408,9 @@ function initGlobalModalKeyboardSupport() {
  * @param {Function} [options.onAction]
  * @param {number} [options.duration]
  */
+const POSECHRONO_TOAST_DEDUP_WINDOW_MS = 1500;
+const POSECHRONO_TOAST_LAST_SHOWN = new Map();
+
 function showPoseChronoToast(options = {}) {
   const {
     type = "info",
@@ -22024,6 +22419,24 @@ function showPoseChronoToast(options = {}) {
     onAction = null,
     duration = 3000,
   } = options;
+
+  // Dedup : ignorer un toast identique (même type + message) déclenché
+  // dans une courte fenêtre. Évite les boucles de notifications quand
+  // l'utilisateur spamme un bouton ou qu'un événement se répète.
+  const dedupKey = `${type}|${String(message || "")}`;
+  const nowTs = Date.now();
+  const lastTs = POSECHRONO_TOAST_LAST_SHOWN.get(dedupKey) || 0;
+  if (nowTs - lastTs < POSECHRONO_TOAST_DEDUP_WINDOW_MS) {
+    return;
+  }
+  POSECHRONO_TOAST_LAST_SHOWN.set(dedupKey, nowTs);
+  // GC léger pour éviter croissance de la Map
+  if (POSECHRONO_TOAST_LAST_SHOWN.size > 64) {
+    const cutoff = nowTs - POSECHRONO_TOAST_DEDUP_WINDOW_MS * 4;
+    for (const [key, ts] of POSECHRONO_TOAST_LAST_SHOWN.entries()) {
+      if (ts < cutoff) POSECHRONO_TOAST_LAST_SHOWN.delete(key);
+    }
+  }
 
   let container = document.getElementById("posechrono-toast-container");
   if (!container) {
@@ -24259,6 +24672,7 @@ function openZoomForImage(image, options = {}) {
     blur: false,
     blurAmount: 8,
     silhouette: false,
+    edgeDetection: false,
   };
 
   // Vérifier que l'image a un chemin valide
@@ -24350,6 +24764,7 @@ function openZoomForImage(image, options = {}) {
     if (zoomFilters.gray) filter += "grayscale(100%) ";
     if (zoomFilters.blur) filter += `blur(${zoomFilters.blurAmount}px) `;
     if (zoomFilters.silhouette) filter += getSilhouetteFilterCSS();
+    if (zoomFilters.edgeDetection) filter += getEdgeDetectionFilterCSS();
 
     // Créer le contenu selon le type de média
     if (isVideo) {
@@ -24751,11 +25166,33 @@ function openZoomForImage(image, options = {}) {
       };
     }
 
+    // --- BOUTON EDGE DETECTION ---
+    const btnEdgeDetection = document.createElement("button");
+    btnEdgeDetection.className = `control-btn-small ${zoomFilters.edgeDetection ? "active" : ""}`;
+    btnEdgeDetection.setAttribute(
+      "data-tooltip",
+      i18next.t("filters.edgeDetectionTooltip", {
+        hotkey: CONFIG.HOTKEYS.EDGE_DETECTION.toUpperCase(),
+        defaultValue: "Edge detection ({{hotkey}}) - right-click for settings",
+      }),
+    );
+    btnEdgeDetection.innerHTML = ICONS.EDGE_DETECTION;
+    btnEdgeDetection.onclick = () => {
+      zoomFilters.edgeDetection = !zoomFilters.edgeDetection;
+      btnEdgeDetection.classList.toggle("active", zoomFilters.edgeDetection);
+      updateZoomContent();
+    };
+    btnEdgeDetection.oncontextmenu = (e) => {
+      e.preventDefault();
+      showSilhouetteConfig();
+    };
+
     toolbar.appendChild(btnFlip);
     toolbar.appendChild(btnFlipV);
     toolbar.appendChild(btnGray);
     toolbar.appendChild(btnBlur);
     toolbar.appendChild(btnSilhouette);
+    toolbar.appendChild(btnEdgeDetection);
     if (btnDraw) toolbar.appendChild(btnDraw);
     toolbar.appendChild(btnReveal);
     if (btnDelete) toolbar.appendChild(btnDelete);
@@ -24944,6 +25381,10 @@ function openZoomForImage(image, options = {}) {
       e.preventDefault();
       zoomFilters.silhouette = !zoomFilters.silhouette;
       updateZoomContent();
+    } else if (!hasSystemModifier && keyLow === hk.EDGE_DETECTION.toLowerCase()) {
+      e.preventDefault();
+      zoomFilters.edgeDetection = !zoomFilters.edgeDetection;
+      updateZoomContent();
     } else if (
       (!hasSystemModifier && keyLow === hk.ANNOTATE.toLowerCase()) ||
       (!hasSystemModifier && keyLow === hk.DRAWING_TOOL_PENCIL.toLowerCase()) ||
@@ -25052,6 +25493,7 @@ function showReview() {
     blur: false,
     blurAmount: 8,
     silhouette: false, // Silhouette contrôlée indépendamment dans le zoom-overlay
+    edgeDetection: false,
   };
 
   const statsText = document.getElementById("review-stats");
@@ -25472,6 +25914,7 @@ function showReview() {
     if (zoomFilters.gray) filter += "grayscale(100%) ";
     if (zoomFilters.blur) filter += `blur(${zoomFilters.blurAmount}px) `;
     if (zoomFilters.silhouette) filter += getSilhouetteFilterCSS();
+    if (zoomFilters.edgeDetection) filter += getEdgeDetectionFilterCSS();
 
     // Créer le contenu selon le type de média
     if (isVideo) {
@@ -25784,6 +26227,27 @@ function showReview() {
       showSilhouetteConfig();
     };
 
+    // --- BOUTON EDGE DETECTION ---
+    const btnEdgeDetection = document.createElement("button");
+    btnEdgeDetection.className = `control-btn-small ${zoomFilters.edgeDetection ? "active" : ""}`;
+    btnEdgeDetection.setAttribute(
+      "data-tooltip",
+      i18next.t("filters.edgeDetectionTooltip", {
+        hotkey: CONFIG.HOTKEYS.EDGE_DETECTION.toUpperCase(),
+        defaultValue: "Edge detection ({{hotkey}}) - right-click for settings",
+      }),
+    );
+    btnEdgeDetection.innerHTML = ICONS.EDGE_DETECTION;
+    btnEdgeDetection.onclick = () => {
+      zoomFilters.edgeDetection = !zoomFilters.edgeDetection;
+      btnEdgeDetection.classList.toggle("active", zoomFilters.edgeDetection);
+      updateZoomContent();
+    };
+    btnEdgeDetection.oncontextmenu = (e) => {
+      e.preventDefault();
+      showSilhouetteConfig();
+    };
+
     // Bouton Dessiner (seulement pour les images, pas les vidéos)
     let btnDraw = null;
     if (!isVideo) {
@@ -25941,6 +26405,7 @@ function showReview() {
     toolbar.appendChild(btnGray);
     toolbar.appendChild(btnBlur);
     toolbar.appendChild(btnSilhouette);
+    toolbar.appendChild(btnEdgeDetection);
     if (btnDraw) toolbar.appendChild(btnDraw);
     toolbar.appendChild(btnReveal);
     toolbar.appendChild(btnDelete);
@@ -26138,6 +26603,10 @@ function showReview() {
       // Puis tester S seul pour toggle la silhouette
       e.preventDefault();
       zoomFilters.silhouette = !zoomFilters.silhouette;
+      updateZoomContent();
+    } else if (!hasSystemModifier && keyLow === hk.EDGE_DETECTION.toLowerCase()) {
+      e.preventDefault();
+      zoomFilters.edgeDetection = !zoomFilters.edgeDetection;
       updateZoomContent();
     } else if (
       (!hasSystemModifier && keyLow === hk.ANNOTATE.toLowerCase()) ||
@@ -27441,6 +27910,12 @@ function applyImageFilters() {
   if (state.silhouetteEnabled) {
     const silhouetteFilterCSS = getSilhouetteFilterCSS();
     filters.push(silhouetteFilterCSS);
+  }
+
+  // Filtre détection de contours (edge detection)
+  if (state.edgeDetectionEnabled) {
+    const edgeFilterCSS = getEdgeDetectionFilterCSS();
+    filters.push(edgeFilterCSS);
   }
 
   // Application des filtres (fonctionne sur img ET video)

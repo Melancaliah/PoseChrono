@@ -190,6 +190,48 @@
       return value || String(fallback || "").trim();
     }
 
+    /**
+     * Génère un nom de participant unique dans une room donnée.
+     * Miroir de resolveUniqueParticipantName du relay server : suffixe
+     * automatiquement "Invité 2", "Invité 3", ... si le fallback est utilisé
+     * et qu'un autre participant porte déjà ce nom.
+     */
+    function resolveUniqueParticipantName(room, rawInput, fallback, excludeClientId = "") {
+      const desired = normalizeParticipantName(rawInput, fallback);
+      if (!desired || !room || !(room.participantProfiles instanceof Map)) {
+        return desired;
+      }
+      const exclude = String(excludeClientId || "").trim();
+      const used = new Set();
+      if (
+        room.hostClientId &&
+        room.hostClientId !== exclude &&
+        room.participantProfiles.has(room.hostClientId)
+      ) {
+        const hostName = String(
+          room.participantProfiles.get(room.hostClientId) || "",
+        ).trim().toLowerCase();
+        if (hostName) used.add(hostName);
+      }
+      room.participantProfiles.forEach((name, clientId) => {
+        if (clientId === exclude) return;
+        if (clientId === room.hostClientId) return;
+        const n = String(name || "").trim().toLowerCase();
+        if (n) used.add(n);
+      });
+      if (!used.has(desired.toLowerCase())) {
+        return desired;
+      }
+      for (let i = 2; i <= 999; i += 1) {
+        const candidate = `${desired} ${i}`;
+        if (candidate.length > 32) break;
+        if (!used.has(candidate.toLowerCase())) {
+          return candidate;
+        }
+      }
+      return `${desired} ${Math.floor(now() % 10000)}`.slice(0, 32);
+    }
+
     function normalizeParticipantSyncState(input) {
       const value = String(input || "").trim().toLowerCase();
       if (
@@ -392,6 +434,10 @@
                 totalBytes: Math.max(0, Number(room.sessionMediaTotalBytes || 0) || 0),
                 updatedAt: Math.max(0, Number(room.sessionMediaUpdatedAt || 0) || 0),
                 uploadedBy: String(room.sessionMediaUploadedBy || "").trim(),
+                uploadInProgress: !!room.sessionMediaUploadInProgress,
+                uploadTotal: Math.max(0, Number(room.sessionMediaUploadTotal || 0) || 0),
+                uploadStartedAt: Math.max(0, Number(room.sessionMediaUploadStartedAt || 0) || 0),
+                uploadStartedBy: String(room.sessionMediaUploadStartedBy || "").trim(),
               }
             : null,
         createdAt: room.createdAt,
@@ -857,6 +903,10 @@
         sessionMediaUpdatedAt: 0,
         sessionMediaUploadedBy: "",
         sessionMediaTotalBytes: 0,
+        sessionMediaUploadInProgress: false,
+        sessionMediaUploadTotal: 0,
+        sessionMediaUploadStartedAt: 0,
+        sessionMediaUploadStartedBy: "",
         createdAt: now(),
         updatedAt: now(),
       };
@@ -891,7 +941,7 @@
       room.participantIds.add(clientId);
       room.participantProfiles.set(
         clientId,
-        normalizeParticipantName(input.participantName, "Invité"),
+        resolveUniqueParticipantName(room, input.participantName, "Invité"),
       );
       if (!(room.participantSyncStates instanceof Map)) {
         room.participantSyncStates = new Map();
@@ -1133,6 +1183,94 @@
       };
     }
 
+    // 5 minutes : si l'upload du host n'a pas progressé depuis ce délai,
+    // on considère le verrou comme obsolète (host crashé/réseau coupé)
+    const MOCK_SESSION_MEDIA_UPLOAD_STALE_MS = 5 * 60 * 1000;
+
+    function isMockSessionMediaUploadStale(room) {
+      if (!room || !room.sessionMediaUploadInProgress) return false;
+      const startedAt = Math.max(0, Number(room.sessionMediaUploadStartedAt || 0) || 0);
+      const lastFileAt = Math.max(0, Number(room.sessionMediaUpdatedAt || 0) || 0);
+      const lastActivity = Math.max(startedAt, lastFileAt);
+      if (lastActivity <= 0) return false;
+      return now() - lastActivity > MOCK_SESSION_MEDIA_UPLOAD_STALE_MS;
+    }
+
+    function clearMockStaleMediaUploadLock(sessionCode, room) {
+      if (!isMockSessionMediaUploadStale(room)) return false;
+      room.sessionMediaUploadInProgress = false;
+      room.sessionMediaUploadTotal = 0;
+      room.sessionMediaUploadStartedAt = 0;
+      room.sessionMediaUploadStartedBy = "";
+      room.updatedAt = now();
+      try {
+        const snapshot = makeSnapshot(room);
+        emitToSession(sessionCode, {
+          type: "room-updated",
+          source: "session-media-upload-status-stale-cleared",
+          sessionCode,
+          snapshot,
+        });
+      } catch (_) {
+        // best-effort
+      }
+      return true;
+    }
+
+    function isMockSessionMediaUploadLocked(sessionCode, room) {
+      if (!room || !room.sessionMediaUploadInProgress) return false;
+      if (isMockSessionMediaUploadStale(room)) {
+        clearMockStaleMediaUploadLock(sessionCode, room);
+        return false;
+      }
+      return true;
+    }
+
+    function setSessionMediaUploadStatus(input = {}) {
+      const bus = ensureBus();
+      const sessionCode = normalizeSessionCode(input.sessionCode);
+      const room = bus.rooms.get(sessionCode);
+      if (!room) {
+        throw new Error("session-not-found");
+      }
+
+      const sourceClientId = normalizeClientId(
+        input.sourceClientId,
+        "invalid-client-id",
+      );
+      if (!room.participantIds.has(sourceClientId)) {
+        throw new Error("not-joined");
+      }
+      if (sourceClientId !== room.hostClientId) {
+        throw new Error("forbidden-not-host");
+      }
+
+      const inProgress = !!input.inProgress;
+      const total = Math.max(0, Math.floor(Number(input.total || 0) || 0));
+
+      if (inProgress) {
+        room.sessionMediaUploadInProgress = true;
+        room.sessionMediaUploadTotal = total;
+        room.sessionMediaUploadStartedAt = now();
+        room.sessionMediaUploadStartedBy = sourceClientId;
+      } else {
+        room.sessionMediaUploadInProgress = false;
+        room.sessionMediaUploadTotal = 0;
+        room.sessionMediaUploadStartedAt = 0;
+        room.sessionMediaUploadStartedBy = "";
+      }
+      room.updatedAt = now();
+
+      const snapshot = makeSnapshot(room);
+      emitToSession(sessionCode, {
+        type: "room-updated",
+        source: "session-media-upload-status",
+        sessionCode,
+        snapshot,
+      });
+      return snapshot;
+    }
+
     function resetSessionMediaPack(input = {}) {
       const bus = ensureBus();
       const sessionCode = normalizeSessionCode(input.sessionCode);
@@ -1156,6 +1294,10 @@
       room.sessionMediaTotalBytes = 0;
       room.sessionMediaUpdatedAt = now();
       room.sessionMediaUploadedBy = sourceClientId;
+      room.sessionMediaUploadInProgress = false;
+      room.sessionMediaUploadTotal = 0;
+      room.sessionMediaUploadStartedAt = 0;
+      room.sessionMediaUploadStartedBy = "";
       room.updatedAt = room.sessionMediaUpdatedAt;
 
       const snapshot = makeSnapshot(room);
@@ -1243,6 +1385,12 @@
       if (!room.participantIds.has(sourceClientId)) {
         throw new Error("not-joined");
       }
+      if (
+        sourceClientId !== room.hostClientId &&
+        isMockSessionMediaUploadLocked(sessionCode, room)
+      ) {
+        throw new Error("session-media-upload-in-progress");
+      }
       if (!(room.sessionMediaFiles instanceof Map) || room.sessionMediaFiles.size <= 0) {
         throw new Error("session-media-not-found");
       }
@@ -1280,6 +1428,12 @@
       );
       if (!room.participantIds.has(sourceClientId)) {
         throw new Error("not-joined");
+      }
+      if (
+        sourceClientId !== room.hostClientId &&
+        isMockSessionMediaUploadLocked(sessionCode, room)
+      ) {
+        throw new Error("session-media-upload-in-progress");
       }
       if (!(room.sessionMediaFiles instanceof Map) || room.sessionMediaFiles.size <= 0) {
         throw new Error("session-media-not-found");
@@ -1410,6 +1564,7 @@
       uploadSessionMediaFile,
       getSessionMediaManifest,
       getSessionMediaFile,
+      setSessionMediaUploadStatus,
       sendRtcSignal,
       getRoomSnapshot,
       subscribe,

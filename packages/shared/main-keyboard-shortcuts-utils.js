@@ -217,6 +217,9 @@
     } else if (keyLow === String(hk.SILHOUETTE || "").toLowerCase()) {
       state.silhouetteEnabled = !state.silhouetteEnabled;
       callIfFn(input.applyImageFilters);
+    } else if (keyLow === String(hk.EDGE_DETECTION || "").toLowerCase()) {
+      state.edgeDetectionEnabled = !state.edgeDetectionEnabled;
+      callIfFn(input.applyImageFilters);
     } else if (keyLow === String(hk.SIDEBAR || "").toLowerCase()) {
       callIfFn(input.toggleSidebar);
     } else if (keyLow === String(hk.INFO || "").toLowerCase()) {

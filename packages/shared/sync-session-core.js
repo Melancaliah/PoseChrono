@@ -13,8 +13,30 @@
       typeof options.random === "function"
         ? options.random
         : () => Math.random();
-    const logger =
+    const rawLogger =
       typeof options.logger === "function" ? options.logger : () => {};
+    // Codes d'erreur transitoires/attendus à ne pas logger en bruit (rate limiting,
+    // déconnexions WS pendant reconnexion, etc.). Ils sont gérés par retry interne
+    // et n'ont aucun impact visible.
+    const BENIGN_ERROR_CODES = new Set([
+      "state-rate-limited",
+      "rate-limited",
+      "websocket-not-open",
+      "websocket-disconnected",
+      "websocket-connect-failed",
+      "websocket-connect-closed",
+      "websocket-request-timeout",
+      "transfer-cancelled",
+    ]);
+    function logger(label, err) {
+      try {
+        const code = String(err?.message || err || "").trim();
+        if (code && BENIGN_ERROR_CODES.has(code)) return;
+      } catch (_) {}
+      try {
+        rawLogger(label, err);
+      } catch (_) {}
+    }
     const transport =
       options.transport ||
       (typeof sharedRoot.createSyncTransportMock === "function"
@@ -294,6 +316,26 @@
       });
     }
 
+    function resetP2pFallbackIndicators() {
+      // Effacer les indicateurs de fallback P2P obsolètes après une reconnexion WS.
+      // Le transport WebRTC réémettra un diagnostic frais si le mesh est encore dégradé.
+      if (
+        !state.p2pFallbackActive &&
+        !state.p2pFallbackReason &&
+        state.p2pRelayParticipantsCount === 0 &&
+        (!Array.isArray(state.p2pRelayParticipantIds) ||
+          state.p2pRelayParticipantIds.length === 0)
+      ) {
+        return;
+      }
+      patchState({
+        p2pFallbackActive: false,
+        p2pFallbackReason: "",
+        p2pRelayParticipantsCount: 0,
+        p2pRelayParticipantIds: [],
+      });
+    }
+
     // Transport connection state awareness (reconnection handling)
     if (transport && typeof transport.onConnectionStateChange === "function") {
       transport.onConnectionStateChange((connectionState) => {
@@ -317,6 +359,7 @@
                 .then((snapshot) => {
                   if (role !== reconnectRole || roomCode !== reconnectRoomCode) return;
                   if (snapshot) applyRoomSnapshot(snapshot, "host");
+                  resetP2pFallbackIndicators();
                   patchState({ lastError: "" });
                 })
                 .catch((err) => {
@@ -353,6 +396,7 @@
                 .then((snapshot) => {
                   if (role !== reconnectRole || roomCode !== reconnectRoomCode) return;
                   applyRoomSnapshot(snapshot, "participant");
+                  resetP2pFallbackIndicators();
                   patchState({ lastError: "" });
                 })
                 .catch((joinErr) => {
@@ -374,6 +418,7 @@
                 .then((snapshot) => {
                   if (role !== reconnectRole || roomCode !== reconnectRoomCode) return;
                   if (snapshot) applyRoomSnapshot(snapshot, "participant");
+                  resetP2pFallbackIndicators();
                   patchState({ lastError: "" });
                 })
                 .catch((err) => {
@@ -722,6 +767,9 @@
           sourceClientId: clientId,
         });
         if (!result || typeof result !== "object") return null;
+        if (state.lastError) {
+          patchState({ lastError: "" });
+        }
         return {
           pack: result.pack && typeof result.pack === "object" ? result.pack : null,
           hash: String(result.hash || "").trim(),
@@ -769,6 +817,30 @@
         return true;
       } catch (err) {
         logger("[SyncSession] publishSessionMediaFile failed", err);
+        throw err;
+      }
+    }
+
+    async function setSessionMediaUploadStatus(input = {}) {
+      if (role !== "host") return false;
+      if (!roomCode) return false;
+      if (
+        !transport ||
+        typeof transport.setSessionMediaUploadStatus !== "function"
+      ) {
+        return false;
+      }
+      try {
+        const snapshot = await transport.setSessionMediaUploadStatus({
+          sessionCode: roomCode,
+          sourceClientId: clientId,
+          inProgress: !!input.inProgress,
+          total: Math.max(0, Math.floor(Number(input.total || 0) || 0)),
+        });
+        applyRoomSnapshot(snapshot, "host");
+        return true;
+      } catch (err) {
+        logger("[SyncSession] setSessionMediaUploadStatus failed", err);
         return false;
       }
     }
@@ -784,6 +856,9 @@
           sourceClientId: clientId,
         });
         if (!result || typeof result !== "object") return null;
+        if (state.lastError) {
+          patchState({ lastError: "" });
+        }
         return {
           files: Array.isArray(result.files) ? result.files.slice() : [],
           filesCount: Math.max(0, Number(result.filesCount || 0) || 0),
@@ -811,6 +886,9 @@
         if (!result || typeof result !== "object") return null;
         const file = result.file && typeof result.file === "object" ? result.file : null;
         if (!file) return null;
+        if (state.lastError) {
+          patchState({ lastError: "" });
+        }
         return {
           file: {
             identity: String(file.identity || "").trim(),
@@ -993,6 +1071,7 @@
       fetchSessionPack,
       resetSessionMediaPack,
       publishSessionMediaFile,
+      setSessionMediaUploadStatus,
       fetchSessionMediaManifest,
       fetchSessionMediaFile,
       requestSharedPlayback,

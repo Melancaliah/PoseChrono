@@ -119,6 +119,9 @@
     let localMediaUpdatedAt = 0;
     let localMediaUploadedBy = "";
     let localMediaTotalBytes = 0;
+    // Verrou local côté hôte : empêche les requêtes P2P (manifest/file) tant
+    // que l'upload n'est pas terminé. Symétrique au verrou serveur sur le relay.
+    let localMediaUploadInProgress = false;
     const latencySamples = [];
     let latencyHead = 0;
 
@@ -275,11 +278,16 @@
     }
 
     function clearPendingP2PRequests(reason = "webrtc-not-ready") {
-      pendingP2PRequests.forEach((entry, requestId) => {
-        pendingP2PRequests.delete(requestId);
+      // Snapshot avant itération : un reject() peut déclencher des handlers synchrones
+      // qui insèrent/suppriment d'autres entrées dans pendingP2PRequests.
+      const snapshot = Array.from(pendingP2PRequests.entries());
+      pendingP2PRequests.clear();
+      snapshot.forEach(([, entry]) => {
         if (entry && entry.timerId) clearTimeoutFn(entry.timerId);
         if (entry && typeof entry.reject === "function") {
-          entry.reject(new Error(reason));
+          try {
+            entry.reject(new Error(reason));
+          } catch (_) {}
         }
       });
     }
@@ -566,7 +574,24 @@
           typeof channel.bufferedAmount === "number" &&
           channel.bufferedAmount > maxBufferedAmountBeforeYield
         ) {
-          await sleep(sendYieldDelayMs);
+          // Attendre que le buffer redescende, avec une borne max pour éviter
+          // un blocage indéfini si le pair est mort ou injoignable.
+          const drainStartedAt = now();
+          const drainMaxMs = 30000;
+          while (
+            channel &&
+            channel.readyState === "open" &&
+            typeof channel.bufferedAmount === "number" &&
+            channel.bufferedAmount > maxBufferedAmountBeforeYield
+          ) {
+            if (now() - drainStartedAt > drainMaxMs) {
+              throw new Error("webrtc-backpressure-timeout");
+            }
+            await sleep(sendYieldDelayMs);
+          }
+          if (!channel || channel.readyState !== "open") {
+            throw new Error("webrtc-not-ready");
+          }
         }
       }
 
@@ -585,6 +610,15 @@
       if (!channel) return;
 
       if (kind === "p2p-media-manifest-request") {
+        if (localMediaUploadInProgress) {
+          sendDataMessage(channel, {
+            kind: "p2p-media-manifest-response",
+            requestId,
+            ok: false,
+            errorCode: "session-media-upload-in-progress",
+          });
+          return;
+        }
         const manifest = buildLocalMediaManifest();
         if (!manifest.filesCount) {
           sendDataMessage(channel, {
@@ -605,6 +639,14 @@
       }
 
       if (kind === "p2p-media-file-request") {
+        if (localMediaUploadInProgress) {
+          sendDataMessage(channel, {
+            kind: "p2p-media-file-error",
+            requestId,
+            errorCode: "session-media-upload-in-progress",
+          });
+          return;
+        }
         const identity = String(payload.identity || "").trim();
         if (!identity) {
           sendDataMessage(channel, {
@@ -901,6 +943,8 @@
         channel: null,
         open: false,
         initiator: initiator === true,
+        remoteDescriptionSet: false,
+        pendingIceCandidates: [],
       };
       peerLinks.set(peerId, entry);
 
@@ -993,6 +1037,8 @@
         if (!remote) return;
         try {
           await entry.pc.setRemoteDescription(remote);
+          entry.remoteDescriptionSet = true;
+          await flushPendingIceCandidates(entry);
           const answer = await entry.pc.createAnswer();
           await entry.pc.setLocalDescription(answer);
           await sendRtcSignal(sourceClientId, "answer", {
@@ -1013,6 +1059,8 @@
         if (!remote) return;
         try {
           await entry.pc.setRemoteDescription(remote);
+          entry.remoteDescriptionSet = true;
+          await flushPendingIceCandidates(entry);
         } catch (err) {
           logger("[SyncWebRTC] answer handling failed", err);
           closePeer(sourceClientId);
@@ -1028,6 +1076,30 @@
         if (!entry || !entry.pc) return;
         const candidate = toIceCandidate(signalPayload);
         if (!candidate) return;
+        if (!entry.remoteDescriptionSet) {
+          // Bufferiser : ICE arrivée avant la SDP distante.
+          if (!Array.isArray(entry.pendingIceCandidates)) {
+            entry.pendingIceCandidates = [];
+          }
+          if (entry.pendingIceCandidates.length < 64) {
+            entry.pendingIceCandidates.push(candidate);
+          }
+          return;
+        }
+        try {
+          await entry.pc.addIceCandidate(candidate);
+        } catch (_) {}
+      }
+    }
+
+    async function flushPendingIceCandidates(entry) {
+      if (!entry || !entry.pc) return;
+      const queue = Array.isArray(entry.pendingIceCandidates)
+        ? entry.pendingIceCandidates
+        : null;
+      if (!queue || queue.length === 0) return;
+      entry.pendingIceCandidates = [];
+      for (const candidate of queue) {
         try {
           await entry.pc.addIceCandidate(candidate);
         } catch (_) {}
@@ -1369,6 +1441,21 @@
           }
         }
         return signalingTransport.getSessionMediaFile(safePayload);
+      },
+      async setSessionMediaUploadStatus(payload) {
+        if (!mediaTransferEnabled) {
+          throw new Error("media-transfer-disabled");
+        }
+        const safePayload = payload || {};
+        // Maintient un verrou local côté hôte pour bloquer les requêtes P2P
+        // tant que l'upload n'est pas terminé (symétrique au verrou relay).
+        if (role === "host") {
+          localMediaUploadInProgress = safePayload.inProgress === true;
+        }
+        if (typeof signalingTransport.setSessionMediaUploadStatus === "function") {
+          return signalingTransport.setSessionMediaUploadStatus(safePayload);
+        }
+        return null;
       },
       sendDrawingSync(payload) {
         return signalingTransport.sendDrawingSync(payload || {});

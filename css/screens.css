@@ -638,7 +638,7 @@
 }
 
 #blur-btn.active {
-  background-color: #4a9eff;
+  background-color: var(--color-primary-darkcontext);
 }
 
 .image-container {

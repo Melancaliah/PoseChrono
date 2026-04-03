@@ -370,6 +370,53 @@ function normalizeParticipantName(input, fallback = "") {
   return value || String(fallback || "").trim();
 }
 
+/**
+ * Génère un nom de participant unique dans une room donnée.
+ * Si l'utilisateur n'a pas saisi de pseudo, le fallback "Invité" est
+ * automatiquement suffixé ("Invité 2", "Invité 3", ...) en regardant les
+ * profils déjà présents, pour éviter plusieurs "Invité" identiques.
+ */
+function resolveUniqueParticipantName(room, rawInput, fallback, excludeClientId = "") {
+  const desired = normalizeParticipantName(rawInput, fallback);
+  if (!desired || !room || !(room.participantProfiles instanceof Map)) {
+    return desired;
+  }
+  // Collecte les noms déjà utilisés (host + participants), en minuscule pour
+  // comparaison insensible à la casse. Le clientId courant est exclu pour
+  // éviter qu'un user ne puisse jamais resauvegarder son propre nom.
+  const exclude = String(excludeClientId || "").trim();
+  const used = new Set();
+  if (
+    room.hostClientId &&
+    room.hostClientId !== exclude &&
+    room.participantProfiles.has(room.hostClientId)
+  ) {
+    const hostName = String(
+      room.participantProfiles.get(room.hostClientId) || "",
+    ).trim().toLowerCase();
+    if (hostName) used.add(hostName);
+  }
+  room.participantProfiles.forEach((name, clientId) => {
+    if (clientId === exclude) return;
+    if (clientId === room.hostClientId) return;
+    const n = String(name || "").trim().toLowerCase();
+    if (n) used.add(n);
+  });
+  if (!used.has(desired.toLowerCase())) {
+    return desired;
+  }
+  // Conflit : suffixer par un numéro croissant jusqu'à trouver un nom libre.
+  for (let i = 2; i <= 999; i += 1) {
+    const candidate = `${desired} ${i}`;
+    if (candidate.length > 32) break;
+    if (!used.has(candidate.toLowerCase())) {
+      return candidate;
+    }
+  }
+  // Fallback très défensif : suffixer avec un hash court du timestamp.
+  return `${desired} ${Math.floor(nowMs() % 10000)}`.slice(0, 32);
+}
+
 function normalizeRtcSignalType(input) {
   const value = String(input || "")
     .trim()
@@ -678,6 +725,10 @@ function makeRoomSnapshot(room) {
             totalBytes: Math.max(0, Number(room.sessionMediaTotalBytes || 0) || 0),
             updatedAt: Math.max(0, Number(room.sessionMediaUpdatedAt || 0) || 0),
             uploadedBy: String(room.sessionMediaUploadedBy || "").trim(),
+            uploadInProgress: !!room.sessionMediaUploadInProgress,
+            uploadTotal: Math.max(0, Number(room.sessionMediaUploadTotal || 0) || 0),
+            uploadStartedAt: Math.max(0, Number(room.sessionMediaUploadStartedAt || 0) || 0),
+            uploadStartedBy: String(room.sessionMediaUploadStartedBy || "").trim(),
           }
         : null,
     createdAt: room.createdAt,
@@ -1389,6 +1440,10 @@ async function createRoom(state, payload) {
     sessionMediaUpdatedAt: 0,
     sessionMediaUploadedBy: "",
     sessionMediaTotalBytes: 0,
+    sessionMediaUploadInProgress: false,
+    sessionMediaUploadTotal: 0,
+    sessionMediaUploadStartedAt: 0,
+    sessionMediaUploadStartedBy: "",
     createdAt: nowMs(),
     updatedAt: nowMs(),
   };
@@ -1427,7 +1482,7 @@ async function joinRoom(state, payload) {
   room.participantIds.add(clientId);
   room.participantProfiles.set(
     clientId,
-    normalizeParticipantName(payload?.participantName, "Invité"),
+    resolveUniqueParticipantName(room, payload?.participantName, "Invité"),
   );
   if (!(room.participantSyncStates instanceof Map)) {
     room.participantSyncStates = new Map();
@@ -1525,7 +1580,16 @@ function updateParticipantProfile(state, payload) {
   const displayName = normalizeParticipantName(payload?.displayName);
   if (!displayName) throw new Error("invalid-display-name");
 
-  room.participantProfiles.set(sourceClientId, displayName);
+  // Déduplication : si le nom est déjà pris par un autre participant, on
+  // suffixe automatiquement (Samuel → Samuel 2). Le clientId courant est
+  // exclu pour qu'on puisse resauvegarder son propre nom sans incrément.
+  const uniqueName = resolveUniqueParticipantName(
+    room,
+    displayName,
+    "",
+    sourceClientId,
+  );
+  room.participantProfiles.set(sourceClientId, uniqueName);
   room.updatedAt = nowMs();
 
   const snapshot = makeRoomSnapshot(room);
@@ -1712,6 +1776,11 @@ function resetSessionMediaPack(state, payload) {
   room.sessionMediaTotalBytes = 0;
   room.sessionMediaUpdatedAt = nowMs();
   room.sessionMediaUploadedBy = sourceClientId;
+  // Reset du verrou d'upload : on repart à zéro
+  room.sessionMediaUploadInProgress = false;
+  room.sessionMediaUploadTotal = 0;
+  room.sessionMediaUploadStartedAt = 0;
+  room.sessionMediaUploadStartedBy = "";
   room.updatedAt = room.sessionMediaUpdatedAt;
 
   const snapshot = makeRoomSnapshot(room);
@@ -1778,6 +1847,98 @@ function uploadSessionMediaFile(state, payload) {
   return snapshot;
 }
 
+function setSessionMediaUploadStatus(state, payload) {
+  const sessionCode = normalizeSessionCode(payload?.sessionCode);
+  const room = state.rooms.get(sessionCode);
+  if (!room) throw new Error("session-not-found");
+
+  const sourceClientId = normalizeString(payload?.sourceClientId);
+  if (!room.participantIds.has(sourceClientId)) {
+    throw new Error("not-joined");
+  }
+  if (!sourceClientId || sourceClientId !== room.hostClientId) {
+    throw new Error("forbidden-not-host");
+  }
+
+  const inProgress = !!payload?.inProgress;
+  const total = Math.max(0, Math.floor(Number(payload?.total || 0) || 0));
+
+  if (inProgress) {
+    room.sessionMediaUploadInProgress = true;
+    room.sessionMediaUploadTotal = total;
+    room.sessionMediaUploadStartedAt = nowMs();
+    room.sessionMediaUploadStartedBy = sourceClientId;
+  } else {
+    room.sessionMediaUploadInProgress = false;
+    room.sessionMediaUploadTotal = 0;
+    room.sessionMediaUploadStartedAt = 0;
+    room.sessionMediaUploadStartedBy = "";
+  }
+  room.updatedAt = nowMs();
+
+  const snapshot = makeRoomSnapshot(room);
+  broadcastSessionEvent(state, sessionCode, {
+    type: "room-updated",
+    source: "session-media-upload-status",
+    sessionCode,
+    snapshot,
+  });
+  return snapshot;
+}
+
+// 5 minutes : si l'upload du host n'a pas progressé depuis ce délai,
+// on considère le verrou comme obsolète (host crashé/réseau coupé)
+const SESSION_MEDIA_UPLOAD_STALE_MS = 5 * 60 * 1000;
+
+// Vérifie si le verrou d'upload est "stale" (inactif depuis trop longtemps).
+// N'effectue PAS le clear : c'est le rôle du caller via clearStaleMediaUploadLock()
+// pour pouvoir broadcaster proprement la libération.
+function isSessionMediaUploadStale(room) {
+  if (!room || !room.sessionMediaUploadInProgress) return false;
+  const startedAt = Math.max(0, Number(room.sessionMediaUploadStartedAt || 0) || 0);
+  const lastFileAt = Math.max(0, Number(room.sessionMediaUpdatedAt || 0) || 0);
+  const lastActivity = Math.max(startedAt, lastFileAt);
+  if (lastActivity <= 0) return false;
+  return nowMs() - lastActivity > SESSION_MEDIA_UPLOAD_STALE_MS;
+}
+
+// Libère le verrou stale ET broadcast l'event aux participants en attente
+// pour qu'ils puissent réactiver leur bouton download sans avoir à refresh.
+// Retourne true si un clear a été effectué.
+function clearStaleMediaUploadLock(state, sessionCode, room) {
+  if (!isSessionMediaUploadStale(room)) return false;
+  room.sessionMediaUploadInProgress = false;
+  room.sessionMediaUploadTotal = 0;
+  room.sessionMediaUploadStartedAt = 0;
+  room.sessionMediaUploadStartedBy = "";
+  room.updatedAt = nowMs();
+  try {
+    const snapshot = makeRoomSnapshot(room);
+    broadcastSessionEvent(state, sessionCode, {
+      type: "room-updated",
+      source: "session-media-upload-status-stale-cleared",
+      sessionCode,
+      snapshot,
+    });
+  } catch (broadcastError) {
+    // Le broadcast est best-effort : si ça échoue on garde quand même le clear.
+    // (logger() est volontairement omis ici car cette fonction peut être appelée
+    // dans des chemins non-critiques.)
+  }
+  return true;
+}
+
+// Helper combiné : retourne true si l'upload est en cours ET non stale.
+// Si stale, libère le verrou et broadcast avant de retourner false.
+function isSessionMediaUploadLocked(state, sessionCode, room) {
+  if (!room || !room.sessionMediaUploadInProgress) return false;
+  if (isSessionMediaUploadStale(room)) {
+    clearStaleMediaUploadLock(state, sessionCode, room);
+    return false;
+  }
+  return true;
+}
+
 function getSessionMediaManifest(state, payload) {
   const sessionCode = normalizeSessionCode(payload?.sessionCode);
   const room = state.rooms.get(sessionCode);
@@ -1786,6 +1947,14 @@ function getSessionMediaManifest(state, payload) {
   const sourceClientId = normalizeString(payload?.sourceClientId);
   if (!room.participantIds.has(sourceClientId)) {
     throw new Error("not-joined");
+  }
+  // Verrou : tant que le host n'a pas signalé la fin de son upload,
+  // les autres participants ne peuvent pas lire le manifest (évite pack incomplet).
+  if (
+    sourceClientId !== room.hostClientId &&
+    isSessionMediaUploadLocked(state, sessionCode, room)
+  ) {
+    throw new Error("session-media-upload-in-progress");
   }
   if (!(room.sessionMediaFiles instanceof Map) || room.sessionMediaFiles.size <= 0) {
     throw new Error("session-media-not-found");
@@ -1818,6 +1987,13 @@ function getSessionMediaFile(state, payload) {
   const sourceClientId = normalizeString(payload?.sourceClientId);
   if (!room.participantIds.has(sourceClientId)) {
     throw new Error("not-joined");
+  }
+  // Verrou : idem que getSessionMediaManifest
+  if (
+    sourceClientId !== room.hostClientId &&
+    isSessionMediaUploadLocked(state, sessionCode, room)
+  ) {
+    throw new Error("session-media-upload-in-progress");
   }
   if (!(room.sessionMediaFiles instanceof Map) || room.sessionMediaFiles.size <= 0) {
     throw new Error("session-media-not-found");
@@ -1965,7 +2141,8 @@ async function executeAction(state, action, payload) {
     (normalizedAction === "resetSessionMediaPack" ||
       normalizedAction === "uploadSessionMediaFile" ||
       normalizedAction === "getSessionMediaManifest" ||
-      normalizedAction === "getSessionMediaFile")
+      normalizedAction === "getSessionMediaFile" ||
+      normalizedAction === "setSessionMediaUploadStatus")
   ) {
     throw new Error("media-transfer-disabled");
   }
@@ -1996,6 +2173,8 @@ async function executeAction(state, action, payload) {
       return getSessionMediaManifest(state, payload);
     case "getSessionMediaFile":
       return getSessionMediaFile(state, payload);
+    case "setSessionMediaUploadStatus":
+      return setSessionMediaUploadStatus(state, payload);
     case "sendRtcSignal":
       return sendRtcSignal(state, payload);
     case "sendDrawingSync":
@@ -2220,6 +2399,7 @@ async function main() {
           action === "uploadSessionMediaFile" ||
           action === "getSessionMediaManifest" ||
           action === "getSessionMediaFile" ||
+          action === "setSessionMediaUploadStatus" ||
           action === "sendRtcSignal" ||
           action === "sendDrawingSync" ||
           action === "getRoomSnapshot"
@@ -2261,6 +2441,7 @@ async function main() {
           action === "uploadSessionMediaFile" ||
           action === "getSessionMediaManifest" ||
           action === "getSessionMediaFile" ||
+          action === "setSessionMediaUploadStatus" ||
           action === "getRoomSnapshot" ||
           action === "sendRtcSignal" ||
           action === "sendDrawingSync"

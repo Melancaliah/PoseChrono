@@ -1396,6 +1396,48 @@
       return value || String(fallback || "").trim();
     }
 
+    /**
+     * Génère un nom de participant unique dans une room donnée.
+     * Miroir de resolveUniqueParticipantName du relay server : suffixe
+     * automatiquement "Invité 2", "Invité 3", ... si le fallback est utilisé
+     * et qu'un autre participant porte déjà ce nom.
+     */
+    function resolveUniqueParticipantName(room, rawInput, fallback, excludeClientId = "") {
+      const desired = normalizeParticipantName(rawInput, fallback);
+      if (!desired || !room || !(room.participantProfiles instanceof Map)) {
+        return desired;
+      }
+      const exclude = String(excludeClientId || "").trim();
+      const used = new Set();
+      if (
+        room.hostClientId &&
+        room.hostClientId !== exclude &&
+        room.participantProfiles.has(room.hostClientId)
+      ) {
+        const hostName = String(
+          room.participantProfiles.get(room.hostClientId) || "",
+        ).trim().toLowerCase();
+        if (hostName) used.add(hostName);
+      }
+      room.participantProfiles.forEach((name, clientId) => {
+        if (clientId === exclude) return;
+        if (clientId === room.hostClientId) return;
+        const n = String(name || "").trim().toLowerCase();
+        if (n) used.add(n);
+      });
+      if (!used.has(desired.toLowerCase())) {
+        return desired;
+      }
+      for (let i = 2; i <= 999; i += 1) {
+        const candidate = `${desired} ${i}`;
+        if (candidate.length > 32) break;
+        if (!used.has(candidate.toLowerCase())) {
+          return candidate;
+        }
+      }
+      return `${desired} ${Math.floor(now() % 10000)}`.slice(0, 32);
+    }
+
     function normalizeParticipantSyncState(input) {
       const value = String(input || "").trim().toLowerCase();
       if (
@@ -1598,6 +1640,10 @@
                 totalBytes: Math.max(0, Number(room.sessionMediaTotalBytes || 0) || 0),
                 updatedAt: Math.max(0, Number(room.sessionMediaUpdatedAt || 0) || 0),
                 uploadedBy: String(room.sessionMediaUploadedBy || "").trim(),
+                uploadInProgress: !!room.sessionMediaUploadInProgress,
+                uploadTotal: Math.max(0, Number(room.sessionMediaUploadTotal || 0) || 0),
+                uploadStartedAt: Math.max(0, Number(room.sessionMediaUploadStartedAt || 0) || 0),
+                uploadStartedBy: String(room.sessionMediaUploadStartedBy || "").trim(),
               }
             : null,
         createdAt: room.createdAt,
@@ -2063,6 +2109,10 @@
         sessionMediaUpdatedAt: 0,
         sessionMediaUploadedBy: "",
         sessionMediaTotalBytes: 0,
+        sessionMediaUploadInProgress: false,
+        sessionMediaUploadTotal: 0,
+        sessionMediaUploadStartedAt: 0,
+        sessionMediaUploadStartedBy: "",
         createdAt: now(),
         updatedAt: now(),
       };
@@ -2097,7 +2147,7 @@
       room.participantIds.add(clientId);
       room.participantProfiles.set(
         clientId,
-        normalizeParticipantName(input.participantName, "Invité"),
+        resolveUniqueParticipantName(room, input.participantName, "Invité"),
       );
       if (!(room.participantSyncStates instanceof Map)) {
         room.participantSyncStates = new Map();
@@ -2339,6 +2389,94 @@
       };
     }
 
+    // 5 minutes : si l'upload du host n'a pas progressé depuis ce délai,
+    // on considère le verrou comme obsolète (host crashé/réseau coupé)
+    const MOCK_SESSION_MEDIA_UPLOAD_STALE_MS = 5 * 60 * 1000;
+
+    function isMockSessionMediaUploadStale(room) {
+      if (!room || !room.sessionMediaUploadInProgress) return false;
+      const startedAt = Math.max(0, Number(room.sessionMediaUploadStartedAt || 0) || 0);
+      const lastFileAt = Math.max(0, Number(room.sessionMediaUpdatedAt || 0) || 0);
+      const lastActivity = Math.max(startedAt, lastFileAt);
+      if (lastActivity <= 0) return false;
+      return now() - lastActivity > MOCK_SESSION_MEDIA_UPLOAD_STALE_MS;
+    }
+
+    function clearMockStaleMediaUploadLock(sessionCode, room) {
+      if (!isMockSessionMediaUploadStale(room)) return false;
+      room.sessionMediaUploadInProgress = false;
+      room.sessionMediaUploadTotal = 0;
+      room.sessionMediaUploadStartedAt = 0;
+      room.sessionMediaUploadStartedBy = "";
+      room.updatedAt = now();
+      try {
+        const snapshot = makeSnapshot(room);
+        emitToSession(sessionCode, {
+          type: "room-updated",
+          source: "session-media-upload-status-stale-cleared",
+          sessionCode,
+          snapshot,
+        });
+      } catch (_) {
+        // best-effort
+      }
+      return true;
+    }
+
+    function isMockSessionMediaUploadLocked(sessionCode, room) {
+      if (!room || !room.sessionMediaUploadInProgress) return false;
+      if (isMockSessionMediaUploadStale(room)) {
+        clearMockStaleMediaUploadLock(sessionCode, room);
+        return false;
+      }
+      return true;
+    }
+
+    function setSessionMediaUploadStatus(input = {}) {
+      const bus = ensureBus();
+      const sessionCode = normalizeSessionCode(input.sessionCode);
+      const room = bus.rooms.get(sessionCode);
+      if (!room) {
+        throw new Error("session-not-found");
+      }
+
+      const sourceClientId = normalizeClientId(
+        input.sourceClientId,
+        "invalid-client-id",
+      );
+      if (!room.participantIds.has(sourceClientId)) {
+        throw new Error("not-joined");
+      }
+      if (sourceClientId !== room.hostClientId) {
+        throw new Error("forbidden-not-host");
+      }
+
+      const inProgress = !!input.inProgress;
+      const total = Math.max(0, Math.floor(Number(input.total || 0) || 0));
+
+      if (inProgress) {
+        room.sessionMediaUploadInProgress = true;
+        room.sessionMediaUploadTotal = total;
+        room.sessionMediaUploadStartedAt = now();
+        room.sessionMediaUploadStartedBy = sourceClientId;
+      } else {
+        room.sessionMediaUploadInProgress = false;
+        room.sessionMediaUploadTotal = 0;
+        room.sessionMediaUploadStartedAt = 0;
+        room.sessionMediaUploadStartedBy = "";
+      }
+      room.updatedAt = now();
+
+      const snapshot = makeSnapshot(room);
+      emitToSession(sessionCode, {
+        type: "room-updated",
+        source: "session-media-upload-status",
+        sessionCode,
+        snapshot,
+      });
+      return snapshot;
+    }
+
     function resetSessionMediaPack(input = {}) {
       const bus = ensureBus();
       const sessionCode = normalizeSessionCode(input.sessionCode);
@@ -2362,6 +2500,10 @@
       room.sessionMediaTotalBytes = 0;
       room.sessionMediaUpdatedAt = now();
       room.sessionMediaUploadedBy = sourceClientId;
+      room.sessionMediaUploadInProgress = false;
+      room.sessionMediaUploadTotal = 0;
+      room.sessionMediaUploadStartedAt = 0;
+      room.sessionMediaUploadStartedBy = "";
       room.updatedAt = room.sessionMediaUpdatedAt;
 
       const snapshot = makeSnapshot(room);
@@ -2449,6 +2591,12 @@
       if (!room.participantIds.has(sourceClientId)) {
         throw new Error("not-joined");
       }
+      if (
+        sourceClientId !== room.hostClientId &&
+        isMockSessionMediaUploadLocked(sessionCode, room)
+      ) {
+        throw new Error("session-media-upload-in-progress");
+      }
       if (!(room.sessionMediaFiles instanceof Map) || room.sessionMediaFiles.size <= 0) {
         throw new Error("session-media-not-found");
       }
@@ -2486,6 +2634,12 @@
       );
       if (!room.participantIds.has(sourceClientId)) {
         throw new Error("not-joined");
+      }
+      if (
+        sourceClientId !== room.hostClientId &&
+        isMockSessionMediaUploadLocked(sessionCode, room)
+      ) {
+        throw new Error("session-media-upload-in-progress");
       }
       if (!(room.sessionMediaFiles instanceof Map) || room.sessionMediaFiles.size <= 0) {
         throw new Error("session-media-not-found");
@@ -2616,6 +2770,7 @@
       uploadSessionMediaFile,
       getSessionMediaManifest,
       getSessionMediaFile,
+      setSessionMediaUploadStatus,
       sendRtcSignal,
       getRoomSnapshot,
       subscribe,
@@ -2764,6 +2919,16 @@
       reconnectTimerId = setTimeoutFn(() => {
         reconnectTimerId = null;
         ensureConnected().catch((error) => {
+          // Erreurs attendues pendant les tentatives de reconnexion : silencieux pour
+          // ne pas spammer la console (le mécanisme de retry les gère).
+          const code = String(error?.message || error || "").trim();
+          if (
+            code === "websocket-connect-failed" ||
+            code === "websocket-connect-closed" ||
+            code === "websocket-not-open"
+          ) {
+            return;
+          }
           logger("[SyncWS] reconnect attempt failed", error);
         });
       }, delay);
@@ -2897,7 +3062,11 @@
         };
 
         ws.onerror = (event) => {
-          logger("[SyncWS] socket error", event);
+          // Pendant un cycle de reconnexion, l'événement onerror est attendu à
+          // chaque tentative ratée → on évite de spammer la console.
+          if (reconnectAttempt === 0) {
+            logger("[SyncWS] socket error", event);
+          }
           if (!settled) {
             settled = true;
             connectPromise = null;
@@ -3075,6 +3244,12 @@
         }
         return request("getSessionMediaFile", payload || {});
       },
+      setSessionMediaUploadStatus(payload) {
+        if (!mediaTransferEnabled) {
+          return Promise.reject(new Error("media-transfer-disabled"));
+        }
+        return request("setSessionMediaUploadStatus", payload || {});
+      },
       sendRtcSignal(payload) {
         return request("sendRtcSignal", payload || {});
       },
@@ -3221,6 +3396,9 @@
     let localMediaUpdatedAt = 0;
     let localMediaUploadedBy = "";
     let localMediaTotalBytes = 0;
+    // Verrou local côté hôte : empêche les requêtes P2P (manifest/file) tant
+    // que l'upload n'est pas terminé. Symétrique au verrou serveur sur le relay.
+    let localMediaUploadInProgress = false;
     const latencySamples = [];
     let latencyHead = 0;
 
@@ -3377,11 +3555,16 @@
     }
 
     function clearPendingP2PRequests(reason = "webrtc-not-ready") {
-      pendingP2PRequests.forEach((entry, requestId) => {
-        pendingP2PRequests.delete(requestId);
+      // Snapshot avant itération : un reject() peut déclencher des handlers synchrones
+      // qui insèrent/suppriment d'autres entrées dans pendingP2PRequests.
+      const snapshot = Array.from(pendingP2PRequests.entries());
+      pendingP2PRequests.clear();
+      snapshot.forEach(([, entry]) => {
         if (entry && entry.timerId) clearTimeoutFn(entry.timerId);
         if (entry && typeof entry.reject === "function") {
-          entry.reject(new Error(reason));
+          try {
+            entry.reject(new Error(reason));
+          } catch (_) {}
         }
       });
     }
@@ -3668,7 +3851,24 @@
           typeof channel.bufferedAmount === "number" &&
           channel.bufferedAmount > maxBufferedAmountBeforeYield
         ) {
-          await sleep(sendYieldDelayMs);
+          // Attendre que le buffer redescende, avec une borne max pour éviter
+          // un blocage indéfini si le pair est mort ou injoignable.
+          const drainStartedAt = now();
+          const drainMaxMs = 30000;
+          while (
+            channel &&
+            channel.readyState === "open" &&
+            typeof channel.bufferedAmount === "number" &&
+            channel.bufferedAmount > maxBufferedAmountBeforeYield
+          ) {
+            if (now() - drainStartedAt > drainMaxMs) {
+              throw new Error("webrtc-backpressure-timeout");
+            }
+            await sleep(sendYieldDelayMs);
+          }
+          if (!channel || channel.readyState !== "open") {
+            throw new Error("webrtc-not-ready");
+          }
         }
       }
 
@@ -3687,6 +3887,15 @@
       if (!channel) return;
 
       if (kind === "p2p-media-manifest-request") {
+        if (localMediaUploadInProgress) {
+          sendDataMessage(channel, {
+            kind: "p2p-media-manifest-response",
+            requestId,
+            ok: false,
+            errorCode: "session-media-upload-in-progress",
+          });
+          return;
+        }
         const manifest = buildLocalMediaManifest();
         if (!manifest.filesCount) {
           sendDataMessage(channel, {
@@ -3707,6 +3916,14 @@
       }
 
       if (kind === "p2p-media-file-request") {
+        if (localMediaUploadInProgress) {
+          sendDataMessage(channel, {
+            kind: "p2p-media-file-error",
+            requestId,
+            errorCode: "session-media-upload-in-progress",
+          });
+          return;
+        }
         const identity = String(payload.identity || "").trim();
         if (!identity) {
           sendDataMessage(channel, {
@@ -4003,6 +4220,8 @@
         channel: null,
         open: false,
         initiator: initiator === true,
+        remoteDescriptionSet: false,
+        pendingIceCandidates: [],
       };
       peerLinks.set(peerId, entry);
 
@@ -4095,6 +4314,8 @@
         if (!remote) return;
         try {
           await entry.pc.setRemoteDescription(remote);
+          entry.remoteDescriptionSet = true;
+          await flushPendingIceCandidates(entry);
           const answer = await entry.pc.createAnswer();
           await entry.pc.setLocalDescription(answer);
           await sendRtcSignal(sourceClientId, "answer", {
@@ -4115,6 +4336,8 @@
         if (!remote) return;
         try {
           await entry.pc.setRemoteDescription(remote);
+          entry.remoteDescriptionSet = true;
+          await flushPendingIceCandidates(entry);
         } catch (err) {
           logger("[SyncWebRTC] answer handling failed", err);
           closePeer(sourceClientId);
@@ -4130,6 +4353,30 @@
         if (!entry || !entry.pc) return;
         const candidate = toIceCandidate(signalPayload);
         if (!candidate) return;
+        if (!entry.remoteDescriptionSet) {
+          // Bufferiser : ICE arrivée avant la SDP distante.
+          if (!Array.isArray(entry.pendingIceCandidates)) {
+            entry.pendingIceCandidates = [];
+          }
+          if (entry.pendingIceCandidates.length < 64) {
+            entry.pendingIceCandidates.push(candidate);
+          }
+          return;
+        }
+        try {
+          await entry.pc.addIceCandidate(candidate);
+        } catch (_) {}
+      }
+    }
+
+    async function flushPendingIceCandidates(entry) {
+      if (!entry || !entry.pc) return;
+      const queue = Array.isArray(entry.pendingIceCandidates)
+        ? entry.pendingIceCandidates
+        : null;
+      if (!queue || queue.length === 0) return;
+      entry.pendingIceCandidates = [];
+      for (const candidate of queue) {
         try {
           await entry.pc.addIceCandidate(candidate);
         } catch (_) {}
@@ -4472,6 +4719,21 @@
         }
         return signalingTransport.getSessionMediaFile(safePayload);
       },
+      async setSessionMediaUploadStatus(payload) {
+        if (!mediaTransferEnabled) {
+          throw new Error("media-transfer-disabled");
+        }
+        const safePayload = payload || {};
+        // Maintient un verrou local côté hôte pour bloquer les requêtes P2P
+        // tant que l'upload n'est pas terminé (symétrique au verrou relay).
+        if (role === "host") {
+          localMediaUploadInProgress = safePayload.inProgress === true;
+        }
+        if (typeof signalingTransport.setSessionMediaUploadStatus === "function") {
+          return signalingTransport.setSessionMediaUploadStatus(safePayload);
+        }
+        return null;
+      },
       sendDrawingSync(payload) {
         return signalingTransport.sendDrawingSync(payload || {});
       },
@@ -4521,8 +4783,30 @@
       typeof options.random === "function"
         ? options.random
         : () => Math.random();
-    const logger =
+    const rawLogger =
       typeof options.logger === "function" ? options.logger : () => {};
+    // Codes d'erreur transitoires/attendus à ne pas logger en bruit (rate limiting,
+    // déconnexions WS pendant reconnexion, etc.). Ils sont gérés par retry interne
+    // et n'ont aucun impact visible.
+    const BENIGN_ERROR_CODES = new Set([
+      "state-rate-limited",
+      "rate-limited",
+      "websocket-not-open",
+      "websocket-disconnected",
+      "websocket-connect-failed",
+      "websocket-connect-closed",
+      "websocket-request-timeout",
+      "transfer-cancelled",
+    ]);
+    function logger(label, err) {
+      try {
+        const code = String(err?.message || err || "").trim();
+        if (code && BENIGN_ERROR_CODES.has(code)) return;
+      } catch (_) {}
+      try {
+        rawLogger(label, err);
+      } catch (_) {}
+    }
     const transport =
       options.transport ||
       (typeof sharedRoot.createSyncTransportMock === "function"
@@ -4802,6 +5086,26 @@
       });
     }
 
+    function resetP2pFallbackIndicators() {
+      // Effacer les indicateurs de fallback P2P obsolètes après une reconnexion WS.
+      // Le transport WebRTC réémettra un diagnostic frais si le mesh est encore dégradé.
+      if (
+        !state.p2pFallbackActive &&
+        !state.p2pFallbackReason &&
+        state.p2pRelayParticipantsCount === 0 &&
+        (!Array.isArray(state.p2pRelayParticipantIds) ||
+          state.p2pRelayParticipantIds.length === 0)
+      ) {
+        return;
+      }
+      patchState({
+        p2pFallbackActive: false,
+        p2pFallbackReason: "",
+        p2pRelayParticipantsCount: 0,
+        p2pRelayParticipantIds: [],
+      });
+    }
+
     // Transport connection state awareness (reconnection handling)
     if (transport && typeof transport.onConnectionStateChange === "function") {
       transport.onConnectionStateChange((connectionState) => {
@@ -4825,6 +5129,7 @@
                 .then((snapshot) => {
                   if (role !== reconnectRole || roomCode !== reconnectRoomCode) return;
                   if (snapshot) applyRoomSnapshot(snapshot, "host");
+                  resetP2pFallbackIndicators();
                   patchState({ lastError: "" });
                 })
                 .catch((err) => {
@@ -4861,6 +5166,7 @@
                 .then((snapshot) => {
                   if (role !== reconnectRole || roomCode !== reconnectRoomCode) return;
                   applyRoomSnapshot(snapshot, "participant");
+                  resetP2pFallbackIndicators();
                   patchState({ lastError: "" });
                 })
                 .catch((joinErr) => {
@@ -4882,6 +5188,7 @@
                 .then((snapshot) => {
                   if (role !== reconnectRole || roomCode !== reconnectRoomCode) return;
                   if (snapshot) applyRoomSnapshot(snapshot, "participant");
+                  resetP2pFallbackIndicators();
                   patchState({ lastError: "" });
                 })
                 .catch((err) => {
@@ -5230,6 +5537,9 @@
           sourceClientId: clientId,
         });
         if (!result || typeof result !== "object") return null;
+        if (state.lastError) {
+          patchState({ lastError: "" });
+        }
         return {
           pack: result.pack && typeof result.pack === "object" ? result.pack : null,
           hash: String(result.hash || "").trim(),
@@ -5277,6 +5587,30 @@
         return true;
       } catch (err) {
         logger("[SyncSession] publishSessionMediaFile failed", err);
+        throw err;
+      }
+    }
+
+    async function setSessionMediaUploadStatus(input = {}) {
+      if (role !== "host") return false;
+      if (!roomCode) return false;
+      if (
+        !transport ||
+        typeof transport.setSessionMediaUploadStatus !== "function"
+      ) {
+        return false;
+      }
+      try {
+        const snapshot = await transport.setSessionMediaUploadStatus({
+          sessionCode: roomCode,
+          sourceClientId: clientId,
+          inProgress: !!input.inProgress,
+          total: Math.max(0, Math.floor(Number(input.total || 0) || 0)),
+        });
+        applyRoomSnapshot(snapshot, "host");
+        return true;
+      } catch (err) {
+        logger("[SyncSession] setSessionMediaUploadStatus failed", err);
         return false;
       }
     }
@@ -5292,6 +5626,9 @@
           sourceClientId: clientId,
         });
         if (!result || typeof result !== "object") return null;
+        if (state.lastError) {
+          patchState({ lastError: "" });
+        }
         return {
           files: Array.isArray(result.files) ? result.files.slice() : [],
           filesCount: Math.max(0, Number(result.filesCount || 0) || 0),
@@ -5319,6 +5656,9 @@
         if (!result || typeof result !== "object") return null;
         const file = result.file && typeof result.file === "object" ? result.file : null;
         if (!file) return null;
+        if (state.lastError) {
+          patchState({ lastError: "" });
+        }
         return {
           file: {
             identity: String(file.identity || "").trim(),
@@ -5501,6 +5841,7 @@
       fetchSessionPack,
       resetSessionMediaPack,
       publishSessionMediaFile,
+      setSessionMediaUploadStatus,
       fetchSessionMediaManifest,
       fetchSessionMediaFile,
       requestSharedPlayback,
@@ -9950,6 +10291,9 @@
       callIfFn(input.updateGridOverlay);
     } else if (keyLow === String(hk.SILHOUETTE || "").toLowerCase()) {
       state.silhouetteEnabled = !state.silhouetteEnabled;
+      callIfFn(input.applyImageFilters);
+    } else if (keyLow === String(hk.EDGE_DETECTION || "").toLowerCase()) {
+      state.edgeDetectionEnabled = !state.edgeDetectionEnabled;
       callIfFn(input.applyImageFilters);
     } else if (keyLow === String(hk.SIDEBAR || "").toLowerCase()) {
       callIfFn(input.toggleSidebar);

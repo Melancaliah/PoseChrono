@@ -1,5 +1,5 @@
 // PoseChrono Drawing Module - Bundled from js/draw/
-// Generated: 2026-03-13T18:10:10.161Z
+// Generated: 2026-04-08T23:19:32.470Z
 
 // ================================================================
 // MODULE: utils.js
@@ -11449,7 +11449,17 @@ function handleRemoteDrawingEvent(event) {
 function _handleRemoteSharingStarted(sourceClientId, event) {
   remoteDrawState.remoteSharers.add(sourceClientId);
   const data = event.data || {};
-  const name = data.participantName || sourceClientId;
+  // Priorité 1 : pseudo envoyé dans le payload (compat anciens clients).
+  // Priorité 2 : profil participant déjà connu localement (résolution par clientId).
+  // Priorité 3 : tronquer le clientId pour éviter "client-56fbd8e005fc47e5".
+  let name = String(data.participantName || "").trim();
+  if (!name) {
+    try {
+      name = _resolveSharerName(sourceClientId);
+    } catch (_) {
+      name = sourceClientId;
+    }
+  }
   if (typeof showDrawingToast === "function") {
     const msg = typeof i18next !== "undefined"
       ? i18next.t("drawSync.shareStart", { name, defaultValue: `${name} started sharing drawings` })
@@ -12176,7 +12186,13 @@ function _toggleRemoteDrawPopover(anchorBtn) {
   shareBtn.onclick = (e) => {
     e.stopPropagation();
     const newState = !remoteDrawState.sharingEnabled;
-    const pseudo = _getSyncServiceState()?.myPseudo || "";
+    // Récupère son propre pseudo via participantProfiles[clientId] (et non
+    // myPseudo qui n'existe pas dans le state). Fallback : chaîne vide → le
+    // récepteur résoudra via _resolveSharerName.
+    const _st = _getSyncServiceState();
+    const _profiles = _st?.participantProfiles || {};
+    const _myId = _st?.clientId || "";
+    const pseudo = String(_profiles[_myId] || "").trim();
     setRemoteDrawSharing(newState, pseudo);
     shareBtn.classList.toggle("active", newState);
     _updateRemoteDrawShareButtonState();

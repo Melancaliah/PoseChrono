@@ -135,6 +135,16 @@
       reconnectTimerId = setTimeoutFn(() => {
         reconnectTimerId = null;
         ensureConnected().catch((error) => {
+          // Erreurs attendues pendant les tentatives de reconnexion : silencieux pour
+          // ne pas spammer la console (le mécanisme de retry les gère).
+          const code = String(error?.message || error || "").trim();
+          if (
+            code === "websocket-connect-failed" ||
+            code === "websocket-connect-closed" ||
+            code === "websocket-not-open"
+          ) {
+            return;
+          }
           logger("[SyncWS] reconnect attempt failed", error);
         });
       }, delay);
@@ -268,7 +278,11 @@
         };
 
         ws.onerror = (event) => {
-          logger("[SyncWS] socket error", event);
+          // Pendant un cycle de reconnexion, l'événement onerror est attendu à
+          // chaque tentative ratée → on évite de spammer la console.
+          if (reconnectAttempt === 0) {
+            logger("[SyncWS] socket error", event);
+          }
           if (!settled) {
             settled = true;
             connectPromise = null;
@@ -445,6 +459,12 @@
           return Promise.reject(new Error("media-transfer-disabled"));
         }
         return request("getSessionMediaFile", payload || {});
+      },
+      setSessionMediaUploadStatus(payload) {
+        if (!mediaTransferEnabled) {
+          return Promise.reject(new Error("media-transfer-disabled"));
+        }
+        return request("setSessionMediaUploadStatus", payload || {});
       },
       sendRtcSignal(payload) {
         return request("sendRtcSignal", payload || {});
