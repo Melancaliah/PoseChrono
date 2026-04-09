@@ -98,7 +98,8 @@ describe("i18n-loader-utils", () => {
       const utils = createI18nLoaderUtils({
         localeFileByLang: LOCALE_FILE_BY_LANG,
         baseLang: "en",
-        i18nextInstance: { language: "fr" },
+        // isInitialized:true requis — on ignore .language si i18next pas encore prêt
+        i18nextInstance: { language: "fr", isInitialized: true },
       });
       expect(utils.getPreferredLocaleLang()).toBe("fr");
     });

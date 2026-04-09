@@ -1,3 +1,7 @@
 TODO.txt
 dist/
 .vscode/
+
+# Dépendances Node (jamais commiter node_modules)
+node_modules/
+apps/desktop/node_modules/

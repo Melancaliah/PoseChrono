@@ -25,7 +25,10 @@ if (!WebSocketServer) {
 }
 
 const DEFAULT_HOST = process.env.POSECHRONO_SYNC_RELAY_HOST || "0.0.0.0";
-const DEFAULT_PORT = Number(process.env.POSECHRONO_SYNC_RELAY_PORT || 8787);
+// Priorité : variable custom > PORT (Render/Heroku/etc assignent PORT dynamiquement) > 8787 (dev local)
+const DEFAULT_PORT = Number(
+  process.env.POSECHRONO_SYNC_RELAY_PORT || process.env.PORT || 8787,
+);
 const MAX_PAYLOAD_BYTES = Number(process.env.POSECHRONO_SYNC_MAX_PAYLOAD || 20 * 1024 * 1024);
 const MAX_PARTICIPANTS_PER_ROOM = Math.max(
   2,
