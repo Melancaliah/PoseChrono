@@ -20,7 +20,7 @@ if errorlevel 1 (
 )
 
 echo.
-echo [PoseChrono] OK. Sortie dans dist\PoseChrono_v*_windows_*\
+echo [PoseChrono] OK. Sortie dans dist\v*_windows_*\
 echo   - PoseChrono-Setup-*.exe
 pause
 endlocal

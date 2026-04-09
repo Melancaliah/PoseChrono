@@ -1,5 +1,22 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
+// La version app est injectée par main.js via additionalArguments parce que
+// le preload est sandboxé (sandbox: true) et ne peut donc pas `require` de
+// fichiers arbitraires comme package.json. main.js lit app.getVersion() qui
+// pointe automatiquement sur apps/desktop/package.json (synchronisé avec
+// manifest.json par scripts/bump-version.js).
+const DESKTOP_APP_VERSION_PREFIX = "--pose-chrono-version=";
+let DESKTOP_APP_VERSION = "0.0.0-unknown";
+try {
+  const arg = (process.argv || []).find(
+    (a) => typeof a === "string" && a.startsWith(DESKTOP_APP_VERSION_PREFIX),
+  );
+  if (arg) {
+    const injected = arg.slice(DESKTOP_APP_VERSION_PREFIX.length).trim();
+    if (injected) DESKTOP_APP_VERSION = injected;
+  }
+} catch (_) {}
+
 const createHandlers = [];
 const runHandlers = [];
 const hideHandlers = [];
@@ -161,7 +178,7 @@ contextBridge.exposeInMainWorld("eagle", eagleShim);
 
 contextBridge.exposeInMainWorld("poseChronoDesktop", {
   platform: "desktop",
-  version: "0.1.0-dev",
+  version: DESKTOP_APP_VERSION,
   bridge: "eagle-shim",
   bootTraceEnabled: process.env.POSECHRONO_BOOT_TRACE === "1",
   sync: {

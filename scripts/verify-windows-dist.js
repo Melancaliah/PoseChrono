@@ -29,7 +29,12 @@ function isSetupFileName(name) {
   return (
     /^PoseChrono-Setup-.*\.exe$/i.test(name) ||
     /^posechrono-desktop-[0-9A-Za-z._-]+-setup\.exe$/i.test(name) ||
-    /^PoseChrono_v[0-9A-Za-z._-]+_[0-9]{4}-[0-9]{2}-[0-9]{2}_windows_T[0-9]{2}-[0-9]{2}_[0-9]{2}\.exe$/i.test(name)
+    // Format simple aligné sur release-all : PoseChrono_v{ver}_windows.exe
+    /^PoseChrono_v[0-9A-Za-z._-]+_windows\.exe$/i.test(name) ||
+    // Legacy format (compat anciens builds)
+    /^PoseChrono_v[0-9A-Za-z._-]+_[0-9]{4}-[0-9]{2}-[0-9]{2}_windows_T[0-9]{2}-[0-9]{2}_[0-9]{2}\.exe$/i.test(name) ||
+    // Legacy format intermédiaire : v{ver}_{date}_windows_T{HH-mm}[_NN].exe
+    /^v[0-9A-Za-z._-]+_[0-9]{4}-[0-9]{2}-[0-9]{2}_windows_T[0-9]{2}-[0-9]{2}(?:_[0-9]{2})?\.exe$/i.test(name)
   );
 }
 
@@ -56,12 +61,18 @@ async function main() {
             entry.isDirectory() &&
             (entry.name === "windows" ||
               entry.name.startsWith("windows-") ||
-              /^PoseChrono_v[^_]+.*_windows_T/i.test(entry.name)),
+              /^PoseChrono_v[^_]+.*_windows_T/i.test(entry.name) ||
+              /^v[^_]+.*_windows_T/i.test(entry.name)),
         )
         .map((entry) => entry.name);
 
       const dated = candidates
-        .filter((name) => name.startsWith("windows-") || /^PoseChrono_v/i.test(name))
+        .filter(
+          (name) =>
+            name.startsWith("windows-") ||
+            /^PoseChrono_v/i.test(name) ||
+            /^v[^_]+.*_windows_T/i.test(name),
+        )
         .sort((a, b) => b.localeCompare(a));
       if (dated.length > 0) {
         distDir = path.join(DIST_ROOT, dated[0]);

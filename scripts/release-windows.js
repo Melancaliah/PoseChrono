@@ -18,10 +18,14 @@ const SYNC_DESKTOP_VERSION_SCRIPT = path.join(
 );
 
 function isWindowsSetupFileName(name) {
+  const value = String(name || "");
   return (
-    /^PoseChrono-Setup-.*\.exe$/i.test(String(name || "")) ||
-    /^posechrono-desktop-[0-9A-Za-z._-]+-setup\.exe$/i.test(String(name || "")) ||
-    /^PoseChrono_v[0-9A-Za-z._-]+_[0-9]{4}-[0-9]{2}-[0-9]{2}_windows_T[0-9]{2}-[0-9]{2}_[0-9]{2}\.exe$/i.test(String(name || ""))
+    /^PoseChrono-Setup-.*\.exe$/i.test(value) ||
+    /^posechrono-desktop-[0-9A-Za-z._-]+-setup\.exe$/i.test(value) ||
+    // Legacy format (compat anciens builds)
+    /^PoseChrono_v[0-9A-Za-z._-]+_[0-9]{4}-[0-9]{2}-[0-9]{2}_windows_T[0-9]{2}-[0-9]{2}_[0-9]{2}\.exe$/i.test(value) ||
+    // Nouveau format aligné sur release-all : v{ver}_{date}_windows_T{HH-mm}[_NN].exe
+    /^v[0-9A-Za-z._-]+_[0-9]{4}-[0-9]{2}-[0-9]{2}_windows_T[0-9]{2}-[0-9]{2}(?:_[0-9]{2})?\.exe$/i.test(value)
   );
 }
 
@@ -65,13 +69,21 @@ function formatArtifactBaseName(version, platform, date = new Date()) {
   const day = String(date.getDate()).padStart(2, "0");
   const hours = String(date.getHours()).padStart(2, "0");
   const minutes = String(date.getMinutes()).padStart(2, "0");
-  return `PoseChrono_v${safe}_${year}-${month}-${day}_${platform}_T${hours}-${minutes}`;
+  return `v${safe}_${year}-${month}-${day}_${platform}_T${hours}-${minutes}`;
 }
 
 async function createArtifactDir(rootDir, version, platform) {
   await fsp.mkdir(rootDir, { recursive: true });
   const base = formatArtifactBaseName(version, platform);
-  for (let index = 1; index < 1000; index += 1) {
+  // Try without suffix first, then _02, _03, ... (aligned with release-all.js)
+  const firstCandidate = path.join(rootDir, base);
+  try {
+    await fsp.mkdir(firstCandidate, { recursive: false });
+    return { dirPath: firstCandidate, baseName: base };
+  } catch (err) {
+    if (!err || err.code !== "EEXIST") throw err;
+  }
+  for (let index = 2; index < 1000; index += 1) {
     const suffix = String(index).padStart(2, "0");
     const fullName = `${base}_${suffix}`;
     const candidate = path.join(rootDir, fullName);
@@ -209,8 +221,9 @@ async function main() {
     );
   }
 
-  const { dirPath: windowsDistDir, baseName } = await createArtifactDir(DIST_ROOT, releaseVersion, "windows");
-  const setupName = `${baseName}.exe`;
+  const { dirPath: windowsDistDir } = await createArtifactDir(DIST_ROOT, releaseVersion, "windows");
+  // Aligné sur release-all : PoseChrono_v{version}_windows.exe
+  const setupName = `PoseChrono_v${releaseVersion}_windows.exe`;
   const setupDest = path.join(windowsDistDir, setupName);
   await fsp.copyFile(latestSetup, setupDest);
 

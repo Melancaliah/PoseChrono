@@ -1104,6 +1104,10 @@ async function createMainWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      // Injection de la version app dans le preload (sandboxé, pas d'accès
+      // direct à require arbitraire). app.getVersion() lit automatiquement
+      // apps/desktop/package.json.
+      additionalArguments: [`--pose-chrono-version=${app.getVersion()}`],
     },
   };
 
