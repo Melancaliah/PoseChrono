@@ -2600,7 +2600,11 @@ async function main() {
 
   tryListen();
 
+  let _isShuttingDown = false;
   function shutdown() {
+    // Idempotent : ignorer les appels multiples
+    if (_isShuttingDown) return Promise.resolve();
+    _isShuttingDown = true;
     console.log("[sync-relay] shutting down...");
     clearInterval(cleanupIntervalId);
     wss.clients.forEach((client) => {
@@ -2608,21 +2612,39 @@ async function main() {
         client.close(1001, "server-shutdown");
       } catch (_) {}
     });
-    wss.close(() => {
-      server.close(() => {
-        if (isMainScript) process.exit(0);
-      });
-    });
-    if (isMainScript) {
-      setTimeout(() => process.exit(0), 1500).unref();
-    } else {
+
+    // Créer une promesse qui résout quand le port est libéré
+    const done = new Promise((resolve) => {
+      let resolved = false;
+      const finish = () => { if (!resolved) { resolved = true; resolve(); } };
+      try {
+        wss.close(() => {
+          try {
+            server.close(() => {
+              if (isMainScript) process.exit(0);
+              finish();
+            });
+          } catch (_) { finish(); }
+        });
+      } catch (_) { finish(); }
+      // Timeout de sécurité : si les callbacks n'arrivent jamais
+      const safetyMs = isMainScript ? 1500 : 2000;
       setTimeout(() => {
+        if (isMainScript) process.exit(0);
         try { server.close(); } catch (_) {}
-      }, 1500);
-    }
+        finish();
+      }, safetyMs);
+      if (isMainScript) {
+        setTimeout(() => process.exit(0), safetyMs).unref();
+      }
+    });
+
     // Nettoyer le cache require pour permettre un re-require() ulterieur
     try { delete require.cache[__filename]; } catch (_) {}
     _activeInstance = null;
+    // Exposer la promesse pour que stopServer() puisse l'attendre
+    shutdown._done = done;
+    return done;
   }
 
   // Stocker l'instance active pour pouvoir l'arreter de l'exterieur
@@ -2639,11 +2661,15 @@ let _activeInstance = null;
 
 /**
  * Arrete le serveur relay s'il tourne en in-process (charge via require()).
- * Retourne true si un serveur a ete arrete, false sinon.
+ * Retourne une Promise qui résout quand le port est libéré.
+ * Retourne false si aucun serveur actif.
  */
-function stopServer() {
+async function stopServer() {
   if (_activeInstance) {
-    _activeInstance.shutdown();
+    const done = _activeInstance.shutdown();
+    if (done && typeof done.then === "function") {
+      await done;
+    }
     return true;
   }
   return false;

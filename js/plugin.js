@@ -6789,21 +6789,24 @@ let syncParticipantPackValidationState = {
 let syncParticipantPackValidationWarningAt = 0;
 let _eagleLocalSyncProcess = null;
 
-function killEagleLocalSyncServer() {
+async function killEagleLocalSyncServer() {
   // Desktop Electron : arreter via IPC si disponible
   if (window.poseChronoDesktop?.sync?.stopLocalServer) {
     try { window.poseChronoDesktop.sync.stopLocalServer(); } catch (_) {}
   }
 
+  let killedInProcess = false;
   if (_eagleLocalSyncProcess) {
     if (_eagleLocalSyncProcess.inProcess) {
       // Serveur charge en in-process via require() : appeler stopServer()
+      // et attendre que le port soit réellement libéré
       try {
         const serverModule = require(_eagleLocalSyncProcess.script);
         if (serverModule && typeof serverModule.stopServer === 'function') {
-          serverModule.stopServer();
+          await serverModule.stopServer();
         }
         try { delete require.cache[_eagleLocalSyncProcess.script]; } catch (_) {}
+        killedInProcess = true;
       } catch (_) {}
     } else {
       // Child process spawne : le tuer
@@ -6811,10 +6814,13 @@ function killEagleLocalSyncServer() {
     }
     _eagleLocalSyncProcess = null;
   }
-  // POST /shutdown pour les processus orphelins (ancien .bat, autre instance)
-  try {
-    fetch("http://127.0.0.1:8787/shutdown", { method: "POST" }).catch(() => {});
-  } catch (_) {}
+  // POST /shutdown UNIQUEMENT pour les processus orphelins (ancien .bat, autre instance)
+  // Ne PAS envoyer si on vient de stopServer() in-process — sinon double shutdown
+  if (!killedInProcess) {
+    try {
+      fetch("http://127.0.0.1:8787/shutdown", { method: "POST" }).catch(() => {});
+    } catch (_) {}
+  }
 }
 
 const SYNC_SESSION_CONTROL_MODE_OPTIONS =
@@ -12946,7 +12952,15 @@ function setupSyncSessionModalBindings() {
               const shutRes = await fetch("http://127.0.0.1:8787/shutdown", { method: "POST" });
               if (shutRes.ok) {
                 console.log("[Sync] killed orphaned relay server on port 8787");
-                await new Promise((r) => setTimeout(r, 600));
+                // Attendre que le port soit réellement libéré (max ~3s)
+                for (let _w = 0; _w < 6; _w++) {
+                  await new Promise((r) => setTimeout(r, 500));
+                  try {
+                    await fetch("http://127.0.0.1:8787/health");
+                  } catch (_portFree) {
+                    break; // port libre, on peut continuer
+                  }
+                }
               }
             } catch (_noServer) {}
             require(scriptPath);
@@ -13298,7 +13312,7 @@ function setupSyncSessionModalBindings() {
       syncParticipantTransferInProgress = false;
       syncParticipantLastDownloadedPackHash = null;
       await service.leaveSession();
-      killEagleLocalSyncServer();
+      await killEagleLocalSyncServer();
       syncSessionLastParticipantsCount = null;
       setSyncSessionModalRole(wasHost ? "host" : "join");
       renderSyncSessionStatus(modal);
