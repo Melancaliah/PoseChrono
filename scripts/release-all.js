@@ -36,6 +36,14 @@ const REQUIRED_ENTRIES = [
 ];
 const OPTIONAL_ENTRIES = ["LICENSE", "README.md", "GabContainer"];
 
+// Fichiers supplémentaires copiés individuellement (relay local + dépendance ws)
+const EXTRA_FILE_COPIES = [
+  { src: "scripts/sync-relay-server.js", dest: "scripts/sync-relay-server.js" },
+];
+const EXTRA_DIR_COPIES = [
+  { src: "node_modules/ws", dest: "node_modules/ws" },
+];
+
 // ── Production manifest overrides ────────────────────────────────────────────
 const RELEASE_MANIFEST_OVERRIDES = {
   id: "b459df53-4b7c-4116-a996-647c1ef63dc9",
@@ -300,6 +308,21 @@ async function main() {
     if (!existsSyncSafe(src)) continue;
     const dest = path.join(eagleDir, entry);
     await copyRecursive(src, dest);
+  }
+
+  // Copier le relay server local + dépendance ws (nécessaires pour le mode Réseau Local)
+  for (const { src: relSrc, dest: relDest } of EXTRA_FILE_COPIES) {
+    const srcPath = path.join(ROOT, relSrc);
+    if (!existsSyncSafe(srcPath)) continue;
+    const destPath = path.join(eagleDir, relDest);
+    await fsp.mkdir(path.dirname(destPath), { recursive: true });
+    await fsp.copyFile(srcPath, destPath);
+  }
+  for (const { src: relSrc, dest: relDest } of EXTRA_DIR_COPIES) {
+    const srcPath = path.join(ROOT, relSrc);
+    if (!existsSyncSafe(srcPath)) continue;
+    const destPath = path.join(eagleDir, relDest);
+    await copyRecursive(srcPath, destPath);
   }
 
   // Patch manifest.json with production values (overrides dev ID and logo)

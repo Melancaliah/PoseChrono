@@ -12659,6 +12659,32 @@ function setupSyncSessionModalBindings() {
   // --- Connection type (Internet / Local) ---
   const publicSyncAllowed = CONFIG?.SYNC?.allowPublicSync !== false;
 
+  // Détecter si le serveur relay local est disponible (script + module ws présents)
+  let localSyncAvailable = false;
+  if (!window.poseChronoDesktop) {
+    // Mode Eagle : vérifier que le script relay existe via fs.existsSync
+    // (require.resolve n'est pas fiable dans le require wrappé d'Eagle)
+    try {
+      const _urlObj = new URL(window.location.href);
+      let _basePath = decodeURIComponent(_urlObj.pathname);
+      _basePath = _basePath.replace(/^\/+([a-zA-Z]:\/)/, '$1');
+      const _pluginRoot = _basePath.substring(0, _basePath.lastIndexOf('/'));
+      const _relayScript = _pluginRoot + '/scripts/sync-relay-server.js';
+      const _navPlat = String(navigator?.platform || "").toLowerCase();
+      const _isWin = _navPlat.includes("win") || String(navigator?.userAgent || "").toLowerCase().includes("windows");
+      const _normPath = _isWin ? _relayScript.replace(/\//g, '\\') : _relayScript;
+      if (typeof require === "function") {
+        const _fs = require('fs');
+        localSyncAvailable = _fs.existsSync(_normPath);
+      }
+    } catch (_) {
+      // fs indisponible ou erreur — le mode local ne sera pas proposé
+    }
+  } else {
+    // Mode Desktop : le relay est toujours disponible via IPC
+    localSyncAvailable = true;
+  }
+
   const connInternetBtn = modal.querySelector("#sync-conn-internet-btn");
   const connLocalBtn = modal.querySelector("#sync-conn-local-btn");
   const hostLocalSection = modal.querySelector(".sync-session-host-local-section");
@@ -12672,9 +12698,24 @@ function setupSyncSessionModalBindings() {
       UIPreferences.set("syncConnectionType", "local");
     }
   }
+  // When local sync is not available: force internet mode, hide local button
+  if (!localSyncAvailable && publicSyncAllowed) {
+    UIPreferences.set("syncConnectionType", "internet");
+    if (connLocalBtn) connLocalBtn.style.display = "none";
+    // Forcer l'URL relay vers le serveur public (l'ancienne URL locale ne marchera pas)
+    if (relayUrlInput) {
+      relayUrlInput.value = "wss://posechrono-sync-online.onrender.com";
+      if (relayUrlSaveBtn) relayUrlSaveBtn.click();
+    }
+  }
+  // Neither available: shouldn't happen, but defensive
+  if (!localSyncAvailable && !publicSyncAllowed) {
+    console.warn("[Sync] Neither local nor public sync available");
+  }
 
   const updateConnTypeUI = (type) => {
-    const effectiveType = (!publicSyncAllowed && type === "internet") ? "local" : type;
+    let effectiveType = (!publicSyncAllowed && type === "internet") ? "local" : type;
+    if (!localSyncAvailable && effectiveType === "local") effectiveType = "internet";
     if (connInternetBtn) connInternetBtn.classList.toggle("active", effectiveType === "internet");
     if (connLocalBtn) connLocalBtn.classList.toggle("active", effectiveType === "local");
     if (connInternetBtn) connInternetBtn.setAttribute("aria-pressed", effectiveType === "internet" ? "true" : "false");

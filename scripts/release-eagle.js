@@ -22,6 +22,14 @@ const REQUIRED_ENTRIES = [
 ];
 
 const OPTIONAL_ENTRIES = ["LICENSE", "README.md", "GabContainer"];
+
+// Fichiers supplémentaires copiés individuellement (relay local + dépendance ws)
+const EXTRA_FILE_COPIES = [
+  { src: "scripts/sync-relay-server.js", dest: "scripts/sync-relay-server.js" },
+];
+const EXTRA_DIR_COPIES = [
+  { src: "node_modules/ws", dest: "node_modules/ws" },
+];
 const RELEASE_MANIFEST_OVERRIDES = {
   id: "b459df53-4b7c-4116-a996-647c1ef63dc9",
   logo: "/logo.png",
@@ -257,6 +265,23 @@ async function main() {
     const dest = path.join(outDir, entry);
     await copyRecursive(src, dest);
     copied.push(entry);
+  }
+
+  // Copier le relay server local + dépendance ws (nécessaires pour le mode Réseau Local)
+  for (const { src: relSrc, dest: relDest } of EXTRA_FILE_COPIES) {
+    const srcPath = path.join(ROOT, relSrc);
+    if (!existsSyncSafe(srcPath)) { console.warn(`[release:eagle] Extra file not found (skipped): ${relSrc}`); continue; }
+    const destPath = path.join(outDir, relDest);
+    await fsp.mkdir(path.dirname(destPath), { recursive: true });
+    await fsp.copyFile(srcPath, destPath);
+    copied.push(relSrc);
+  }
+  for (const { src: relSrc, dest: relDest } of EXTRA_DIR_COPIES) {
+    const srcPath = path.join(ROOT, relSrc);
+    if (!existsSyncSafe(srcPath)) { console.warn(`[release:eagle] Extra dir not found (skipped): ${relSrc}`); continue; }
+    const destPath = path.join(outDir, relDest);
+    await copyRecursive(srcPath, destPath);
+    copied.push(relSrc);
   }
 
   // Replace bundles with their minified versions in the dist
