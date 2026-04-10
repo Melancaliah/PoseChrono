@@ -6748,7 +6748,7 @@ const SYNC_SESSION_PACK_SCHEMA = "posechrono-session-pack";
 const SYNC_SESSION_PACK_VERSION = 1;
 const SYNC_SESSION_PACK_MAX_TEXT_LENGTH = 2 * 1024 * 1024;
 const SYNC_SESSION_PACK_MAX_MEDIA_REFS = 50000;
-const SYNC_SESSION_MEDIA_MAX_FILES = 5; // TEMPORAIRE pour test sync mediaKey (remettre à 300)
+const SYNC_SESSION_MEDIA_MAX_FILES = 300;
 const SYNC_SESSION_MEDIA_MAX_FILE_BYTES = 2 * 1024 * 1024;
 const SYNC_SESSION_MEDIA_MAX_TOTAL_BYTES = 256 * 1024 * 1024;
 const SYNC_SESSION_MEDIA_TRANSFER_MAX_RETRIES = 4;
@@ -11193,20 +11193,7 @@ function buildSyncRuntimePayload(reason, options = {}) {
     currentMediaKey: (function () {
       const idx = Math.max(0, Number(state.currentIndex || 0) || 0);
       if (Array.isArray(state.images) && idx < state.images.length) {
-        const img = state.images[idx];
-        const key = getSyncMediaIdentity(img) || "";
-        // DEBUG TEMPORAIRE — supprimer après test
-        console.log("[Sync:host:mediaKey]", {
-          idx,
-          key,
-          imgKeys: img ? Object.keys(img).slice(0, 10) : [],
-          name: img?.name,
-          filePath: img?.filePath,
-          path: img?.path,
-          ext: img?.ext,
-          id: img?.id,
-        });
-        return key;
+        return getSyncMediaIdentity(state.images[idx]) || "";
       }
       return "";
     })(),
@@ -11563,13 +11550,6 @@ function applyRemoteSyncRuntimeState(remoteState) {
         );
       }
     }
-    // DEBUG TEMPORAIRE — supprimer après test
-    console.log("[Sync:mediaKey]", {
-      remoteMediaKey,
-      remoteIndex: remoteState.currentIndex,
-      resolvedIndex,
-      localImagesCount: state.images.length,
-    });
     if (resolvedIndex >= 0 && Array.isArray(state.images) && state.images.length > 0) {
       const clampedIndex = Math.max(
         0,
