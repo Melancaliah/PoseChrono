@@ -556,6 +556,9 @@
           case "memoryType":
             out.memoryType = normalizeMemoryType(value);
             return;
+          case "currentMediaKey":
+            out.currentMediaKey = sanitizeText(value, 120, "");
+            return;
           case "requestType": {
             const requestType = String(value || "").trim().toLowerCase();
             if (requestType !== "pause" && requestType !== "play") {

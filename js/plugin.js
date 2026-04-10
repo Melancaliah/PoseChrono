@@ -6748,7 +6748,7 @@ const SYNC_SESSION_PACK_SCHEMA = "posechrono-session-pack";
 const SYNC_SESSION_PACK_VERSION = 1;
 const SYNC_SESSION_PACK_MAX_TEXT_LENGTH = 2 * 1024 * 1024;
 const SYNC_SESSION_PACK_MAX_MEDIA_REFS = 50000;
-const SYNC_SESSION_MEDIA_MAX_FILES = 300;
+const SYNC_SESSION_MEDIA_MAX_FILES = 5; // TEMPORAIRE pour test sync mediaKey (remettre à 300)
 const SYNC_SESSION_MEDIA_MAX_FILE_BYTES = 2 * 1024 * 1024;
 const SYNC_SESSION_MEDIA_MAX_TOTAL_BYTES = 256 * 1024 * 1024;
 const SYNC_SESSION_MEDIA_TRANSFER_MAX_RETRIES = 4;
@@ -11190,6 +11190,26 @@ function buildSyncRuntimePayload(reason, options = {}) {
     selectedDuration: Math.max(0, Number(state.selectedDuration || 0) || 0),
     timeRemaining: Math.max(0, Number(state.timeRemaining || 0) || 0),
     currentIndex: Math.max(0, Number(state.currentIndex || 0) || 0),
+    currentMediaKey: (function () {
+      const idx = Math.max(0, Number(state.currentIndex || 0) || 0);
+      if (Array.isArray(state.images) && idx < state.images.length) {
+        const img = state.images[idx];
+        const key = getSyncMediaIdentity(img) || "";
+        // DEBUG TEMPORAIRE — supprimer après test
+        console.log("[Sync:host:mediaKey]", {
+          idx,
+          key,
+          imgKeys: img ? Object.keys(img).slice(0, 10) : [],
+          name: img?.name,
+          filePath: img?.filePath,
+          path: img?.path,
+          ext: img?.ext,
+          id: img?.id,
+        });
+        return key;
+      }
+      return "";
+    })(),
     currentStepIndex: Math.max(0, Number(state.currentStepIndex || 0) || 0),
     currentPoseInStep: Math.max(1, Number(state.currentPoseInStep || 1) || 1),
     memoryType: String(state.memoryType || "flash"),
@@ -11511,16 +11531,49 @@ function applyRemoteSyncRuntimeState(remoteState) {
       if (settingsScreen) settingsScreen.classList.remove("hidden");
     }
 
-    const currentIndex = Number(remoteState.currentIndex);
+    // Résoudre l'image courante par mediaKey (identité) plutôt que par index brut.
+    // Cela garantit que host et guest affichent la même image même si leurs
+    // tableaux state.images ont des tailles différentes (ex. 303 vs 300).
+    let resolvedIndex = -1;
+    const remoteMediaKey = String(remoteState.currentMediaKey || "").trim();
     if (
-      Number.isFinite(currentIndex) &&
-      currentIndex >= 0 &&
+      remoteMediaKey &&
       Array.isArray(state.images) &&
       state.images.length > 0
     ) {
+      for (let i = 0; i < state.images.length; i++) {
+        if (getSyncMediaIdentity(state.images[i]) === remoteMediaKey) {
+          resolvedIndex = i;
+          break;
+        }
+      }
+    }
+    // Fallback : si mediaKey absent ou non trouvé, utiliser currentIndex brut (rétrocompatibilité)
+    if (resolvedIndex < 0) {
+      const currentIndex = Number(remoteState.currentIndex);
+      if (
+        Number.isFinite(currentIndex) &&
+        currentIndex >= 0 &&
+        Array.isArray(state.images) &&
+        state.images.length > 0
+      ) {
+        resolvedIndex = Math.max(
+          0,
+          Math.min(Math.floor(currentIndex), state.images.length - 1),
+        );
+      }
+    }
+    // DEBUG TEMPORAIRE — supprimer après test
+    console.log("[Sync:mediaKey]", {
+      remoteMediaKey,
+      remoteIndex: remoteState.currentIndex,
+      resolvedIndex,
+      localImagesCount: state.images.length,
+    });
+    if (resolvedIndex >= 0 && Array.isArray(state.images) && state.images.length > 0) {
       const clampedIndex = Math.max(
         0,
-        Math.min(Math.floor(currentIndex), state.images.length - 1),
+        Math.min(resolvedIndex, state.images.length - 1),
       );
       // Réinitialiser le flip sur changement d'image (comme nextImage côté hôte).
       // On ne réplique pas le state.timeRemaining de resetTransforms() car il est
