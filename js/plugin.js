@@ -10006,6 +10006,16 @@ function applySyncHostOnlinePackMediaSelection(pack) {
   }
   if (desiredKeys.length <= 0) return false;
 
+  // Dédupliquer les clés pour que le host garde exactement le même nombre
+  // d'images que le guest (1 seule copie par identité uploadée).
+  const seenKeys = new Set();
+  desiredKeys = desiredKeys.filter((key) => {
+    const k = String(key || "").trim();
+    if (!k || seenKeys.has(k)) return false;
+    seenKeys.add(k);
+    return true;
+  });
+
   const buckets = new Map();
   state.images.forEach((item) => {
     const id = getSyncMediaIdentity(item);
@@ -11535,8 +11545,10 @@ function applyRemoteSyncRuntimeState(remoteState) {
         }
       }
     }
-    // Fallback : si mediaKey absent ou non trouvé, utiliser currentIndex brut (rétrocompatibilité)
-    if (resolvedIndex < 0) {
+    // Fallback : si mediaKey ABSENT (ancien host sans le champ), utiliser currentIndex brut.
+    // Si mediaKey FOURNI mais non trouvé (image que le guest n'a pas), ne rien changer :
+    // le guest reste sur son image courante plutôt que de sauter à un index incohérent.
+    if (resolvedIndex < 0 && !remoteMediaKey) {
       const currentIndex = Number(remoteState.currentIndex);
       if (
         Number.isFinite(currentIndex) &&
@@ -18551,49 +18563,53 @@ function startTimer() {
 
     // LOGIQUE SPÉCIFIQUE MODE MÉMOIRE FLASH
     if (state.sessionMode === "memory" && state.memoryType === "flash") {
-      if (
-        shouldEnterMemoryHiddenPhaseTick({
-          sessionMode: state.sessionMode,
-          memoryType: state.memoryType,
-          timeRemaining: state.timeRemaining,
-          memoryHidden: state.memoryHidden,
-        })
-      ) {
-        // Arrêter le timer et afficher l'écran de masquage
-        state.memoryHidden = true;
-        stopTimer();
-        showMemoryOverlay();
-        if (state.soundEnabled) {
-          SoundManager.play("end");
+      // En sync participant, ne pas gérer les transitions mémoire localement :
+      // l'hôte synchronise memoryHidden et timeRemaining via l'état distant.
+      if (!isSyncSessionParticipantActive()) {
+        if (
+          shouldEnterMemoryHiddenPhaseTick({
+            sessionMode: state.sessionMode,
+            memoryType: state.memoryType,
+            timeRemaining: state.timeRemaining,
+            memoryHidden: state.memoryHidden,
+          })
+        ) {
+          // Arrêter le timer et afficher l'écran de masquage
+          state.memoryHidden = true;
+          stopTimer();
+          showMemoryOverlay();
+          if (state.soundEnabled) {
+            SoundManager.play("end");
+          }
+
+          // Si un temps de dessin est défini (et que "sans pression" n'est pas activé)
+          if (state.memoryDrawingTime > 0 && !state.memoryNoPressure) {
+            // Démarrer un timer pour le temps de dessin
+            state.timeRemaining = state.memoryDrawingTime;
+            state.selectedDuration = state.memoryDrawingTime;
+            updateTimerDisplay();
+            startTimer();
+          }
+
+          return;
         }
 
-        // Si un temps de dessin est défini (et que "sans pression" n'est pas activé)
-        if (state.memoryDrawingTime > 0 && !state.memoryNoPressure) {
-          // Démarrer un timer pour le temps de dessin
-          state.timeRemaining = state.memoryDrawingTime;
-          state.selectedDuration = state.memoryDrawingTime;
-          updateTimerDisplay();
-          startTimer();
+        // Si on est en phase de dessin (overlay visible) et que le temps est écoulé
+        if (
+          shouldAdvanceFromMemoryHiddenPhaseTick({
+            sessionMode: state.sessionMode,
+            memoryType: state.memoryType,
+            timeRemaining: state.timeRemaining,
+            memoryHidden: state.memoryHidden,
+          })
+        ) {
+          stopTimer();
+          // Attendre 1 seconde puis passer à l'image suivante
+          setTimeout(() => {
+            nextImage({ sessionSource: "auto" });
+          }, 1000);
+          return;
         }
-
-        return;
-      }
-
-      // Si on est en phase de dessin (overlay visible) et que le temps est écoulé
-      if (
-        shouldAdvanceFromMemoryHiddenPhaseTick({
-          sessionMode: state.sessionMode,
-          memoryType: state.memoryType,
-          timeRemaining: state.timeRemaining,
-          memoryHidden: state.memoryHidden,
-        })
-      ) {
-        stopTimer();
-        // Attendre 1 seconde puis passer à l'image suivante
-        setTimeout(() => {
-          nextImage({ sessionSource: "auto" });
-        }, 1000);
-        return;
       }
     }
 
@@ -18631,6 +18647,15 @@ function startTimer() {
         memoryType: state.memoryType,
       })
     ) {
+      // En tant que participant sync, ne pas auto-avancer : rester sur
+      // l'image courante à 0:00 et laisser l'hôte contrôler le changement.
+      // Cela évite le bref stopTimer/restart qui cause un flicker visuel
+      // et un décalage momentané entre host et guest.
+      if (isSyncSessionParticipantActive()) {
+        state.timeRemaining = 0;
+        updateTimerDisplay();
+        return;
+      }
       stopTimer();
       setTimeout(() => {
         nextImage({ sessionSource: "auto" });
