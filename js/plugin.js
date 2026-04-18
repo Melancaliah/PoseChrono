@@ -23890,6 +23890,12 @@ async function saveHotkeysToStorage() {
         localStorage.removeItem(HOTKEYS_STORAGE_KEY);
       } catch (_) {}
     }
+
+    // Notifier les UI dépendantes (tooltips, data-tooltip) que les hotkeys ont changé.
+    // Écouté notamment par le module dessin pour rafraîchir ses tooltips en temps réel.
+    try {
+      document.dispatchEvent(new CustomEvent("pose:hotkeys-changed"));
+    } catch (_) {}
   } catch (e) {
     console.error("Error saving hotkeys to storage:", e);
   }

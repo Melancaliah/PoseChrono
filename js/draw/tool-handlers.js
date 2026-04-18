@@ -56,6 +56,12 @@ function eraseAtDrawingPoint(x, y, ctx, canvas) {
  */
 function eraseLineBetweenPoints(from, to, ctx, canvas) {
   if (!ctx || !canvas || !from || !to) return;
+  // Gommer laisse le raster "touché" du point de vue du flag (conservatif) :
+  // si l'utilisateur gomme tout, le bouton Clear reste brièvement actif —
+  // bénin, et évite un getImageData à chaque coup de gomme.
+  if (ctx === drawingCtx && typeof markDrawingDirty === "function") {
+    markDrawingDirty(true);
+  }
 
   const eraserSize = annotationStyle.size / 2;
   const dx = to.x - from.x;
@@ -836,7 +842,7 @@ function handleMeasurementClick(coords, options = {}) {
  */
 function initPencilDrawing(coords) {
   stabilizerBuffer = [coords];
-  lastDrawnPoint = { ...coords };
+  setLastDrawnPoint(coords);
   drawingCtx.beginPath();
   drawingCtx.moveTo(coords.x, coords.y);
   drawingCtx.strokeStyle = annotationStyle.color;
@@ -855,7 +861,7 @@ function initPencilDrawing(coords) {
  * @param {Object} coords - Coordonnées de départ
  */
 function initEraserDrawing(coords) {
-  lastDrawnPoint = { ...coords };
+  setLastDrawnPoint(coords);
   eraseAtDrawingPoint(coords.x, coords.y, drawingCtx, drawingCanvas);
   applyEraserShapeModeAlongStroke(coords, coords, drawingCtx, drawingCanvas);
 
@@ -870,7 +876,7 @@ function initEraserDrawing(coords) {
  * @param {Object} coords - Coordonnées de départ
  */
 function initLaserDrawing(coords) {
-  lastDrawnPoint = { ...coords };
+  setLastDrawnPoint(coords);
   addLaserPoint(coords.x, coords.y);
 }
 
@@ -883,6 +889,12 @@ function handleDrawingMouseDown(e) {
   if (e.button !== 0) return;
   hideDrawingEditHud();
 
+  // Défensif : un rect frais garantit que le trait s'aligne sur le curseur
+  // (couvre tout layout shift survenu entre deux strokes : scroll, animation,
+  // redimensionnement CSS dynamique, etc.).
+  if (typeof _invalidatePreviewRectCache === "function") {
+    _invalidatePreviewRectCache();
+  }
 
   const coords = getDrawingCoordinates(e);
 
@@ -1046,6 +1058,10 @@ function handleDrawingMouseDown(e) {
  * @param {number} step - Distance entre chaque point interpolé
  */
 function interpolateLine(ctx, from, to, step) {
+  // Marquer le raster dirty dès qu'on peint sur drawingCtx (crayon/gomme/bord).
+  if (ctx === drawingCtx && typeof markDrawingDirty === "function") {
+    markDrawingDirty(true);
+  }
   const dx = to.x - from.x;
   const dy = to.y - from.y;
   const distance = getDistance(from, to);
@@ -1178,7 +1194,7 @@ function handlePencilMove(coords, ctx, previewCtx, previewCanvas) {
       ctx.stroke();
       ctx.beginPath();
       ctx.moveTo(coords.x, coords.y);
-      lastDrawnPoint = { ...coords };
+      setLastDrawnPoint(coords);
     }
 
     // Mode Shift : ligne droite depuis le dernier point
@@ -1213,7 +1229,7 @@ function handlePencilMove(coords, ctx, previewCtx, previewCanvas) {
     ctx.stroke();
     ctx.beginPath();
     ctx.moveTo(coords.x, coords.y);
-    lastDrawnPoint = { ...coords };
+    setLastDrawnPoint(coords);
     
     if (remoteDrawState.sharingEnabled) {
       remoteDrawSyncBufferPoint(coords);
@@ -1247,7 +1263,7 @@ function handlePencilMove(coords, ctx, previewCtx, previewCanvas) {
       ctx.stroke();
       ctx.beginPath();
       ctx.moveTo(midX, midY);
-      lastDrawnPoint = { ...smoothed };
+      setLastDrawnPoint(smoothed);
 
       if (remoteDrawState.sharingEnabled) {
         remoteDrawSyncBufferPoint(smoothed);
@@ -1307,7 +1323,7 @@ function handlePencilMove(coords, ctx, previewCtx, previewCanvas) {
       ctx.beginPath();
       ctx.moveTo(coords.x, coords.y);
     }
-    lastDrawnPoint = { ...coords };
+    setLastDrawnPoint(coords);
     
     if (remoteDrawState.sharingEnabled) {
       remoteDrawSyncBufferPoint(coords);
@@ -1341,7 +1357,7 @@ function handleEraserMove(coords, ctx, canvas, previewCtx, previewCanvas) {
   if (wasShiftPressed && lastDrawnPoint) {
     eraseLineBetweenPoints(lastDrawnPoint, coords, ctx, canvas);
     applyEraserShapeModeAlongStroke(lastDrawnPoint, coords, ctx, canvas);
-    lastDrawnPoint = { ...coords };
+    setLastDrawnPoint(coords);
     
     if (remoteDrawState.sharingEnabled) {
       remoteDrawSyncBufferPoint(coords);
@@ -1364,7 +1380,7 @@ function handleEraserMove(coords, ctx, canvas, previewCtx, previewCanvas) {
     eraseAtDrawingPoint(coords.x, coords.y, ctx, canvas);
     applyEraserShapeModeAlongStroke(coords, coords, ctx, canvas);
   }
-  lastDrawnPoint = { ...coords };
+  setLastDrawnPoint(coords);
   
   if (remoteDrawState.sharingEnabled) {
     remoteDrawSyncBufferPoint(coords);
@@ -1389,6 +1405,9 @@ function drawArrowHeadLocal(ctx, from, to, headLength) {
 
 function rasterizeEditableShapeLineToCanvas(line, ctx) {
   if (!line || !ctx || !isEditableShape(line)) return false;
+  if (ctx === drawingCtx && typeof markDrawingDirty === "function") {
+    markDrawingDirty(true);
+  }
 
   const color = line.config?.color ?? annotationStyle.color;
   const lineWidth = line.config?.lineWidth ?? annotationStyle.size;
@@ -1580,7 +1599,7 @@ function handleLaserMove(coords) {
   // Transition Shift → libre
   if (wasShiftPressed && lastDrawnPoint) {
     addLaserLineBetweenPoints(lastDrawnPoint, coords);
-    lastDrawnPoint = { ...coords };
+    setLastDrawnPoint(coords);
     laserShiftPreview = null;
     wasShiftPressed = false;
     return;
@@ -1590,7 +1609,7 @@ function handleLaserMove(coords) {
 
   // Tracé laser libre
   addLaserPoint(coords.x, coords.y);
-  lastDrawnPoint = { ...coords };
+  setLastDrawnPoint(coords);
 }
 
 /**
@@ -2629,6 +2648,31 @@ function handleLabelDrag(coords) {
   return true;
 }
 
+// Cache de la signature du dernier hit target pour éviter les redraws inutiles
+// lorsque la souris bouge sans changer d'élément survolé.
+let _lastHoverRedrawSig = "__init__";
+
+function _hoverRedrawSignature(target, cursor, modifiers) {
+  // Signature basée sur l'identité de l'élément survolé + curseur + modifiers
+  // Un redraw est déclenché uniquement quand cette signature change.
+  if (!target) return `none|${cursor}|${modifiers}`;
+  const line = target.line || target;
+  const id = line?.id ?? line?._tempId ?? "?";
+  const kind = target.kind || "?";
+  const type = line?.type || "?";
+  return `${kind}|${type}|${id}|${cursor}|${modifiers}`;
+}
+
+function _scheduleHoverRedrawIfChanged(sig, coords, threshold) {
+  if (sig === _lastHoverRedrawSig) return;
+  _lastHoverRedrawSig = sig;
+  scheduleDrawingMeasurementsRedraw(coords, threshold);
+}
+
+function _resetHoverRedrawCache() {
+  _lastHoverRedrawSig = "__init__";
+}
+
 /**
  * Gère le survol quand on ne dessine pas (curseurs, hover)
  */
@@ -2637,6 +2681,8 @@ function handleIdleHover(coords, e) {
   keysState.shift = e.shiftKey;
   keysState.alt = e.altKey;
   keysState.ctrl = e.ctrlKey;
+
+  const _mods = `${e.shiftKey ? "S" : ""}${e.altKey ? "A" : ""}${e.ctrlKey ? "C" : ""}`;
 
   // Détection des touches de modification
   const isShiftPressed = e.shiftKey;
@@ -2648,7 +2694,11 @@ function handleIdleHover(coords, e) {
 
   if (forceCreateShape) {
     if (drawingPreview) drawingPreview.style.cursor = "crosshair";
-    scheduleDrawingMeasurementsRedraw();
+    _scheduleHoverRedrawIfChanged(
+      _hoverRedrawSignature(null, "crosshair", _mods),
+      null,
+      15,
+    );
     return true;
   }
 
@@ -2666,7 +2716,11 @@ function handleIdleHover(coords, e) {
   if (isShiftPressed && isAltPressed && !isCtrlPressed) {
     if (modLineHit && drawingPreview) {
       drawingPreview.style.cursor = getDeleteCursor();
-      scheduleDrawingMeasurementsRedraw(coords, 20);
+      _scheduleHoverRedrawIfChanged(
+        _hoverRedrawSignature(modTarget, "delete", _mods),
+        coords,
+        20,
+      );
       return true;
     }
     return false;
@@ -2674,11 +2728,16 @@ function handleIdleHover(coords, e) {
 
   // Alt maintenu SEUL (sans Shift) : curseur de duplication
   if (isAltPressed && !isShiftPressed && modLineHit) {
+    const cur = modLineHit.type === "calibrate" ? "not-allowed" : "duplicate";
     if (drawingPreview) {
       drawingPreview.style.cursor =
         modLineHit.type === "calibrate" ? "not-allowed" : getDuplicateCursor();
     }
-    scheduleDrawingMeasurementsRedraw(coords, 20);
+    _scheduleHoverRedrawIfChanged(
+      _hoverRedrawSignature(modTarget, cur, _mods),
+      coords,
+      20,
+    );
     return true;
   }
 
@@ -2690,7 +2749,11 @@ function handleIdleHover(coords, e) {
     drawingPreview
   ) {
     drawingPreview.style.cursor = getCycleCursor();
-    scheduleDrawingMeasurementsRedraw(coords, 20);
+    _scheduleHoverRedrawIfChanged(
+      _hoverRedrawSignature(modTarget, "cycle", _mods),
+      coords,
+      20,
+    );
     return true;
   }
 
@@ -2724,36 +2787,60 @@ function handleIdleHover(coords, e) {
 
     if (!target) {
       if (drawingPreview) drawingPreview.style.cursor = "";
-      scheduleDrawingMeasurementsRedraw();
+      _scheduleHoverRedrawIfChanged(
+        _hoverRedrawSignature(null, "", _mods),
+        null,
+        15,
+      );
       return true;
     }
 
     if (target.kind === "control") {
       if (drawingPreview) drawingPreview.style.cursor = "grab";
-      scheduleDrawingMeasurementsRedraw(coords, 15);
+      _scheduleHoverRedrawIfChanged(
+        _hoverRedrawSignature(target, "grab", _mods),
+        coords,
+        15,
+      );
       return true;
     }
 
     if (target.kind === "endpoint") {
       if (drawingPreview) drawingPreview.style.cursor = "pointer";
-      scheduleDrawingMeasurementsRedraw(coords, 15);
+      _scheduleHoverRedrawIfChanged(
+        _hoverRedrawSignature(target, "pointer", _mods),
+        coords,
+        15,
+      );
       return true;
     }
 
     if (target.kind === "label") {
       if (drawingPreview) drawingPreview.style.cursor = "grab";
-      scheduleDrawingMeasurementsRedraw(coords, 15);
+      _scheduleHoverRedrawIfChanged(
+        _hoverRedrawSignature(target, "grab-label", _mods),
+        coords,
+        15,
+      );
       return true;
     }
 
     const lineHit = target.line;
     if (lineHit && isEditableShape(lineHit.type) && needsEditableShapeSelection(lineHit)) {
       if (drawingPreview) drawingPreview.style.cursor = "pointer";
-      scheduleDrawingMeasurementsRedraw(coords, 15);
+      _scheduleHoverRedrawIfChanged(
+        _hoverRedrawSignature(target, "pointer-sel", _mods),
+        coords,
+        15,
+      );
       return true;
     }
     if (drawingPreview) drawingPreview.style.cursor = "move";
-    scheduleDrawingMeasurementsRedraw(coords, 15);
+    _scheduleHoverRedrawIfChanged(
+      _hoverRedrawSignature(target, "move", _mods),
+      coords,
+      15,
+    );
     return true;
   }
 
@@ -2767,8 +2854,13 @@ function handleIdleHover(coords, e) {
 function handleDrawingMouseMove(e) {
 
 
-  // Mettre à jour la position pour updateAltDuplicateCursor
-  lastMousePosition = { x: e.clientX, y: e.clientY };
+  // Mettre à jour la position pour updateAltDuplicateCursor (mutation in-place)
+  if (lastMousePosition) {
+    lastMousePosition.x = e.clientX;
+    lastMousePosition.y = e.clientY;
+  } else {
+    lastMousePosition = { x: e.clientX, y: e.clientY };
+  }
 
   const coords = getDrawingCoordinates(e);
 
@@ -2781,7 +2873,12 @@ function handleDrawingMouseMove(e) {
 
   // Stocker les coordonnées canvas pour le compas (utilisé dans mouseUp)
   if (currentTool === "protractor" && compassWaitingSecondClick) {
-    lastMousePosition = coords;
+    if (lastMousePosition) {
+      lastMousePosition.x = coords.x;
+      lastMousePosition.y = coords.y;
+    } else {
+      lastMousePosition = { x: coords.x, y: coords.y };
+    }
     if (compassDragging && compassCenter) {
       const distance = getDistance(compassCenter, coords);
       if (distance > 10) {
@@ -2971,14 +3068,15 @@ function handleDrawingMouseUp(e = null) {
       drawingCtx.lineWidth = getActivePencilStrokeSize();
       drawingCtx.lineCap = "round";
       drawingCtx.stroke();
-      
+      if (typeof markDrawingDirty === "function") markDrawingDirty(true);
+
       if (remoteDrawState.sharingEnabled) {
         remoteDrawSyncBufferPoint(lineOrigin);
         remoteDrawSyncBufferPoint(endPoint);
       }
-      
+
       // Mettre à jour lastDrawnPoint pour une éventuelle continuation
-      lastDrawnPoint = { ...endPoint };
+      setLastDrawnPoint(endPoint);
     }
     // Effacer la prévisualisation
     if (drawingPreviewCtx && drawingPreview) {
@@ -2998,7 +3096,7 @@ function handleDrawingMouseUp(e = null) {
         remoteDrawSyncBufferPoint(endPoint);
       }
       
-      lastDrawnPoint = { ...endPoint };
+      setLastDrawnPoint(endPoint);
     }
     // Effacer la prévisualisation
     if (drawingPreviewCtx && drawingPreview) {
@@ -3011,7 +3109,7 @@ function handleDrawingMouseUp(e = null) {
     const lineOrigin = lastDrawnPoint || startPoint;
     if (lineOrigin) {
       addLaserLineBetweenPoints(lineOrigin, endPoint);
-      lastDrawnPoint = { ...endPoint };
+      setLastDrawnPoint(endPoint);
     }
     laserShiftPreview = null; // Effacer la preview
   }
@@ -3102,6 +3200,7 @@ function handleDrawingMouseUp(e = null) {
   if (currentTool === "pencil" && lastDrawnPoint && !keysState.shift) {
     drawingCtx.lineTo(lastDrawnPoint.x, lastDrawnPoint.y);
     drawingCtx.stroke();
+    if (typeof markDrawingDirty === "function") markDrawingDirty(true);
   }
   
   // Sync remote drawing — terminer le stroke sortant (pencil/eraser)

@@ -19,15 +19,16 @@ function finalizeDrawingModeActivation(toolName = "pencil", contextType = null) 
   } else {
     drawingManager.setContext('normal');
     drawingManager.normal.canvas = document.getElementById("drawing-canvas");
+    // willReadFrequently=true uniquement sur le canvas principal (getImageData pour history/sync)
     drawingManager.normal.ctx = drawingManager.normal.canvas?.getContext("2d", { willReadFrequently: true }) || null;
     drawingManager.normal.preview = document.getElementById("drawing-preview");
-    drawingManager.normal.previewCtx = drawingManager.normal.preview?.getContext("2d", { willReadFrequently: true }) || null;
+    drawingManager.normal.previewCtx = drawingManager.normal.preview?.getContext("2d") || null;
     drawingManager.normal.measures = document.getElementById("drawing-measures");
-    drawingManager.normal.measuresCtx = drawingManager.normal.measures?.getContext("2d", { willReadFrequently: true }) || null;
+    drawingManager.normal.measuresCtx = drawingManager.normal.measures?.getContext("2d") || null;
     drawingManager.normal.lightbox = document.getElementById("drawing-lightbox");
-    drawingManager.normal.lightboxCtx = drawingManager.normal.lightbox?.getContext("2d", { willReadFrequently: true }) || null;
+    drawingManager.normal.lightboxCtx = drawingManager.normal.lightbox?.getContext("2d") || null;
     drawingManager.normal.remote = document.getElementById("drawing-remote");
-    drawingManager.normal.remoteCtx = drawingManager.normal.remote?.getContext("2d", { willReadFrequently: true }) || null;
+    drawingManager.normal.remoteCtx = drawingManager.normal.remote?.getContext("2d") || null;
     drawingManager.normal.toolbar = document.getElementById("drawing-toolbar");
     drawingManager.normal.targetImage = document.getElementById("current-image");
   }
@@ -87,11 +88,12 @@ async function openDrawingMode() {
   setupDrawingCanvasDimensions();
 
   // Initialiser les contextes
+  // willReadFrequently=true uniquement sur drawingCtx (seul canvas lu via getImageData pour history/sync)
   drawingCtx = drawingCanvas.getContext("2d", { willReadFrequently: true });
-  drawingMeasuresCtx = drawingMeasures.getContext("2d", { willReadFrequently: true });
-  drawingPreviewCtx = drawingPreview.getContext("2d", { willReadFrequently: true });
+  drawingMeasuresCtx = drawingMeasures.getContext("2d");
+  drawingPreviewCtx = drawingPreview.getContext("2d");
   if (drawingLightboxCanvas) {
-    drawingLightboxCtx = drawingLightboxCanvas.getContext("2d", { willReadFrequently: true });
+    drawingLightboxCtx = drawingLightboxCanvas.getContext("2d");
   }
 
   // Cache des éléments UI pour les hot paths (mousemove, animations)
@@ -585,9 +587,10 @@ function setupDrawingModeTools() {
   document.addEventListener("keydown", handleDrawingModeKeydown);
   document.addEventListener("keyup", handleDrawingModeKeyup);
 
-  // Écouteur global pour mouseup (pour arrêter le dessin même hors du canvas)
-  document.addEventListener("mouseup", handleGlobalMouseUp);
+  // Écouteur global pour pointerup/pointercancel (couvre souris + stylet + touch).
+  // On évite le doublon mouseup+pointerup : pointerup est émis pour tous les types.
   document.addEventListener("pointerup", handleGlobalMouseUp);
+  document.addEventListener("pointercancel", handleGlobalMouseUp);
 
   // Pan/rotation/zoom globaux (MMB ou Space+clic même hors du canvas, sur l'espace noir)
   document.addEventListener("mousedown", _handleGlobalPanDown);

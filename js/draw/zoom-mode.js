@@ -197,10 +197,11 @@ async function openZoomDrawingMode(overlay, image) {
   });
 
   // Initialiser les contextes
+  // willReadFrequently=true uniquement sur zoomDrawingCtx (seul canvas lu via getImageData)
   zoomDrawingCtx = zoomDrawingCanvas.getContext("2d", { willReadFrequently: true });
-  zoomDrawingMeasuresCtx = zoomDrawingMeasures.getContext("2d", { willReadFrequently: true });
-  zoomDrawingPreviewCtx = zoomDrawingPreview.getContext("2d", { willReadFrequently: true });
-  zoomDrawingLightboxCtx = zoomDrawingLightbox.getContext("2d", { willReadFrequently: true });
+  zoomDrawingMeasuresCtx = zoomDrawingMeasures.getContext("2d");
+  zoomDrawingPreviewCtx = zoomDrawingPreview.getContext("2d");
+  zoomDrawingLightboxCtx = zoomDrawingLightbox.getContext("2d");
 
   // Configurer le DrawingManager pour le mode zoom
   // Synchroniser explicitement les éléments zoom avec le DrawingManager
@@ -213,7 +214,7 @@ async function openZoomDrawingMode(overlay, image) {
   drawingManager.zoom.lightbox = zoomDrawingLightbox;
   drawingManager.zoom.lightboxCtx = zoomDrawingLightboxCtx;
   drawingManager.zoom.remote = zoomDrawingRemote;
-  drawingManager.zoom.remoteCtx = zoomDrawingRemote.getContext("2d", { willReadFrequently: true });
+  drawingManager.zoom.remoteCtx = zoomDrawingRemote.getContext("2d");
   drawingManager.zoom.targetImage = overlay.querySelector("img");
   drawingManager.setContext('zoom');
 

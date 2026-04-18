@@ -524,6 +524,40 @@ let isDrawingModeActive = false;
 let drawingOverlay = null;
 let canvasResizeObserver = null;
 
+// Flag "dirty" du raster de dessin : true dès qu'un trait (crayon/gomme/forme rasterisée)
+// a touché drawingCanvas depuis le dernier clear/load. Évite l'appel coûteux à
+// isCanvasBlank() (getImageData) dans le hot path updateDrawingButtonStates().
+// Remis à false par clearDrawingCanvas() et par les chargements d'historique/snapshots.
+let drawingDirty = false;
+function markDrawingDirty(value = true) {
+  drawingDirty = !!value;
+}
+function isDrawingDirty() { return drawingDirty; }
+
+// Helper : met à jour lastDrawnPoint en mutant l'objet existant si possible
+// (évite une alloc par échantillon dans le hot path du crayon).
+function setLastDrawnPoint(p) {
+  if (!p) { drawingManager.state.lastDrawnPoint = null; return; }
+  const cur = drawingManager.state.lastDrawnPoint;
+  if (cur) {
+    cur.x = p.x;
+    cur.y = p.y;
+  } else {
+    drawingManager.state.lastDrawnPoint = { x: p.x, y: p.y };
+  }
+}
+
+// Helper : même principe pour lastMousePosition.
+function setLastMousePosition(x, y) {
+  const cur = drawingManager.state.lastMousePosition;
+  if (cur) {
+    cur.x = x;
+    cur.y = y;
+  } else {
+    drawingManager.state.lastMousePosition = { x, y };
+  }
+}
+
 // historyState aliases (getters/setters pour synchronisation)
 Object.defineProperties(window, {
   drawingHistory: {

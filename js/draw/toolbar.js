@@ -753,3 +753,84 @@ function initDrawingToolbarDrag() {
   // Écouter le redimensionnement de la fenêtre
   window.addEventListener("resize", globalEventHandlers.toolbarResize);
 }
+
+// ================================================================
+// REFRESH DES TOOLTIPS QUAND LES HOTKEYS CHANGENT
+// ================================================================
+
+/**
+ * Ré-applique les data-tooltip des boutons existants dans les toolbars dessin
+ * (mode principal + mode zoom) sans recréer le DOM. Appelé après un changement
+ * de hotkey dans les préférences pour que les tooltips restent à jour en live.
+ */
+function refreshDrawingTooltipsFromHotkeys() {
+  const hk = (typeof CONFIG !== "undefined" && CONFIG.HOTKEYS) || {};
+  if (typeof i18next === "undefined") return;
+
+  // 1) Boutons d'outils (pencil/eraser/shapes/measure/...) — les 2 toolbars
+  const toolSelectors = [
+    ".annotation-tool[data-tool]",
+    ".zoom-tool-btn[data-tool]",
+  ];
+  toolSelectors.forEach((sel) => {
+    document.querySelectorAll(sel).forEach((btn) => {
+      const toolId = btn.getAttribute("data-tool");
+      const def = TOOL_DEFINITIONS[toolId];
+      if (!def) return;
+      const tip = typeof def.tooltip === "function" ? def.tooltip() : def.tooltip;
+      if (tip) btn.setAttribute("data-tooltip", tip);
+    });
+  });
+
+  // 2) Boutons export (main + zoom)
+  const exportHotkey = `Ctrl+${(hk.DRAWING_EXPORT || "s").toUpperCase()}`;
+  ["#drawing-export", "#zoom-export-btn", "#annotation-export"].forEach((sel) => {
+    const btn = document.querySelector(sel);
+    if (btn) {
+      btn.setAttribute(
+        "data-tooltip",
+        i18next.t("draw.buttons.export", { hotkey: exportHotkey }),
+      );
+    }
+  });
+
+  // 3) Bouton close
+  const closeBtn = document.getElementById("drawing-close");
+  if (closeBtn && hk.DRAWING_CLOSE) {
+    closeBtn.setAttribute(
+      "data-tooltip",
+      i18next.t("draw.buttons.closeWithKey", { hotkey: hk.DRAWING_CLOSE }),
+    );
+  }
+
+  // 4) Bouton lightbox (main) — tooltip conditionnelle sur hotkey présente
+  const lightboxBtn = document.getElementById("drawing-lightbox-btn");
+  if (lightboxBtn && hk.DRAWING_LIGHTBOX) {
+    lightboxBtn.setAttribute(
+      "data-tooltip",
+      i18next.t("draw.buttons.lightboxWithKey", { hotkey: hk.DRAWING_LIGHTBOX }),
+    );
+  }
+  const lightboxBtnAlt = document.getElementById("annotation-lightbox-btn");
+  if (lightboxBtnAlt && hk.DRAWING_LIGHTBOX) {
+    lightboxBtnAlt.setAttribute(
+      "data-tooltip",
+      i18next.t("draw.buttons.lightboxWithKey", { hotkey: hk.DRAWING_LIGHTBOX }),
+    );
+  }
+
+  // 5) Helpers existants (tooltips annotation-toolbar principale)
+  if (typeof updateDrawingTooltips === "function") {
+    try { updateDrawingTooltips(); } catch (_) {}
+  }
+}
+
+// Enregistrer le listener une seule fois (le bundle est chargé une fois par page).
+if (typeof document !== "undefined" && !document._poseDrawingTooltipsListener) {
+  document._poseDrawingTooltipsListener = true;
+  document.addEventListener("pose:hotkeys-changed", () => {
+    try { refreshDrawingTooltipsFromHotkeys(); } catch (e) {
+      console.warn("[draw] refreshDrawingTooltipsFromHotkeys failed:", e);
+    }
+  });
+}

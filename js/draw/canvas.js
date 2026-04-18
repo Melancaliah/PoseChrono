@@ -86,6 +86,11 @@ function setupDrawingCanvasDimensions() {
     }
   });
 
+  // Les dimensions/position du preview viennent de changer → invalider le cache.
+  if (typeof _invalidatePreviewRectCache === "function") {
+    _invalidatePreviewRectCache();
+  }
+
   debugLog(
     "Canvas dimensions:",
     naturalWidth,
@@ -114,41 +119,33 @@ function setupCanvasResizeObserver() {
 
     for (const entry of entries) {
       if (entry.target === targetImageElement) {
-        // Sauvegarder l'état du canvas
-        const savedState = drawingCanvas ? drawingCanvas.toDataURL() : null;
-        const savedMeasures = drawingMeasures
-          ? drawingMeasures.toDataURL()
-          : null;
+        // Sauvegarder l'état dans des canvas hors-écran (synchrone, sans sérialisation PNG).
+        // Remplace l'ancien aller-retour toDataURL → new Image().src → onload (async + scintille).
+        const snap = _snapshotCanvasToOffscreen(drawingCanvas);
+        const snapMeasures = _snapshotCanvasToOffscreen(drawingMeasures);
 
         // Mettre à jour les dimensions
         setupDrawingCanvasDimensions();
+        _invalidatePreviewRectCache();
 
         // Restaurer l'état
-        if (savedState && drawingCtx) {
-          const img = new Image();
-          img.onload = () => {
-            drawingCtx.drawImage(
-              img,
-              0,
-              0,
-              drawingCanvas.width,
-              drawingCanvas.height,
-            );
-          };
-          img.src = savedState;
+        if (snap && drawingCtx) {
+          drawingCtx.drawImage(
+            snap,
+            0,
+            0,
+            drawingCanvas.width,
+            drawingCanvas.height,
+          );
         }
-        if (savedMeasures && drawingMeasuresCtx) {
-          const img = new Image();
-          img.onload = () => {
-            drawingMeasuresCtx.drawImage(
-              img,
-              0,
-              0,
-              drawingMeasures.width,
-              drawingMeasures.height,
-            );
-          };
-          img.src = savedMeasures;
+        if (snapMeasures && drawingMeasuresCtx) {
+          drawingMeasuresCtx.drawImage(
+            snapMeasures,
+            0,
+            0,
+            drawingMeasures.width,
+            drawingMeasures.height,
+          );
         }
       }
     }
@@ -170,23 +167,37 @@ function handleDrawingWindowResize() {
 
   resizeDebouncer.debounce(() => {
     if (targetImageElement) {
-      const savedState = drawingCanvas ? drawingCanvas.toDataURL() : null;
+      const snap = _snapshotCanvasToOffscreen(drawingCanvas);
       setupDrawingCanvasDimensions();
-      if (savedState && drawingCtx) {
-        const img = new Image();
-        img.onload = () => {
-          drawingCtx.drawImage(
-            img,
-            0,
-            0,
-            drawingCanvas.width,
-            drawingCanvas.height,
-          );
-        };
-        img.src = savedState;
+      _invalidatePreviewRectCache();
+      if (snap && drawingCtx) {
+        drawingCtx.drawImage(
+          snap,
+          0,
+          0,
+          drawingCanvas.width,
+          drawingCanvas.height,
+        );
+      }
+      // Les mesures sont vectorielles : re-render direct depuis measurementLines
+      // (plus fiable qu'un snapshot raster après resize).
+      if (typeof redrawDrawingMeasurements === "function") {
+        redrawDrawingMeasurements();
       }
     }
   }, DRAWING_CONSTANTS.RESIZE_DEBOUNCE_MS);
+}
+
+// Clone synchrone d'un canvas dans un canvas hors-écran (pas de sérialisation PNG).
+function _snapshotCanvasToOffscreen(sourceCanvas) {
+  if (!sourceCanvas || !sourceCanvas.width || !sourceCanvas.height) return null;
+  const snap = document.createElement("canvas");
+  snap.width = sourceCanvas.width;
+  snap.height = sourceCanvas.height;
+  const snapCtx = snap.getContext("2d");
+  if (!snapCtx) return null;
+  snapCtx.drawImage(sourceCanvas, 0, 0);
+  return snap;
 }
 
 /**
@@ -254,6 +265,28 @@ function updateAltDuplicateCursor() {
   }
 }
 
+// Cache du BoundingClientRect du canvas preview pour éviter le forced layout reflow
+// à chaque pointermove pendant un tracé (120 Hz stylet = 120 reflows/s sinon).
+// Invalidé sur pointerdown, resize, zoom/pan/rotate, et changement d'overlay.
+let _cachedPreviewRect = null;
+let _cachedPreviewEl = null;
+function _invalidatePreviewRectCache() {
+  _cachedPreviewRect = null;
+  _cachedPreviewEl = null;
+}
+
+function _getPreviewRect(previewEl) {
+  // Si l'élément cible a changé (switch normal/zoom), rafraîchir.
+  if (_cachedPreviewEl !== previewEl) {
+    _cachedPreviewEl = previewEl;
+    _cachedPreviewRect = previewEl.getBoundingClientRect();
+    return _cachedPreviewRect;
+  }
+  if (_cachedPreviewRect) return _cachedPreviewRect;
+  _cachedPreviewRect = previewEl.getBoundingClientRect();
+  return _cachedPreviewRect;
+}
+
 /**
  * Convertit les coordonnées de la souris en coordonnées canvas.
  * Prend en compte la rotation et le zoom CSS du conteneur.
@@ -266,7 +299,7 @@ function getDrawingCoordinates(e, context = null) {
 
   if (rotation === 0) {
     // Pas de rotation : calcul rapide classique
-    const rect = ctx.preview.getBoundingClientRect();
+    const rect = _getPreviewRect(ctx.preview);
     const relX = e.clientX - rect.left;
     const relY = e.clientY - rect.top;
     const scaleX = ctx.canvas.width / rect.width;
@@ -278,7 +311,7 @@ function getDrawingCoordinates(e, context = null) {
   // qui est agrandi par la rotation → les coordonnées rect.left/top sont fausses.
   // On passe par le centre (qui reste correct) + rotation inverse.
 
-  const rect = ctx.preview.getBoundingClientRect();
+  const rect = _getPreviewRect(ctx.preview);
   const centerScreenX = rect.left + rect.width / 2;
   const centerScreenY = rect.top + rect.height / 2;
 
@@ -333,7 +366,18 @@ let _zoomDeltaAccum = 0;
 let _zoomLastScreenX = 0;
 let _zoomLastScreenY = 0;
 
-function isBlockingModalOpenForWheel() {
+// Cache court pour éviter de re-scanner le DOM à chaque event wheel (trackpad = 60+ events/s).
+// TTL très court : aucun humain n'ouvre/ferme un modal et scrolle en <80ms.
+let _blockingModalCache = { value: false, expiresAt: 0 };
+const _BLOCKING_MODAL_TTL_MS = 80;
+
+function _computeIsBlockingModalOpenForWheel() {
+  // Si le zoom-overlay est ouvert, il est au-dessus de tout le reste (z-index 10001).
+  // Les modals "inférieurs" (ex: timeline-day-modal qui reste ouvert derrière quand on zoome
+  // une image d'historique) ne doivent pas bloquer la molette de zoom du mode dessin.
+  const zoomOverlayEl = document.getElementById("zoom-overlay");
+  if (zoomOverlayEl) return false;
+
   // Si le helper global existe, il est la source de verite prioritaire.
   if (typeof getTopOpenModal === "function") {
     try {
@@ -366,6 +410,17 @@ function isBlockingModalOpenForWheel() {
   return false;
 }
 
+function isBlockingModalOpenForWheel() {
+  const now = performance.now();
+  if (now < _blockingModalCache.expiresAt) {
+    return _blockingModalCache.value;
+  }
+  const value = _computeIsBlockingModalOpenForWheel();
+  _blockingModalCache.value = value;
+  _blockingModalCache.expiresAt = now + _BLOCKING_MODAL_TTL_MS;
+  return value;
+}
+
 function handleCanvasZoom(e) {
   if (isBlockingModalOpenForWheel()) {
     return;
@@ -393,6 +448,7 @@ function handleCanvasZoom(e) {
         DRAWING_CONSTANTS.ZOOM_WHEEL_SENSITIVITY *
         ZoomManager.scale;
       ZoomManager.zoom(delta, _zoomLastScreenX, _zoomLastScreenY);
+      _invalidatePreviewRectCache();
       _zoomDeltaAccum = 0;
       _zoomRAFId = null;
     });
@@ -406,6 +462,7 @@ function resetCanvasZoomPan() {
 function handleCanvasPanStart(e) {
   if (e.button !== 1) return; // Clic molette uniquement
   e.preventDefault();
+  _invalidatePreviewRectCache();
   ZoomManager.startPan(e.clientX, e.clientY);
   if (drawingPreview) drawingPreview.style.cursor = "grabbing";
 }
@@ -417,6 +474,7 @@ function handleCanvasPanStart(e) {
 function handleCanvasPanMove(e) {
   if (!ZoomManager.isPanning) return;
   e.preventDefault();
+  _invalidatePreviewRectCache();
   ZoomManager.pan(e.clientX, e.clientY);
 }
 
@@ -441,6 +499,7 @@ function handleCanvasPanEnd() {
  */
 function handleSpacePanStart(e) {
   e.preventDefault();
+  _invalidatePreviewRectCache();
   ZoomManager.startPan(e.clientX, e.clientY);
   const preview = zoomDrawingPreview || drawingPreview;
   if (preview) preview.style.cursor = "grabbing";
@@ -451,6 +510,7 @@ function handleSpacePanStart(e) {
  */
 function handleRotateStart(e) {
   e.preventDefault();
+  _invalidatePreviewRectCache();
   ZoomManager.startRotate(e.clientX, e.clientY);
   const preview = zoomDrawingPreview || drawingPreview;
   if (preview) preview.style.cursor = "alias"; // Curseur rotation
@@ -462,6 +522,7 @@ function handleRotateStart(e) {
 function handleRotateMove(e) {
   if (!ZoomManager.isRotating) return;
   e.preventDefault();
+  _invalidatePreviewRectCache();
   ZoomManager.rotate(e.clientX, e.clientY);
 }
 
@@ -483,13 +544,13 @@ function handleRotateEnd() {
 }
 
 function handleGlobalMouseUp(e) {
-
-  // Si on était en train de dessiner, arrêter le dessin
-  if (isDrawing && e.button === 0) {
+  // Si on était en train de dessiner, arrêter le dessin.
+  // On couvre pointerup (e.button === 0) et pointercancel (pas de button fiable).
+  if (!isDrawing) return;
+  const isCancel = e && e.type === "pointercancel";
+  if (isCancel || e.button === 0 || e.button === undefined) {
     handleDrawingMouseUp(e);
-    return;
   }
-
 }
 
 function resetDrawingStateOnEnter() {
@@ -537,7 +598,7 @@ function handleDrawingMouseLeave(e, previewCanvas, drawingCanvas, drawingCtx) {
         edge,
         annotationStyle.size * 0.5,
       );
-      lastDrawnPoint = { ...edge };
+      setLastDrawnPoint(edge);
     }
   }
   // Cacher le curseur mais ne pas arrêter le dessin
@@ -549,63 +610,83 @@ function handleDrawingMouseLeave(e, previewCanvas, drawingCanvas, drawingCtx) {
  * Met à jour l'état des boutons selon le contexte (main ou zoom)
  * @param {string} context - "main" pour drawing-toolbar, "zoom" pour zoom-drawing-toolbar
  */
+// Cache des références DOM des boutons de la toolbar, par contexte.
+// Invalidé automatiquement si le noeud n'est plus attaché au document.
+const _drawingButtonRefsCache = {
+  main: { protractor: null, clearMeasurements: null, clear: null, unitInfo: null },
+  zoom: { protractor: null, clearMeasurements: null, clear: null, unitInfo: null },
+};
+function _invalidateDrawingButtonRefsCache() {
+  _drawingButtonRefsCache.main = { protractor: null, clearMeasurements: null, clear: null, unitInfo: null };
+  _drawingButtonRefsCache.zoom = { protractor: null, clearMeasurements: null, clear: null, unitInfo: null };
+}
+function _getCachedDrawingButtons(context) {
+  const isMain = context === "main";
+  const bucket = isMain ? _drawingButtonRefsCache.main : _drawingButtonRefsCache.zoom;
+  // Vérifier attachement : un changement de contexte (zoom ⇄ normal) peut détacher les noeuds.
+  const stillAttached = (el) => el && document.body.contains(el);
+  if (!stillAttached(bucket.protractor) || !stillAttached(bucket.clearMeasurements) || !stillAttached(bucket.clear)) {
+    const protractorSelector = isMain
+      ? '#drawing-toolbar .annotation-tool[data-tool="protractor"]'
+      : '#zoom-drawing-toolbar [data-tool="protractor"]';
+    const clearMeasurementsSelector = isMain
+      ? '#drawing-toolbar .annotation-tool[data-tool="clear-measurements"]'
+      : '#zoom-drawing-toolbar [data-tool="clear-measurements"]';
+    const clearSelector = isMain
+      ? '#drawing-toolbar .annotation-tool[data-tool="clear"]'
+      : '#zoom-drawing-toolbar [data-tool="clear"]';
+    bucket.protractor = document.querySelector(protractorSelector);
+    bucket.clearMeasurements = document.querySelector(clearMeasurementsSelector);
+    bucket.clear = document.querySelector(clearSelector);
+    bucket.unitInfo = drawingDOM.unitInfo || document.getElementById("drawing-unit-info");
+  }
+  return bucket;
+}
+
 function updateDrawingButtonStates(context = "main") {
   const isMain = context === "main";
-
-  // Sélecteurs selon le contexte
-  const protractorSelector = isMain
-    ? '#drawing-toolbar .annotation-tool[data-tool="protractor"]'
-    : '#zoom-drawing-toolbar [data-tool="protractor"]';
-  const clearMeasurementsSelector = isMain
-    ? '#drawing-toolbar .annotation-tool[data-tool="clear-measurements"]'
-    : '#zoom-drawing-toolbar [data-tool="clear-measurements"]';
-  const clearSelector = isMain
-    ? '#drawing-toolbar .annotation-tool[data-tool="clear"]'
-    : '#zoom-drawing-toolbar [data-tool="clear"]';
-  const unitInfo = drawingDOM.unitInfo || document.getElementById("drawing-unit-info");
+  const refs = _getCachedDrawingButtons(context);
 
   // État
   const hasValidCalibration = calibrationUnit && calibrationUnit > 0;
   const hasMeasurements = measurementLines.some(
     (line) => !isEditableShape(line.type),
   );
-  const hasDrawingContent = !isCanvasBlank(drawingCanvas);
+  // Flag dirty (O(1)) au lieu de isCanvasBlank() (getImageData + scan) à chaque appel.
+  const hasDrawingContent = typeof isDrawingDirty === "function"
+    ? isDrawingDirty()
+    : !isCanvasBlank(drawingCanvas);
   const hasShapeEdges = measurementLines.some(
     (line) => isEditableShape(line.type),
   );
 
   // Protractor : nécessite une calibration valide (> 0px)
-  const protractorBtn = document.querySelector(protractorSelector);
-  if (protractorBtn) {
-    protractorBtn.classList.toggle("disabled", !hasValidCalibration);
-    protractorBtn.style.opacity = hasValidCalibration ? "1" : "0.3";
-    protractorBtn.style.pointerEvents = hasValidCalibration ? "auto" : "none";
+  if (refs.protractor) {
+    refs.protractor.classList.toggle("disabled", !hasValidCalibration);
+    refs.protractor.style.opacity = hasValidCalibration ? "1" : "0.3";
+    refs.protractor.style.pointerEvents = hasValidCalibration ? "auto" : "none";
   }
 
   // Clear-measurements : nécessite au moins une mesure
-  const clearMeasurementsBtn = document.querySelector(
-    clearMeasurementsSelector,
-  );
-  if (clearMeasurementsBtn) {
-    clearMeasurementsBtn.classList.toggle("disabled", !hasMeasurements);
-    clearMeasurementsBtn.style.opacity = hasMeasurements ? "1" : "0.3";
-    clearMeasurementsBtn.style.pointerEvents = hasMeasurements
+  if (refs.clearMeasurements) {
+    refs.clearMeasurements.classList.toggle("disabled", !hasMeasurements);
+    refs.clearMeasurements.style.opacity = hasMeasurements ? "1" : "0.3";
+    refs.clearMeasurements.style.pointerEvents = hasMeasurements
       ? "auto"
       : "none";
   }
 
   // Clear : contenu raster OU rectangles vectoriels
-  const clearBtn = document.querySelector(clearSelector);
-  if (clearBtn) {
+  if (refs.clear) {
     const canClear = hasDrawingContent || hasShapeEdges;
-    clearBtn.classList.toggle("disabled", !canClear);
-    clearBtn.style.opacity = canClear ? "1" : "0.3";
-    clearBtn.style.pointerEvents = canClear ? "auto" : "none";
+    refs.clear.classList.toggle("disabled", !canClear);
+    refs.clear.style.opacity = canClear ? "1" : "0.3";
+    refs.clear.style.pointerEvents = canClear ? "auto" : "none";
   }
 
   // Masquer unit-info si calibration invalide (0px) - uniquement pour le contexte main
-  if (isMain && unitInfo && !hasValidCalibration) {
-    unitInfo.classList.add("hidden");
+  if (isMain && refs.unitInfo && !hasValidCalibration) {
+    refs.unitInfo.classList.add("hidden");
   }
 }
 

@@ -923,6 +923,11 @@ function scheduleDrawingMeasurementsRedraw(hoverPoint = null, hoverThreshold = 1
 }
 
 function redrawDrawingMeasurements(hoverPoint = null, hoverThreshold = 15) {
+  // Invalider le cache de hover : un redraw direct (non-hover) peut effacer le highlight ;
+  // on veut que le prochain hover le redessine.
+  if (typeof _resetHoverRedrawCache === "function") {
+    _resetHoverRedrawCache();
+  }
   _renderDrawingMeasurementsNow(hoverPoint, hoverThreshold);
 }
 

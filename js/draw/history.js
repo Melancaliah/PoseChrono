@@ -443,10 +443,16 @@ function cloneMeasurementLines(lines) {
   return structuredClone(Array.isArray(lines) ? lines : []);
 }
 
+// Historique tiered : les N derniers snapshots raster sont conservés comme
+// canvas hors-écran (pas de sérialisation PNG → push undo quasi-gratuit).
+// Les entrées plus anciennes sont démotées en dataURL (mémoire compacte).
+const HISTORY_RECENT_RASTER_TIER = 6;
+
 function normalizeHistorySnapshot(entry) {
   if (typeof entry === "string") {
     return {
       canvasDataURL: entry,
+      canvasSnapshot: null,
       measurementLines: [],
       calibrationUnit: null,
     };
@@ -455,6 +461,7 @@ function normalizeHistorySnapshot(entry) {
   if (!entry || typeof entry !== "object") {
     return {
       canvasDataURL: null,
+      canvasSnapshot: null,
       measurementLines: [],
       calibrationUnit: null,
     };
@@ -462,6 +469,7 @@ function normalizeHistorySnapshot(entry) {
 
   return {
     canvasDataURL: entry.canvasDataURL || null,
+    canvasSnapshot: entry.canvasSnapshot || null,
     measurementLines: cloneMeasurementLines(entry.measurementLines),
     calibrationUnit: Number.isFinite(Number(entry.calibrationUnit))
       ? Number(entry.calibrationUnit)
@@ -473,6 +481,9 @@ function cloneHistorySnapshot(entry) {
   const normalized = normalizeHistorySnapshot(entry);
   return {
     canvasDataURL: normalized.canvasDataURL,
+    // canvasSnapshot n'est pas cloné en profondeur : la référence est partagée,
+    // le canvas hors-écran est immutable après création (pas de réécriture).
+    canvasSnapshot: normalized.canvasSnapshot,
     measurementLines: cloneMeasurementLines(normalized.measurementLines),
     calibrationUnit: normalized.calibrationUnit,
   };
@@ -483,10 +494,30 @@ function cloneDrawingHistory(history) {
   return history.map((entry) => cloneHistorySnapshot(entry));
 }
 
+// Convertit un snapshot offscreen en dataURL (démotion vers tier 2).
+function _demoteHistoryEntryToDataURL(entry) {
+  if (!entry || entry.canvasDataURL || !entry.canvasSnapshot) return;
+  try {
+    entry.canvasDataURL = entry.canvasSnapshot.toDataURL();
+  } catch (_) {
+    entry.canvasDataURL = null;
+  }
+  entry.canvasSnapshot = null;
+}
+
 function buildCurrentHistorySnapshot() {
-  const hasCanvas = drawingCanvas && !isCanvasBlank(drawingCanvas);
+  // Fast-path: le flag dirty évite un getImageData. En fallback, on retombe sur isCanvasBlank().
+  const dirtyFlagAvailable = typeof isDrawingDirty === "function";
+  const hasCanvas = drawingCanvas
+    && (dirtyFlagAvailable ? isDrawingDirty() : !isCanvasBlank(drawingCanvas));
+  // Tier 1 : canvas hors-écran synchrone (aucune sérialisation).
+  const snap = (hasCanvas && typeof _snapshotCanvasToOffscreen === "function")
+    ? _snapshotCanvasToOffscreen(drawingCanvas)
+    : null;
   return {
-    canvasDataURL: hasCanvas ? drawingCanvas.toDataURL() : null,
+    canvasSnapshot: snap,
+    // dataURL calculé paresseusement lors de la démotion.
+    canvasDataURL: null,
     measurementLines: cloneMeasurementLines(measurementLines),
     calibrationUnit: Number.isFinite(Number(calibrationUnit))
       ? Number(calibrationUnit)
@@ -513,8 +544,22 @@ function applyHistorySnapshot(snapshot, onDone) {
     return;
   }
 
+  // Tier 1 : snapshot offscreen → restitution synchrone sans décodage PNG.
+  if (normalized.canvasSnapshot) {
+    clearCanvas(drawingCtx, drawingCanvas);
+    try {
+      drawingCtx.drawImage(normalized.canvasSnapshot, 0, 0);
+    } catch (_) {
+      // Si le snapshot est corrompu/détaché, on finalise vide.
+    }
+    if (typeof markDrawingDirty === "function") markDrawingDirty(true);
+    finalizeState();
+    return;
+  }
+
   if (!normalized.canvasDataURL) {
     clearCanvas(drawingCtx, drawingCanvas);
+    if (typeof markDrawingDirty === "function") markDrawingDirty(false);
     finalizeState();
     return;
   }
@@ -525,11 +570,13 @@ function applyHistorySnapshot(snapshot, onDone) {
     // pour éviter le scintillement visuel pendant undo/redo.
     clearCanvas(drawingCtx, drawingCanvas);
     drawingCtx.drawImage(img, 0, 0);
+    if (typeof markDrawingDirty === "function") markDrawingDirty(true);
     finalizeState();
   };
   img.onerror = () => {
     console.warn("undo/redo: failed to load snapshot image");
     clearCanvas(drawingCtx, drawingCanvas);
+    if (typeof markDrawingDirty === "function") markDrawingDirty(false);
     finalizeState();
   };
   img.src = normalized.canvasDataURL;
@@ -581,6 +628,7 @@ async function restoreDrawingState(savedState, mainCtx, measuresCtx) {
           mainCtx.canvas.width,
           mainCtx.canvas.height,
         );
+        if (typeof markDrawingDirty === "function") markDrawingDirty(true);
         resolve();
       };
       img.onerror = () =>
@@ -629,8 +677,11 @@ function saveDrawingState(
       return false;
     }
 
-    // Vérifier s'il y a du contenu à sauvegarder (dessin ou mesures)
-    const hasDrawingContent = !isCanvasBlank(mainCanvas);
+    // Vérifier s'il y a du contenu à sauvegarder (dessin ou mesures).
+    // Fast-path via le flag dirty (évite un getImageData).
+    const hasDrawingContent = (typeof isDrawingDirty === "function" && mainCanvas === drawingCanvas)
+      ? isDrawingDirty()
+      : !isCanvasBlank(mainCanvas);
     const hasMeasures = measurementLines.length > 0;
 
     debugLog(
@@ -650,13 +701,22 @@ function saveDrawingState(
       return false;
     }
 
+    // Pour le cache persistant entre images : démoter tous les snapshots offscreen
+    // en dataURL (sinon on garderait N images × MAX_HISTORY canvas en mémoire).
+    const historyClone = cloneDrawingHistory(drawingHistory);
+    for (const entry of historyClone) {
+      if (entry && entry.canvasSnapshot) {
+        _demoteHistoryEntryToDataURL(entry);
+      }
+    }
+
     cache.set(imageSrc, {
       // Sauvegarder en base64 pour pouvoir redimensionner à la restauration
       canvasDataURL: hasDrawingContent ? mainCanvas.toDataURL() : null,
       // Les mesures sont stockées en coordonnées et redessinées dynamiquement
       measurementLines: structuredClone(measurementLines),
       calibrationUnit: calibrationUnit,
-      history: cloneDrawingHistory(drawingHistory),
+      history: historyClone,
       historyIndex: drawingHistoryIndex,
     });
 
@@ -691,6 +751,7 @@ function initFreshDrawingState() {
   drawingHistoryIndex = -1;
   measurementLines = [];
   calibrationUnit = null;
+  if (typeof markDrawingDirty === "function") markDrawingDirty(false);
 
   // Sauvegarder l'état vide initial pour permettre undo du premier trait
   // (sera fait après que les canvas soient initialisés)
@@ -707,6 +768,7 @@ function clearDrawingCanvas() {
 
   if (drawingCtx && drawingCanvas) {
     clearCanvas(drawingCtx, drawingCanvas);
+    if (typeof markDrawingDirty === "function") markDrawingDirty(false);
     changed = true;
   }
 
@@ -778,6 +840,13 @@ function saveDrawingHistory() {
 
   drawingHistory.push(buildCurrentHistorySnapshot());
   drawingHistoryIndex++;
+
+  // Démotion : l'entrée qui vient de sortir du "tier 1" est sérialisée en dataURL
+  // pour libérer le canvas offscreen (mémoire GPU/RAM).
+  const demoteIdx = drawingHistory.length - 1 - HISTORY_RECENT_RASTER_TIER;
+  if (demoteIdx >= 0) {
+    _demoteHistoryEntryToDataURL(drawingHistory[demoteIdx]);
+  }
 
   // Limiter la taille de l'historique
   if (drawingHistory.length > MAX_HISTORY) {
