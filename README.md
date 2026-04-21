@@ -30,9 +30,17 @@ English, Chinese (Simplified), Japanese, German, Spanish, Korean, Russian, Frenc
 
 #
 
+<br /> 
+
 ### 🚀 Installation
 
-## Eagle (Manual installation)
+### Eagle
+
+Go to the Eagle's plugin center inside the app or download it here : https://community-en.eagle.cool/plugin/b459df53-4b7c-4116-a996-647c1ef63dc9
+
+#
+
+### Eagle (Manual installation)
 
 If you need to install it manually, follow these steps:
 
@@ -44,8 +52,8 @@ If you need to install it manually, follow these steps:
 
 #
 
-## Windows (Version Standalone)
+### Windows (Version Standalone)
 
 1. Go to [Latest Releases](https://github.com/Melancaliah/PoseChrono/releases/latest).
-2. Download the `posechrono-desktop-<release>-setup.exe` file.
+2. Download the `posechrono_<release>_windows.exe` file.
 3. Launch the application.
